@@ -64,13 +64,42 @@ siguiente objetivo en la hoja de ruta.
 
 ## Qué hace falta para correrlo (no incluido en este repo)
 
-- **ffmpeg** — no se incluye por tamaño (los binarios superan el límite de
-  GitHub). Se usa el build de [gyan.dev](https://www.gyan.dev/ffmpeg/builds/)
-  ("full_build"), colocado junto a los scripts del servidor.
+- **ffmpeg** — no se incluye por tamaño (ver abajo cómo instalarlo).
 - Una **capturadora HDMI** compatible con DirectShow, con salida de audio
   digital.
 - Un **ESP32-S3** flasheado con el firmware de `deck-client/esp32_firmware/`
   (ver abajo cómo).
+
+## Instalar ffmpeg (para que arranque el servidor)
+
+`windows-server/start_server_gui.ps1`, `start_server_stream.bat` y
+`detectar_dispositivos.ps1` buscan `ffmpeg.exe` en una ruta **fija**, con el
+número de versión incluido en el nombre de la carpeta:
+
+```
+windows-server/ffmpeg-9.0.1-full_build/bin/ffmpeg.exe
+```
+
+Pasos:
+
+1. Descargar exactamente esa versión (el build "full", con todos los
+   codecs) desde el sitio oficial de [gyan.dev](https://www.gyan.dev/ffmpeg/builds/):
+
+   **https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.1-full_build.7z**
+
+   (Es un `.7z`, no un `.zip` — hace falta [7-Zip](https://www.7-zip.org/)
+   para extraerlo; Windows no lo abre nativamente.)
+2. Extraer el `.7z` **dentro de `windows-server/`**, junto a
+   `start_server_stream.bat`. Al extraerlo debe quedar la carpeta
+   `ffmpeg-9.0.1-full_build/` ahí mismo (no un nivel más adentro).
+3. Confirmar que exista `windows-server/ffmpeg-9.0.1-full_build/bin/ffmpeg.exe`
+   (y `ffplay.exe`, `ffprobe.exe` al lado).
+
+> Si en el futuro usas otra versión de ffmpeg, la carpeta extraída va a
+> tener otro nombre (por ejemplo `ffmpeg-9.2.0-full_build`). Los scripts NO
+> la detectan sola: hay que **renombrar la carpeta** a
+> `ffmpeg-9.0.1-full_build` para que coincida con la ruta que buscan, o
+> editar esa ruta en los tres archivos mencionados arriba.
 
 ## Flashear el firmware del ESP32-S3
 
