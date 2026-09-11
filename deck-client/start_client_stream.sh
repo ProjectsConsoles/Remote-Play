@@ -50,6 +50,29 @@ if [ -f "$SCRIPT_DIR/client_config.env" ]; then
     source "$SCRIPT_DIR/client_config.env"
 fi
 
+# Lossless Scaling / frame generation via lsfg-vk (2026-09-11): normalmente
+# esto se prende escribiendo "~/lsfg %command%" a mano en las Opciones de
+# Lanzamiento de Steam, envolviendo TODO el comando desde afuera - pero eso
+# no se puede prender/apagar desde la pantalla "Configurar cliente" porque
+# para cuando este script arranca, Steam ya decidio si envolverlo o no. En
+# vez de eso, el envoltorio se mueve PARA ADENTRO: si PS3RP_LSFG=1 (puesto
+# por client_config.env, igual que las demas variables), este script se
+# re-ejecuta a si mismo A TRAVES de ~/lsfg. El guard PS3RP_LSFG_ENVUELTO
+# evita que, ya envuelto, el propio ~/lsfg vuelva a lanzar bash con este
+# script y se re-envuelva para siempre.
+if [ "${PS3RP_LSFG:-0}" = "1" ] && [ -z "$PS3RP_LSFG_ENVUELTO" ]; then
+    if [ -x "$HOME/lsfg" ]; then
+        export PS3RP_LSFG_ENVUELTO=1
+        # Ruta absoluta via SCRIPT_DIR (no "$0"): si Steam algun dia invoca
+        # este script con una ruta relativa o distinta a BASH_SOURCE, "$0"
+        # podria no ser un camino valido una vez que ~/lsfg haga su propio
+        # "exec $@" desde el home del usuario.
+        exec "$HOME/lsfg" "$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")" "$@"
+    else
+        echo "PS3RP_LSFG=1 pero no existe (o no es ejecutable) $HOME/lsfg - sigo sin el." >> "$LOG"
+    fi
+fi
+
 # ------------------------------------------------------------
 # Control remoto (input) - se lanza junto con el video
 # ------------------------------------------------------------
