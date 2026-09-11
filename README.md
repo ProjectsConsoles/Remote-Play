@@ -13,8 +13,8 @@ reemplaza es la pantalla (por una capturadora HDMI + streaming) y el mando
 
 Tres piezas que se comunican por red local:
 
-1. **PC con Windows** (`windows-server/`) — corre el software de Remote Play
-   oficial de la consola y una capturadora HDMI USB. Un servidor propio usa
+1. **PC con Windows** (`windows-server/`) — tiene conectada una capturadora
+   HDMI USB a la salida de video/audio de la consola. Un servidor propio usa
    `ffmpeg` con codificación por hardware (NVENC) para capturar la señal y
    re-transmitirla como MPEG-TS por UDP hacia el handheld, y recibe el
    estado del control por UDP para inyectarlo del lado de la consola.
@@ -64,9 +64,6 @@ siguiente objetivo en la hoja de ruta.
 
 ## Qué hace falta para correrlo (no incluido en este repo)
 
-- **El software de Remote Play oficial** de la consola correspondiente, del
-  lado del PC — es software de terceros, con licencia propia; no se
-  redistribuye aquí.
 - **ffmpeg** — no se incluye por tamaño (los binarios superan el límite de
   GitHub). Se usa el build de [gyan.dev](https://www.gyan.dev/ffmpeg/builds/)
   ("full_build"), colocado junto a los scripts del servidor.
