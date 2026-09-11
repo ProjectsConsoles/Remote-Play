@@ -1,0 +1,313 @@
+// (2026-08-28) Igual a ds3_raw_tinyusb_udp_test.ino (que SI funciono - LED
+// verde sostenido) pero agregando debugLog() (WiFiUDP broadcast + Serial,
+// igual funcion que ds3_controller.ino) llamado DESDE DENTRO de
+// tud_hid_get_report_cb/tud_hid_set_report_cb - la UNICA diferencia real
+// que queda sin probar entre lo que funciona y ds3_controller.ino (que
+// fallo con datos reales confirmados). Si este test da rojo, confirma que
+// llamar a debugLog() (WiFiUDP/lwIP) desde el contexto/tarea de TinyUSB
+// especificamente durante el manejo de un GET_FEATURE/SET_FEATURE real dana
+// algo que deja el endpoint de Input atascado para siempre.
+//
+// LED: rojo = tud_hid_ready()==false, verde = true.
+
+#include "USB.h"
+#include "esp32-hal-tinyusb.h"
+#include <WiFi.h>
+#include <WiFiUdp.h>
+#include <stdarg.h>
+
+const char *WIFI_SSID = "TU_RED_WIFI_2.4GHZ";
+const char *WIFI_PASSWORD = "TU_CONTRASENA_WIFI";
+const uint16_t DEBUG_LOG_PORT = 9001;
+WiFiUDP debugUdp;
+IPAddress debugBroadcastIP;
+
+void debugLog(const char *fmt, ...) {
+  char buf[256];
+  int prefixLen = snprintf(buf, sizeof(buf), "[%8lu] ", millis());
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(buf + prefixLen, sizeof(buf) - prefixLen, fmt, args);
+  va_end(args);
+  Serial.print(buf);
+  if (WiFi.status() == WL_CONNECTED) {
+    debugUdp.beginPacket(debugBroadcastIP, DEBUG_LOG_PORT);
+    debugUdp.print(buf);
+    debugUdp.endPacket();
+  }
+}
+
+static const uint8_t DS3_REPORT_DESCRIPTOR[] = {
+  0x05, 0x01, 0x09, 0x04, 0xA1, 0x01, 0xA1, 0x02, 0x85, 0x01, 0x75, 0x08, 0x95, 0x01, 0x15, 0x00, 0x26, 0xFF, 0x00,
+  0x81, 0x03, 0x75, 0x01, 0x95, 0x13, 0x15, 0x00, 0x25, 0x01, 0x35, 0x00, 0x45, 0x01, 0x05, 0x09, 0x19, 0x01, 0x29,
+  0x13, 0x81, 0x02, 0x75, 0x01, 0x95, 0x0D, 0x06, 0x00, 0xFF, 0x81, 0x03, 0x15, 0x00, 0x26, 0xFF, 0x00, 0x05, 0x01,
+  0x09, 0x01, 0xA1, 0x00, 0x75, 0x08, 0x95, 0x04, 0x35, 0x00, 0x46, 0xFF, 0x00, 0x09, 0x30, 0x09, 0x31, 0x09, 0x32,
+  0x09, 0x35, 0x81, 0x02, 0xC0, 0x05, 0x01, 0x75, 0x08, 0x95, 0x27, 0x09, 0x01, 0x81, 0x02, 0x75, 0x08, 0x95, 0x30,
+  0x09, 0x01, 0x91, 0x02, 0x75, 0x08, 0x95, 0x30, 0x09, 0x01, 0xB1, 0x02, 0xC0, 0xA1, 0x02, 0x85, 0x02, 0x75, 0x08,
+  0x95, 0x30, 0x09, 0x01, 0xB1, 0x02, 0xC0, 0xA1, 0x02, 0x85, 0xEE, 0x75, 0x08, 0x95, 0x30, 0x09, 0x01, 0xB1, 0x02,
+  0xC0, 0xA1, 0x02, 0x85, 0xEF, 0x75, 0x08, 0x95, 0x30, 0x09, 0x01, 0xB1, 0x02, 0xC0,
+  0xC0,
+};
+
+static uint8_t ds3_itf_num = 0xFF;
+
+extern "C" uint16_t ds3_hid_load_descriptor(uint8_t *dst, uint8_t *itf) {
+  uint8_t str_index = tinyusb_add_string_descriptor("PLAYSTATION(R)3 Controller");
+  uint8_t ep_in = tinyusb_get_free_in_endpoint();
+  uint8_t ep_out = tinyusb_get_free_out_endpoint();
+  if (ep_in == 0 || ep_out == 0) {
+    return 0;
+  }
+  uint8_t descriptor[TUD_HID_INOUT_DESC_LEN] = {
+    TUD_HID_INOUT_DESCRIPTOR(*itf, str_index, HID_ITF_PROTOCOL_NONE, sizeof(DS3_REPORT_DESCRIPTOR), ep_out, (uint8_t)(0x80 | ep_in), 64, 1)
+  };
+  ds3_itf_num = *itf;
+  *itf += 1;
+  memcpy(dst, descriptor, TUD_HID_INOUT_DESC_LEN);
+  return TUD_HID_INOUT_DESC_LEN;
+}
+
+extern "C" const uint8_t *tud_hid_descriptor_report_cb(uint8_t instance) {
+  (void)instance;
+  return DS3_REPORT_DESCRIPTOR;
+}
+
+// ---------------------------------------------------------------------------
+// Respuestas REALES de un DualShock 3 fisico a cada feature report, dumpeadas
+// con ioctl(HIDIOCGFEATURE) sobre /dev/hidrawN (ver
+// esp32_firmware/reference/ds3_real_feature_reports.txt). Antes se devolvian
+// puros ceros y el PS3 se plantaba justo despues de GET_FEATURE 0xF7 sin
+// llegar nunca a hacer poll del endpoint de Input.
+// El primer byte del dump (el report ID en el formato hidraw) se descarta:
+// el buffer que llega a tud_hid_get_report_cb NO incluye el report ID.
+// NOTA: 0xF2 lleva el MAC real de ESTE DS3 y 0xF5 el del PS3 con el que esta
+// vinculado - por eso el ESP32 no deberia usarse a la vez que ese DS3 real.
+static const uint8_t FEAT_01[] = {
+  0x01, 0x04, 0x00, 0x06, 0x0C, 0x01, 0x02, 0x18, 0x18, 0x18, 0x18, 0x09,
+  0x0A, 0x10, 0x11, 0x12, 0x13, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x02,
+  0x02, 0x02, 0x02, 0x00, 0x00, 0x00, 0x04, 0x04, 0x04, 0x04, 0x00, 0x00,
+  0x03, 0x00, 0x01, 0x02, 0x00, 0x00, 0x17, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00,
+};
+static const uint8_t FEAT_02[] = {
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00,
+};
+static const uint8_t FEAT_EE[] = {
+  0xEE, 0x02, 0x00, 0x06, 0xEE, 0x10, 0x00, 0x00, 0x00, 0x00, 0x12, 0x02,
+  0xEF, 0x01, 0xF2, 0x00, 0x00, 0x02, 0x02, 0x02, 0x00, 0x03, 0x00, 0x00,
+  0x02, 0x00, 0x00, 0x02, 0x62, 0x01, 0x02, 0x01, 0x5E, 0x00, 0x32, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00,
+};
+static const uint8_t FEAT_EF[] = {
+  0xEF, 0x04, 0x00, 0x06, 0x03, 0x01, 0xB0, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x02, 0x72, 0x02, 0x71, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00,
+};
+static const uint8_t FEAT_F2[] = {
+  0xFF, 0xFF, 0x00, 0x60, 0x38, 0x0E, 0x1E, 0x91, 0x21, 0x00, 0x03, 0x50,
+  0x81, 0xD8, 0x01, 0x8A, 0x02, 0x72, 0x02, 0x71, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00,
+};
+static const uint8_t FEAT_F5[] = {
+  0x00, 0xF8, 0x2F, 0xA8, 0x4E, 0x75, 0x75, 0x91, 0x21, 0x00, 0x03, 0x50,
+  0x81, 0xD8, 0x01, 0x8A, 0x02, 0x72, 0x02, 0x71, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00,
+};
+static const uint8_t FEAT_F7[] = {
+  0x00, 0xEF, 0x02, 0xF2, 0x01, 0xEE, 0xFF, 0x10, 0x12, 0x00, 0x03, 0x50,
+  0x81, 0xD8, 0x01, 0x8A, 0x02, 0x72, 0x02, 0x71, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00,
+};
+static const uint8_t FEAT_F8[] = {
+  0x01, 0x00, 0x00, 0xF2, 0x01, 0xEE, 0xFF, 0x10, 0x12, 0x00, 0x03, 0x50,
+  0x81, 0xD8, 0x01, 0x8A, 0x02, 0x72, 0x02, 0x71, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00,
+};
+
+// firstByte = el byte 0 REAL que devuelve el DS3 fisico. TinyUSB antepone
+// automaticamente el report ID en esa posicion (hid_device.c: report_buf[0] =
+// report id, y a nuestro callback le pasa report_buf+1), pero el DS3 real
+// pone ahi 0x00/0x01 segun el report - solo 0xF2 coincide con su propio id.
+// Se corrige escribiendo buffer[-1] en el callback (ver nota ahi).
+struct FeatEntry { uint8_t id; const uint8_t *data; uint16_t len; uint8_t firstByte; };
+static const FeatEntry FEAT_TABLE[] = {
+  { 0x01, FEAT_01, sizeof(FEAT_01), 0x00 },
+  { 0x02, FEAT_02, sizeof(FEAT_02), 0x00 },
+  { 0xEE, FEAT_EE, sizeof(FEAT_EE), 0x00 },
+  { 0xEF, FEAT_EF, sizeof(FEAT_EF), 0x00 },
+  { 0xF2, FEAT_F2, sizeof(FEAT_F2), 0xF2 },
+  { 0xF5, FEAT_F5, sizeof(FEAT_F5), 0x01 },
+  { 0xF7, FEAT_F7, sizeof(FEAT_F7), 0x01 },
+  { 0xF8, FEAT_F8, sizeof(FEAT_F8), 0x00 },
+};
+
+
+// Eco de feature reports: el PS3 real hace SET_FEATURE (escribe config,
+// ej. 0xEF/0xF5) y despues GET_FEATURE del MISMO id esperando leer de vuelta
+// lo que el mismo escribio (no simplemente ceros) - se confirmo en el log
+// que se traba justo ahi (SET 0xEF -> GET 0xEF x2 -> loop infinito de GET
+// 0xEF) cuando antes devolviamos puros ceros. Guardamos lo ultimo escrito
+// por report_id y lo devolvemos tal cual en el siguiente GET de ese id.
+static uint8_t featureStore[256][64];
+static uint16_t featureStoreLen[256];
+static bool featureStoreValid[256];
+// Byte 0 real de cada report (ver nota en FEAT_TABLE). 0xFF = usar el default
+// de TinyUSB (el propio report ID), para ids que no dumpeamos del DS3 real.
+static uint8_t featureFirstByte[256];
+
+// Inicializa el store con los valores REALES del DS3 (FEAT_TABLE de arriba),
+// para que el primer GET de cada id ya devuelva algo valido aunque el PS3 no
+// haya hecho un SET previo. Un SET posterior lo pisa (comportamiento de eco).
+static void initFeatureStoreFromRealDS3() {
+  for (unsigned i = 0; i < sizeof(FEAT_TABLE) / sizeof(FEAT_TABLE[0]); i++) {
+    uint8_t id = FEAT_TABLE[i].id;
+    uint16_t n = FEAT_TABLE[i].len;
+    if (n > 64) n = 64;
+    memset(featureStore[id], 0, 64);
+    memcpy(featureStore[id], FEAT_TABLE[i].data, n);
+    // Siempre 64: el PS3 pide wLength=63 y hay que poder devolver ese largo
+    // completo o se queda reintentando el mismo id en loop.
+    featureStoreLen[id] = 64;
+    featureStoreValid[id] = true;
+    featureFirstByte[id] = FEAT_TABLE[i].firstByte;
+  }
+}
+
+extern "C" uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t *buffer, uint16_t reqlen) {
+  (void)instance;
+  debugLog("GET_FEATURE id=0x%02X type=%d len=%u\n", report_id, (int)report_type, reqlen);
+
+  if (featureStoreValid[report_id]) {
+    // TinyUSB ya escribio el report ID en buffer[-1] (hid_device.c hace
+    // report_buf[0] = report id y nos pasa report_buf+1). El DS3 real pone
+    // otro valor ahi, asi que lo sobreescribimos para replicarlo byte a byte.
+    // Seguro porque report_id != 0 garantiza que ese prefijo existe.
+    if (report_id != 0) {
+      buffer[-1] = featureFirstByte[report_id];
+    }
+    uint16_t n = (reqlen < featureStoreLen[report_id]) ? reqlen : featureStoreLen[report_id];
+    memcpy(buffer, featureStore[report_id], n);
+    return n;
+  }
+
+  uint16_t n = reqlen;
+  memset(buffer, 0, n);
+  return n;
+}
+
+extern "C" void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const *buffer, uint16_t bufsize) {
+  (void)instance;
+  debugLog("SET_FEATURE/OUTPUT id=0x%02X type=%d len=%u\n", report_id, (int)report_type, bufsize);
+  uint16_t n = (bufsize < 64) ? bufsize : 64;
+  memcpy(featureStore[report_id], buffer, n);
+  featureStoreLen[report_id] = n;
+  featureStoreValid[report_id] = true;
+}
+
+#define RGB_LED_PIN 48
+
+void setup() {
+  Serial.begin(115200);
+  neopixelWrite(RGB_LED_PIN, 32, 0, 0);
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  unsigned long wifiStart = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 15000) {
+    delay(200);
+  }
+  IPAddress localIP = WiFi.localIP();
+  debugBroadcastIP = IPAddress(localIP[0], localIP[1], localIP[2], 255);
+  neopixelWrite(RGB_LED_PIN, 32, 32, 0);
+
+  USB.VID(0x054C);
+  USB.PID(0x0268);
+  USB.manufacturerName("Sony");
+  USB.productName("PLAYSTATION(R)3 Controller");
+  USB.serialNumber("0");
+  USB.usbClass(0x00);
+  USB.usbSubClass(0x00);
+  USB.usbProtocol(0x00);
+  USB.usbAttributes(0x80);
+
+  initFeatureStoreFromRealDS3();
+
+  tinyusb_enable_interface(USB_INTERFACE_HID, TUD_HID_INOUT_DESC_LEN, ds3_hid_load_descriptor);
+  USB.begin();
+}
+
+unsigned long lastSend = 0;
+bool lastReady = false;
+bool readyEverTrue = false;
+unsigned long readyFirstTrueAt = 0;
+
+void loop() {
+  static unsigned long bootDoneAt = 0;
+  if (bootDoneAt == 0) {
+    bootDoneAt = millis();
+  }
+  unsigned long now = millis() - bootDoneAt;
+
+  // Chequeo de ready() en cada vuelta de loop (no solo cada 1000ms) para
+  // loguear la transicion verde->rojo con resolucion fina y poder
+  // correlacionarla exactamente contra los GET_FEATURE/SET_FEATURE de arriba.
+  bool readyNow = tud_hid_ready();
+  if (readyNow != lastReady) {
+    debugLog("[hid] ready cambio a %d\n", (int)readyNow);
+    lastReady = readyNow;
+    if (readyNow && !readyEverTrue) {
+      readyEverTrue = true;
+      readyFirstTrueAt = millis();
+    }
+  }
+
+  // El PS3 real hace una rafaga de GET/SET_FEATURE (0x01/0xF2/0xF5/0xEF/...)
+  // justo despues de montar el USB. Se observo el endpoint de Input
+  // atascarse (ready->0 sin recuperarse) apenas 35ms despues del ultimo
+  // GET_FEATURE, coincidiendo con el momento en que este loop intenta
+  // mandar el primer Input report automatico - posible colision de timing
+  // entre el envio de Input y esa rafaga de control transfers. Se retrasan
+  // 3s desde el primer ready==true antes de mandar cualquier Input report,
+  // para darle a esa rafaga tiempo de terminar sin interferencia.
+  bool pastGracePeriod = readyEverTrue && (millis() - readyFirstTrueAt >= 3000);
+
+  if (now - lastSend >= 1000) {
+    lastSend = now;
+    bool ready = readyNow;
+    neopixelWrite(RGB_LED_PIN, ready ? 0 : 32, ready ? 32 : 0, 0);
+    uint8_t report[48] = { 0 };
+    report[5] = report[6] = report[7] = report[8] = 128;
+    static bool left = false;
+    left = !left;
+    if (left) {
+      report[1] |= (1 << 7);
+      report[17] = 255;
+    }
+    if (ready && pastGracePeriod) {
+      tud_hid_report(0x01, report, 48);
+    }
+  }
+}

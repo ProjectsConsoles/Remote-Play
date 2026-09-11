@@ -1,0 +1,34 @@
+# Artefactos de build de PyInstaller (rog-ally-client), si se recompila localmente
+rog-ally-client/build/
+rog-ally-client/dist/
+rog-ally-client/*.spec
+windows-server/build/
+windows-server/dist/
+windows-server/*.spec
+
+# Estado de runtime / logs, no son parte del codigo
+windows-server/logs/
+**/*.log
+**/servidor.pid
+**/deck_ip.txt
+**/deck_ips.txt
+**/deck_modo.txt
+**/diagnostico_consola.txt
+**/diagnostico_no_arranco.txt
+**/*.bak
+**/*.bak-*
+
+# El build de ffmpeg (cientos de MB, binarios de terceros) nunca va en el repo.
+# Se descarga aparte: https://www.gyan.dev/ffmpeg/builds/ (build "full").
+**/ffmpeg-*-full_build/
+**/ffplay.exe
+**/ffmpeg.exe
+**/ffprobe.exe
+
+# Software de terceros con licencia propia (Remote Play oficial parcheado):
+# nunca se redistribuye en este repo.
+**/Remote-Play.zip
+**/RemotePlay*.exe
+**/RemotePlay*.dll
+
+.DS_Store

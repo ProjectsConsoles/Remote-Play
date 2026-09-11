@@ -1,0 +1,4 @@
+# Worktrees y estado de Claude Code, no son parte del proyecto.
+.claude/
+
+__pycache__/
