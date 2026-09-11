@@ -58,6 +58,25 @@ Tres piezas que se comunican por red local:
 | Servidor Windows | ✅ Funcional. Interfaz gráfica + lanzador nativo para arrancar/detener sin terminal. |
 | Cliente ROG Ally X (Windows) | 🚧 En desarrollo. Compilado (mando XInput, brillo por WMI, menú, modo control) pero pendiente de probar contra hardware real: mapeo de botones, brillo, latencia. |
 
+## Configurar servidor y cliente desde el menú de la Deck
+
+El menú del cliente (`deck-client/client_menu.py`) tiene dos pantallas para
+ajustar todo sin ir a tocar la PC ni editar texto a mano, con navegación
+completa por el mando (cruceta + A/B, izquierda/derecha cambia cada valor):
+
+- **Configurar servidor** — elige el modo de captura de la PC Windows
+  (720p/1080p MJPEG, o los modos crudos sin comprimir para medir latencia) y
+  confirma la IP de la Deck, todo por red. Habla por UDP (puerto 9200) con
+  `config_listener.ps1`, un proceso propio e independiente de la ventana del
+  servidor: si el servidor ya está transmitiendo, lo reinicia con la config
+  nueva; si está apagado, la guarda para la próxima vez que le den Iniciar.
+  Tiene además un botón para mandar la IP actual de la Deck al servidor sin
+  tocar el modo — útil si la IP cambia y no se quiere ir a escribirla a mano
+  en la PC.
+- **Configurar cliente** — las variables de latencia del lado de la Deck
+  (documentadas en `deck-client/OPCIONES.md`), en una pantalla con scroll en
+  vez de tener que ponerlas como opciones de lanzamiento de Steam cada vez.
+
 ## Próxima consola objetivo: PS2
 
 El diseño (capturadora HDMI/componente + microcontrolador emulando el mando
