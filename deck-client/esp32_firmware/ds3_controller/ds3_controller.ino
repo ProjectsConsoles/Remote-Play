@@ -685,6 +685,13 @@ unsigned long reportsFailed = 0;
 //      WiFi y arranca todo de cero.
 // Entre intento e intento hay que esperar: re-enumerar no es instantaneo y
 // reintentar encima solo lo empeora.
+// PROBADO Y DESCARTADO (2026-09-11): se subio este umbral a 20000/15000
+// sospechando que el propio vigilante se autodesconectaba de mas en el menu
+// de OPL (que sondea mas lento que un juego). Probado contra hardware real:
+// el sintoma ("funciona unos segundos y ya no, no se recupera solo") salio
+// IDENTICO con el umbral subido. Eso descarta al vigilante como la causa -
+// se vuelve al valor original, calibrado contra el bug real de la PS3 (ver
+// la nota larga de arriba). La causa de lo de OPL sigue sin identificar.
 const unsigned long USB_ATASCADO_MS = 3000;
 const unsigned long USB_ESPERA_MS = 6000;
 unsigned long ultimoReady = 0;

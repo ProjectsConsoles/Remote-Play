@@ -7,6 +7,13 @@ start_client_stream.sh:
     streaming -> video + audio + control (lo de siempre)
     control   -> SOLO el control, con la pantalla de la Deck apagada
 
+Ademas hay dos pantallas de configuracion (2026-09-11) que NO salen del
+menu: se abren, y al cerrarse vuelven a mostrar este mismo menu.
+    - "Configurar servidor": modo de captura del PC Windows, en remoto
+      (client_server_config.py, habla con config_listener.ps1 por UDP).
+    - "Configurar cliente": las variables de latencia de este mismo lado
+      (client_settings.py, escribe client_config.env).
+
 Se usa tkinter y no zenity/kdialog a proposito: tkinter ya viene con el Python
 del sistema y con el del venv, y deja hacer botones del tamano que uno quiera.
 
@@ -17,7 +24,7 @@ con la pantalla tactil. Por eso aca se lee el mando directo con pygame y se
 traduce a mover el foco / confirmar. El tactil y el raton siguen funcionando.
 
 Codigos de salida:
-    0 = eligio algo, esta impreso en stdout
+    0 = eligio streaming o control, esta impreso en stdout
     1 = cancelo (B, Escape, o cerro la ventana)
     2 = no se pudo abrir ninguna ventana (sin DISPLAY, por ejemplo)
 
@@ -26,8 +33,6 @@ un problema con el menu nunca deje al usuario sin nada.
 """
 
 import os
-import socket
-import subprocess
 import sys
 
 # La lectura del mando vive en deck_gamepad.py, compartida con
@@ -37,47 +42,15 @@ import sys
 # por stdout, que es justo por donde este script devuelve la eleccion.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from deck_gamepad import Mando            # noqa: E402
+from server_udp import obtener_ip_local, obtener_red_wifi  # noqa: E402
 
 FONDO = "#101014"
 TEXTO = "#e8e8ea"
 TENUE = "#8a8a95"
 
 
-
-def obtener_ip_local():
-    """IP de esta Deck en la red local. Se muestra en el menu para no tener
-    que ir a buscarla en Configuracion cuando hace falta ponerla en el
-    servidor de Windows (el campo de IP de start_server_gui.ps1).
-
-    El truco del socket UDP "conectado" a 8.8.8.8 no manda ningun paquete:
-    solo hace que el sistema operativo elija que interfaz de salida usaria,
-    y de ahi se lee la IP local de esa interfaz. Funciona sin internet real.
-    """
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("8.8.8.8", 80))
-        return s.getsockname()[0]
-    except OSError:
-        return None
-    finally:
-        s.close()
-
-
-def obtener_red_wifi():
-    """Nombre (SSID) de la red Wi-Fi conectada ahora, o None si no hay
-    conexion inalambrica activa (por ejemplo, si esta por cable)."""
-    try:
-        salida = subprocess.check_output(
-            ["nmcli", "-t", "-f", "active,ssid", "dev", "wifi"],
-            text=True, timeout=2)
-        for linea in salida.splitlines():
-            if linea.startswith("yes:"):
-                return linea.split(":", 1)[1]
-    except Exception:
-        pass
-    return None
-
-def main():
+def mostrar_menu():
+    """Una vuelta del menu. Devuelve la eleccion (string) o None si cancelo."""
     import tkinter as tk
     from tkinter import font as tkfont
 
@@ -92,12 +65,13 @@ def main():
         root.geometry("900x600")
 
     f_titulo = tkfont.Font(family="DejaVu Sans", size=26, weight="bold")
-    f_boton = tkfont.Font(family="DejaVu Sans", size=20, weight="bold")
+    f_boton = tkfont.Font(family="DejaVu Sans", size=16, weight="bold")
     f_ayuda = tkfont.Font(family="DejaVu Sans", size=12)
+    f_detalle = tkfont.Font(family="DejaVu Sans", size=10)
     f_pie = tkfont.Font(family="DejaVu Sans", size=11)
 
     tk.Label(root, text="Remote Play", font=f_titulo,
-             bg=FONDO, fg=TEXTO).pack(pady=(60, 6))
+             bg=FONDO, fg=TEXTO).pack(pady=(40, 6))
 
     ip_local = obtener_ip_local()
     red_wifi = obtener_red_wifi()
@@ -111,75 +85,77 @@ def main():
                  bg=FONDO, fg=TENUE).pack(pady=(0, 4))
 
     tk.Label(root, text="¿Que quieres hacer?", font=f_ayuda,
-             bg=FONDO, fg=TENUE).pack(pady=(0, 40))
+             bg=FONDO, fg=TENUE).pack(pady=(0, 26))
 
-    fila = tk.Frame(root, bg=FONDO)
-    fila.pack(expand=True)
+    grilla = tk.Frame(root, bg=FONDO)
+    grilla.pack(expand=True)
 
     def elegir(modo):
         eleccion["modo"] = modo
         root.destroy()
 
-    def tarjeta(titulo, detalle, color, modo):
-        marco = tk.Frame(fila, bg=FONDO)
-        marco.pack(side="left", padx=26)
+    def tarjeta(fila, columna, titulo, detalle, color, modo):
+        marco = tk.Frame(grilla, bg=FONDO)
+        marco.grid(row=fila, column=columna, padx=18, pady=14)
         b = tk.Button(marco, text=titulo, font=f_boton,
                       bg=color, fg="#ffffff",
                       activebackground=color, activeforeground="#ffffff",
-                      width=14, height=3, relief="flat", bd=0,
+                      width=15, height=3, relief="flat", bd=0,
                       highlightthickness=5, highlightbackground=FONDO,
                       highlightcolor="#ffffff",
                       command=lambda: elegir(modo))
         b.pack()
-        tk.Label(marco, text=detalle, font=f_ayuda, bg=FONDO, fg=TENUE,
-                 wraplength=290, justify="center").pack(pady=(14, 0))
+        tk.Label(marco, text=detalle, font=f_detalle, bg=FONDO, fg=TENUE,
+                 wraplength=240, justify="center").pack(pady=(10, 0))
         return b
 
-    b_stream = tarjeta(
-        "Streaming",
-        "Video y audio de la consola en la pantalla de la Deck, mas el control.\n"
-        "Es lo de siempre.",
+    # 2x2: streaming/control arriba (las de jugar), configuracion abajo.
+    b_stream = tarjeta(0, 0, "Streaming",
+        "Video y audio de la consola en la Deck, mas el control.",
         "#2d6cdf", "streaming")
-
-    b_control = tarjeta(
-        "Solo control",
-        "La Deck funciona nada mas como mando, con la pantalla apagada.\n"
-        "Para jugar mirando la tele.",
+    b_control = tarjeta(0, 1, "Solo control",
+        "La Deck es nada mas el mando, con la pantalla apagada.",
         "#3f8f4a", "control")
+    b_config_srv = tarjeta(1, 0, "Configurar servidor",
+        "Modo de captura y estado de la PC Windows, en remoto.",
+        "#8e5fd6", "config_servidor")
+    b_config_cli = tarjeta(1, 1, "Configurar cliente",
+        "Variables de latencia de esta Deck (VSYNC, watchdog, etc.).",
+        "#c07d2f", "config_cliente")
 
-    opciones = [b_stream, b_control]
+    opciones = [b_stream, b_control, b_config_srv, b_config_cli]
     foco = {"i": 0}
 
     def marcar():
         for i, b in enumerate(opciones):
-            # El recuadro blanco es la unica pista visual de donde estas
-            # parado cuando navegas con el mando.
             b.configure(highlightbackground="#ffffff" if i == foco["i"] else FONDO)
         opciones[foco["i"]].focus_set()
 
-    def mover(paso):
-        foco["i"] = (foco["i"] + paso) % len(opciones)
+    def mover(dx, dy):
+        fila, col = divmod(foco["i"], 2)
+        fila = (fila + dy) % 2
+        col = (col + dx) % 2
+        foco["i"] = fila * 2 + col
         marcar()
 
     def confirmar():
         opciones[foco["i"]].invoke()
 
     pie = tk.Label(root, font=f_pie, bg=FONDO, fg=TENUE)
-    pie.pack(side="bottom", pady=30)
+    pie.pack(side="bottom", pady=24)
 
-    # Teclado (Modo Escritorio) y tactil (los dos modos) siguen andando.
-    root.bind("<Left>", lambda e: mover(-1))
-    root.bind("<Right>", lambda e: mover(1))
-    root.bind("<Up>", lambda e: mover(-1))
-    root.bind("<Down>", lambda e: mover(1))
-    root.bind("<Tab>", lambda e: mover(1))
+    root.bind("<Left>", lambda e: mover(-1, 0))
+    root.bind("<Right>", lambda e: mover(1, 0))
+    root.bind("<Up>", lambda e: mover(0, -1))
+    root.bind("<Down>", lambda e: mover(0, 1))
+    root.bind("<Tab>", lambda e: mover(1, 0))
     root.bind("<Return>", lambda e: confirmar())
     root.bind("<space>", lambda e: confirmar())
     root.bind("<Escape>", lambda e: root.destroy())
 
     mando = Mando()
     pie.configure(
-        text=("Muevete con la cruceta o el stick, confirma con A, cancela con B."
+        text=("Cruceta/stick para moverte, confirma con A, cancela con B."
               if mando.ok else
               "Toca la pantalla para elegir.")
         + "   (el tactil siempre funciona)")
@@ -187,9 +163,13 @@ def main():
     def revisar_mando():
         for nombre in mando.nuevos():
             if nombre == "DPAD_LEFT":
-                mover(-1)
+                mover(-1, 0)
             elif nombre == "DPAD_RIGHT":
-                mover(1)
+                mover(1, 0)
+            elif nombre == "DPAD_UP":
+                mover(0, -1)
+            elif nombre == "DPAD_DOWN":
+                mover(0, 1)
             elif nombre == "A":
                 confirmar()
                 return          # la ventana ya se destruyo
@@ -204,10 +184,38 @@ def main():
     root.after(40, revisar_mando)
     root.mainloop()
 
-    if eleccion["modo"] is None:
-        return 1
-    print(eleccion["modo"])
-    return 0
+    return eleccion["modo"]
+
+
+def main():
+    # Bucle (2026-09-11): "Configurar servidor"/"Configurar cliente" abren su
+    # propia pantalla y, al cerrarse, vuelven aca en vez de salir - por eso
+    # esto ya no es un tiro unico como streaming/control (que SI terminan el
+    # programa, imprimiendo la eleccion para que la lea start_client_stream.sh).
+    while True:
+        modo = mostrar_menu()
+
+        if modo is None:
+            return 1
+
+        if modo == "config_servidor":
+            import client_server_config
+            try:
+                client_server_config.main()
+            except Exception as e:
+                print(f"pantalla de config del servidor fallo: {e}", file=sys.stderr)
+            continue
+
+        if modo == "config_cliente":
+            import client_settings
+            try:
+                client_settings.main()
+            except Exception as e:
+                print(f"pantalla de config del cliente fallo: {e}", file=sys.stderr)
+            continue
+
+        print(modo)
+        return 0
 
 
 if __name__ == "__main__":

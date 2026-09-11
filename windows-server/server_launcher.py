@@ -30,9 +30,27 @@ def app_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 
+def lanzar_oculto(ps1_path, aqui):
+    """Mismo patron para cualquier .ps1: consola real pero oculta, escapa
+    del Job Object del .exe, descriptores explicitos. Ver las notas largas
+    mas abajo (se dejan una sola vez, valen para los dos lanzamientos)."""
+    CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+    subprocess.Popen(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+         "-WindowStyle", "Hidden", "-File", ps1_path],
+        cwd=aqui,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=CREATE_BREAKAWAY_FROM_JOB,
+        close_fds=True,
+    )
+
+
 def main():
     aqui = app_dir()
     gui_ps1 = os.path.join(aqui, "start_server_gui.ps1")
+    listener_ps1 = os.path.join(aqui, "config_listener.ps1")
 
     if not os.path.isfile(gui_ps1):
         # Sin consola (windowed): un cuadro de mensaje via WinForms es la
@@ -93,17 +111,18 @@ def main():
     #
     # DEVNULL no pierde nada de diagnostico: el motor escribe sus propios
     # logs a logs\ffmpeg-*.log y logs\progreso-*.log por su cuenta.
-    CREATE_BREAKAWAY_FROM_JOB = 0x01000000
-    subprocess.Popen(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-         "-WindowStyle", "Hidden", "-File", gui_ps1],
-        cwd=aqui,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=CREATE_BREAKAWAY_FROM_JOB,
-        close_fds=True,
-    )
+    lanzar_oculto(gui_ps1, aqui)
+
+    # config_listener.ps1 (2026-09-11): deja configurar modo/IP del servidor
+    # en remoto desde el menu de la Deck, aun con esta ventana cerrada -
+    # por eso se lanza APARTE de la GUI, no dentro de ella (ver la nota
+    # larga en config_listener.ps1 sobre por que). Si ya hay uno corriendo
+    # de un lanzamiento anterior, el nuevo revienta solo al intentar tomar
+    # el puerto UDP 9200 (ya ocupado) - autolimitado, no hace falta mas
+    # logica de instancia unica para esto.
+    if os.path.isfile(listener_ps1):
+        lanzar_oculto(listener_ps1, aqui)
+
     # Fire-and-forget, igual que el "start" del .bat viejo: este proceso
     # termina enseguida, el servidor sigue vivo por su cuenta.
 

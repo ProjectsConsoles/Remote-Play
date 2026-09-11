@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 #  start_server_gui.ps1 - interfaz grafica del servidor
 # ============================================================
 #  Pide dos cosas y nada mas: a que IP mandar el video y en que
@@ -22,21 +22,20 @@
 #
 #  No necesita instalar nada: WinForms viene con Windows.
 #  Se abre con iniciar_servidor.bat (doble clic).
+#
+#  2026-09-11: la logica de arranque/parada/config vive ahora en
+#  server_engine_lib.ps1 (compartida con config_listener.ps1, el
+#  escucha que deja configurar esto mismo desde la Deck) - ver ese
+#  archivo para Procesos-Servidor/Servidor-Corriendo/Detener-Servidor/
+#  Iniciar-Servidor/$Modos. Esta ventana ya no define nada de eso.
 # ============================================================
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
-$Aqui        = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Bat         = Join-Path $Aqui "start_server_stream.bat"
-$FfmpegExe   = Join-Path $Aqui "ffmpeg-9.0.1-full_build\bin\ffmpeg.exe"
-$ArchivoIps  = Join-Path $Aqui "deck_ips.txt"    # historial (varias)
-$ArchivoIp   = Join-Path $Aqui "deck_ip.txt"     # ultima, la que ya usaba el .bat
-$ArchivoModo = Join-Path $Aqui "deck_modo.txt"   # ultimo modo elegido
-$ArchivoPid  = Join-Path $Aqui "servidor.pid"    # PID del cmd oculto en curso
-
-$RegexIp = '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$'
+$Aqui = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $Aqui "server_engine_lib.ps1")
 
 if (-not (Test-Path $Bat)) {
     [System.Windows.Forms.MessageBox]::Show(
@@ -44,139 +43,6 @@ if (-not (Test-Path $Bat)) {
         "Remote Play", "OK", "Error") | Out-Null
     exit 1
 }
-
-# ------------------------------------------------------------
-#  Encontrar y detener el servidor en curso
-# ------------------------------------------------------------
-#  Se busca por RUTA del ejecutable, no por nombre: asi solo se
-#  toca el ffmpeg que vive en esta carpeta y nunca otro ffmpeg
-#  que el usuario tenga abierto para cualquier otra cosa.
-#  Get-Process y no Get-CimInstance Win32_Process (2026-09-11):
-#  WMI contesta "Acceso denegado" en esta maquina, y como la
-#  llamada llevaba -ErrorAction SilentlyContinue el error se
-#  tragaba en silencio. Resultado: esta funcion devolvia SIEMPRE
-#  vacio, Servidor-Corriendo daba False aunque ffmpeg estuviera
-#  transmitiendo, y la interfaz mostraba "no arranco en 15
-#  segundos" en CADA arranque, incluidos los exitosos.
-#  Get-Process no necesita WMI ni permisos especiales y permite
-#  el mismo filtro por ruta (.Path en vez de .ExecutablePath).
-function Procesos-Servidor {
-    $todos = @(Get-Process -Name 'ffmpeg' -ErrorAction SilentlyContinue)
-    if ($todos.Count -eq 0) { return @() }
-
-    # Filtrar por ruta del ejecutable MIENTRAS SE PUEDA. Leer .Path abre el
-    # proceso, y segun la sesion de Windows y los permisos eso falla (medido
-    # 2026-09-11: en una sesion RDP devolvia vacio aunque ffmpeg SI estuviera
-    # transmitiendo a 59 fps). Esa lectura fallida dejaba la lista vacia y la
-    # interfaz declaraba 'no arranco' en arranques perfectamente exitosos.
-    $mios = @($todos | Where-Object {
-        $ruta = $null
-        try { $ruta = $_.Path } catch { $ruta = $null }
-        $ruta -and ($ruta -ieq $FfmpegExe)
-    })
-    if ($mios.Count -gt 0) { return $mios }
-
-    # Si no se pudo leer la ruta de NINGUNO, no quedarse ciego: es preferible
-    # contar un ffmpeg ajeno (raro, y a lo sumo molesta al detener) antes que
-    # reportar un fallo falso en cada arranque.
-    return $todos
-}
-
-function Servidor-Corriendo {
-    return ((Procesos-Servidor | Measure-Object).Count -gt 0)
-}
-
-function Detener-Servidor {
-    $mato = $false
-
-    # 1) El arbol del cmd que lanzamos, por el PID que guardamos.
-    #    Hace falta /T: matar el cmd solo NO se lleva al ffmpeg
-    #    hijo, que quedaria transmitiendo por su cuenta.
-    if (Test-Path $ArchivoPid) {
-        $guardado = (Get-Content $ArchivoPid -First 1 -ErrorAction SilentlyContinue)
-        if ($guardado -and $guardado.Trim() -match '^\d+$') {
-            $elPid = $guardado.Trim()
-            if (Get-Process -Id ([int]$elPid) -ErrorAction SilentlyContinue) {
-                & taskkill.exe /PID $elPid /T /F 2>&1 | Out-Null
-                $mato = $true
-            }
-        }
-        Remove-Item $ArchivoPid -Force -ErrorAction SilentlyContinue
-    }
-
-    # 2) Red de seguridad: cualquier ffmpeg de esta carpeta que
-    #    haya quedado huerfano (por ejemplo si se reinicio la
-    #    interfaz o se perdio el archivo de PID).
-    foreach ($p in (Procesos-Servidor)) {
-        & taskkill.exe /PID $p.Id /T /F 2>&1 | Out-Null
-        $mato = $true
-    }
-
-    return $mato
-}
-
-# ------------------------------------------------------------
-#  Historial de IPs
-# ------------------------------------------------------------
-#  Se juntan las dos fuentes: el historial propio de esta
-#  interfaz y el deck_ip.txt que escribe el .bat cuando lo abren
-#  a mano. Asi una IP tecleada en la consola tambien aparece
-#  despues en el combo, sin sincronizar nada.
-function Leer-Ips {
-    $lista = New-Object System.Collections.Generic.List[string]
-    foreach ($archivo in @($ArchivoIps, $ArchivoIp)) {
-        if (Test-Path $archivo) {
-            foreach ($linea in (Get-Content $archivo -ErrorAction SilentlyContinue)) {
-                $ip = $linea.Trim()
-                if ($ip -match $RegexIp -and -not $lista.Contains($ip)) { $lista.Add($ip) }
-            }
-        }
-    }
-    if ($lista.Count -eq 0) { $lista.Add("192.168.0.141") }
-    return $lista
-}
-
-function Guardar-Ip($ip) {
-    # La elegida queda primera; el resto detras, sin repetir. Se
-    # cortan a 8 para que el combo no se vuelva un basurero.
-    # El @() de afuera importa: sin el, si no hay previas, la suma
-    # con $null mete un elemento vacio y el archivo queda con una
-    # linea en blanco arriba.
-    $previas = @(Leer-Ips | Where-Object { $_ -ne $ip })
-    $nuevas  = @(@($ip) + $previas | Select-Object -First 8)
-    Set-Content -Path $ArchivoIps -Value $nuevas -Encoding Ascii
-    Set-Content -Path $ArchivoIp  -Value $ip     -Encoding Ascii
-}
-
-# ------------------------------------------------------------
-#  Modos de captura
-# ------------------------------------------------------------
-#  Las claves (mjpeg720, etc.) tienen que coincidir con la tabla
-#  de modos de start_server_stream.bat. Los fps de cada uno NO
-#  son inventados: salen del listado real de la capturadora,
-#  medido con listar_modos.bat (ver listar_modos_log.txt).
-$Modos = @(
-    [pscustomobject]@{
-        Clave  = "mjpeg720"
-        Nombre = "1280x720  -  MJPEG  (recomendado)"
-        Ayuda  = "El modo de siempre y el unico probado a fondo: 60 fps estables, ~6 Mbps de wifi. Si dudas, este."
-    }
-    [pscustomobject]@{
-        Clave  = "mjpeg1080"
-        Nombre = "1920x1080  -  MJPEG  (mas nitido)"
-        Ayuda  = "Imagen mas definida, pero sube a 8 Mbps y la capturadora comprime el doble de pixeles. Sin probar: si aparecen tirones o cortes de audio, vuelve a 720p."
-    }
-    [pscustomobject]@{
-        Clave  = "crudo480"
-        Nombre = "720x480  -  SIN COMPRIMIR  (prueba)"
-        Ayuda  = "Prueba de latencia: se salta el MJPEG. Ojo, manda 5x mas bytes por el USB 2.0 y baja a 480p. Despues revisa con revisar_log.bat que haya sostenido 60 fps."
-    }
-    [pscustomobject]@{
-        Clave  = "crudo640"
-        Nombre = "640x480  -  SIN COMPRIMIR  (prueba)"
-        Ayuda  = "Igual que el anterior pero pide menos por el USB (37 MB/s contra 41). Si el de 720x480 no sostiene 60 fps, prueba con este."
-    }
-)
 
 # ------------------------------------------------------------
 #  Ventana
@@ -263,7 +129,7 @@ if (Test-Path $ArchivoModo) {
 $cmbModo.SelectedIndex = $indice
 
 $lblNota           = New-Object System.Windows.Forms.Label
-$lblNota.Text      = "El servidor corre oculto, sin ventana negra. Puedes cerrar esta ventana y sigue transmitiendo. Al iniciar de nuevo, la instancia anterior se cierra sola."
+$lblNota.Text      = "El servidor corre oculto, sin ventana negra. Puedes cerrar esta ventana y sigue transmitiendo. Al iniciar de nuevo, la instancia anterior se cierra sola. Tambien se puede configurar en remoto desde el menu de la Deck."
 $lblNota.Location  = New-Object System.Drawing.Point(20, 277)
 $lblNota.Size      = New-Object System.Drawing.Size(460, 50)
 $lblNota.ForeColor = [System.Drawing.Color]::DimGray
@@ -350,45 +216,16 @@ $btnIniciar.Add_Click({
 
     $btnIniciar.Enabled = $false
     $btnDetener.Enabled = $false
-    $lblEstado.Text      = "Cerrando la instancia anterior..."
-    $lblEstado.BackColor = [System.Drawing.Color]::FromArgb(255, 246, 214)
-    $lblEstado.ForeColor = [System.Drawing.Color]::DarkGoldenrod
-    [System.Windows.Forms.Application]::DoEvents()
 
-    [void](Detener-Servidor)
-
-    # La capturadora no siempre se libera al instante despues de
-    # matar al ffmpeg anterior; si el nuevo la abre demasiado
-    # pronto, dshow contesta "device in use" y el arranque falla.
-    Start-Sleep -Milliseconds 900
-
-    Guardar-Ip $ip
-    Set-Content -Path $ArchivoModo -Value $modo -Encoding Ascii
-
-    # Los procesos hijos heredan el entorno del padre, asi que con
-    # esto alcanza para que el .bat las vea.
-    $env:PS3RP_IP   = $ip
-    $env:PS3RP_MODO = $modo
-    $env:PS3RP_GUI  = "1"
-
-    $lblEstado.Text = "Iniciando..."
-    [System.Windows.Forms.Application]::DoEvents()
-
-    $proc = Start-Process -FilePath $Bat -WorkingDirectory $Aqui -WindowStyle Hidden -PassThru
-    Set-Content -Path $ArchivoPid -Value $proc.Id -Encoding Ascii
-
-    # Esperar a que ffmpeg aparezca de verdad. No es capricho:
-    # abrir la capturadora en MJPEG tarda varios segundos, y antes
-    # de eso el .bat todavia esta detectando dispositivos con
-    # PowerShell. Sin esta espera, la interfaz diria "corriendo"
-    # aunque hubiera fallado. Se usa DoEvents en vez de un
-    # Start-Sleep largo para que la ventana no se congele.
-    $arranco = $false
-    for ($i = 0; $i -lt 30; $i++) {
-        Start-Sleep -Milliseconds 500
+    $avisar = {
+        param($msg)
+        $lblEstado.Text      = $msg
+        $lblEstado.BackColor = [System.Drawing.Color]::FromArgb(255, 246, 214)
+        $lblEstado.ForeColor = [System.Drawing.Color]::DarkGoldenrod
         [System.Windows.Forms.Application]::DoEvents()
-        if (Servidor-Corriendo) { $arranco = $true; break }
     }
+
+    $arranco = Iniciar-Servidor $ip $modo $avisar
 
     $btnIniciar.Enabled = $true
     Refrescar-Estado

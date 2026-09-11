@@ -27,6 +27,29 @@
 PORT=5000
 LOG="$HOME/ps3rp_client.log"
 
+# SCRIPT_DIR se necesita ARRIBA de las variables PS3RP_* (mas abajo tenia su
+# propia definicion, duplicada, justo antes de INPUT_SCRIPT/MENU_SCRIPT/etc -
+# se quito esa copia). Hace falta aca temprano para poder cargar
+# client_config.env ANTES de que las lineas ${PS3RP_X:-default} lean esas
+# variables.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# client_config.env (2026-09-11): lo escribe la pantalla "Configurar cliente"
+# del menu de la Deck (client_settings.py). Son las MISMAS variables PS3RP_*
+# de siempre, para no inventar un mecanismo de configuracion aparte - solo
+# les da un lugar donde vivir entre lanzamientos sin tener que escribirlas a
+# mano en las opciones de lanzamiento de Steam cada vez.
+#
+# PRIORIDAD: si Steam ya trae la variable puesta en sus opciones de
+# lanzamiento (%command%), esta carga NO LA PISA - bash ya la trae en el
+# entorno antes de que este script arranque, y las lineas de abajo son
+# `export` normales, que si sobreescribirian. Por eso el archivo se genera
+# con el patron "solo si no esta puesta" (`: "${VAR:=valor}"`), no con
+# `export VAR=valor` a secas.
+if [ -f "$SCRIPT_DIR/client_config.env" ]; then
+    source "$SCRIPT_DIR/client_config.env"
+fi
+
 # ------------------------------------------------------------
 # Control remoto (input) - se lanza junto con el video
 # ------------------------------------------------------------
@@ -84,7 +107,6 @@ VQ_MAX="${PS3RP_VQ_MAX:-100}"    # KB de video encolado a partir de los cuales s
 VQ_SECS="${PS3RP_VQ_SECS:-10}"   # segundos seguidos por encima del tope antes de actuar
 VQ_ESPERA="${PS3RP_VQ_ESPERA:-90}"  # segundos de veda despues de un reinicio, para no realimentarse
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_PY="$SCRIPT_DIR/ps3rp-env/bin/python3"
 INPUT_SCRIPT="$SCRIPT_DIR/input_client_v3.py"
 MENU_SCRIPT="$SCRIPT_DIR/client_menu.py"
