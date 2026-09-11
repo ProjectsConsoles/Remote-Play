@@ -12,7 +12,7 @@ un mando fisico** — no habia acceso a la consola en el momento de hacerlo. Ver
 
 ## Contenido de esta carpeta
 
-- `PS3RemotePlay_Ally.exe` — el cliente. Doble click para lanzarlo (o un
+- `RemotePlay_Ally.exe` — el cliente. Doble click para lanzarlo (o un
   acceso directo con variables de entorno, ver mas abajo).
 - `ffplay.exe` — copiado del mismo `ffmpeg-9.0.1-full_build` que usa el
   servidor de este proyecto. Tiene que estar junto al .exe (o indicar otra
@@ -26,13 +26,13 @@ un mando fisico** — no habia acceso a la consola en el momento de hacerlo. Ver
 
 ## Como se lanza
 
-Doble click en `PS3RemotePlay_Ally.exe`. Sale un menu (Streaming / Solo
+Doble click en `RemotePlay_Ally.exe`. Sale un menu (Streaming / Solo
 control), navegable con mouse, teclado (flechas + Enter/Escape) o el mando
 (dpad/stick + A/B).
 
 Para saltarse el menu o cambiar algo, usar variables de entorno **antes** de
 lanzar el .exe (ej. un acceso directo de Windows con
-`cmd /c "set PS3RP_MODO=streaming && start PS3RemotePlay_Ally.exe"`, o un
+`cmd /c "set PS3RP_MODO=streaming && start RemotePlay_Ally.exe"`, o un
 `.bat`):
 
 | Variable | Default | Que hace |
@@ -129,14 +129,14 @@ reinstalar nada):
 cd C:\ps3rp-build\src
 # copiar aca los .py actualizados, despues:
 C:\ps3rp-build\python\python.exe -m PyInstaller --noconfirm --onefile --windowed `
-    --name "PS3RemotePlay_Ally" `
+    --name "RemotePlay_Ally" `
     --distpath "C:\ps3rp-build\dist" `
     --workpath "C:\ps3rp-build\pyibuild" `
     --specpath "C:\ps3rp-build" `
     main_client.py
 ```
 
-El .exe nuevo queda en `C:\ps3rp-build\dist\PS3RemotePlay_Ally.exe`; copiarlo
+El .exe nuevo queda en `C:\ps3rp-build\dist\RemotePlay_Ally.exe`; copiarlo
 a esta carpeta (`ROG Ally Windows Client\`) para reemplazar el viejo.
 
 Nota: se instalo Python via el paquete "embeddable" (zip) en vez del
