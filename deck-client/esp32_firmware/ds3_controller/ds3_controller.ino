@@ -618,9 +618,21 @@ void setup() {
   USB.manufacturerName("Sony");
   USB.productName("PLAYSTATION(R)3 Controller");
   USB.serialNumber("0");
-  USB.usbClass(0x00);
-  USB.usbSubClass(0x00);
-  USB.usbProtocol(0x00);
+  // Clase de dispositivo USB "Wireless Controller" (0xE0/0x01/0x01), no la
+  // clase HID generica (2026-09-11, soporte PS2/OPL). Un DS3 real usa esta
+  // clase RARA a nivel de DEVICE descriptor (no de interfaz) incluso
+  // conectado por cable, porque el mismo chip tambien habla Bluetooth. La
+  // PS3 no es estricta con esto y aceptaba el emulador igual con clase
+  // generica (0x00/0x00/0x00, "definida en la interfaz"), pero el driver de
+  // OPL (Open PS2 Loader) para PS2 SI la revisa explicitamente antes de
+  // reconocer el mando - ver USB_CLASS_WIRELESS_CONTROLLER/
+  // USB_SUBCLASS_RF_CONTROLLER/USB_PROTOCOL_BLUETOOTH_PROG en
+  // include/ds34common.h del repo de OPL (ps2homebrew/Open-PS2-Loader).
+  // Poner los valores reales no deberia romper nada del lado del PS3: es
+  // MAS fiel al DS3 autentico, no menos.
+  USB.usbClass(0xE0);
+  USB.usbSubClass(0x01);
+  USB.usbProtocol(0x01);
   USB.usbAttributes(0x80);
 
   initFeatureStoreFromRealDS3();
