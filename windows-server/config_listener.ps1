@@ -172,7 +172,9 @@ while ($true) {
             }
         }
     } catch {
-        Log "ERROR en el bucle principal: $($_.Exception.Message)"
+        $detalle = $_.Exception.GetType().FullName
+        $interna = if ($_.Exception.InnerException) { " | interna: $($_.Exception.InnerException.GetType().FullName) -- $($_.Exception.InnerException.Message)" } else { "" }
+        Log "ERROR en el bucle principal [linea $($_.InvocationInfo.ScriptLineNumber)] ($detalle): $($_.Exception.Message)$interna | udp null? $($udp -eq $null)"
         Start-Sleep -Seconds 1
     }
 }

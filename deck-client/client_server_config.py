@@ -148,7 +148,8 @@ def main():
             lblEstado.configure(text="Pon una IP primero.", fg=ROJO)
             return
         clave = MODOS[estado["seleccionado"]][0]
-        lblEstado.configure(text="Aplicando...", fg=TENUE)
+        lblEstado.configure(text="Aplicando... si el servidor ya esta corriendo, puede tardar unos "
+                                  "segundos en reiniciar (no se congelo).", fg=TENUE)
         root.update_idletasks()
         ok, resp = server_udp.aplicar_config(ip, ip_deck, clave)
         if not ok:
@@ -183,7 +184,9 @@ def main():
             lblEstado.configure(text=str(resp), fg=ROJO)
             return
         modo_actual = resp.get("modo") or MODOS[estado["seleccionado"]][0]
-        lblEstado.configure(text=f"Enviando IP de esta Deck ({ip_deck})...", fg=TENUE)
+        lblEstado.configure(
+            text=f"Enviando IP de esta Deck ({ip_deck})... si el servidor esta "
+                 "corriendo, puede tardar unos segundos en reiniciar.", fg=TENUE)
         root.update_idletasks()
         ok, resp = server_udp.aplicar_config(ip, ip_deck, modo_actual)
         if not ok:

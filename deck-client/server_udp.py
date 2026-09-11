@@ -14,6 +14,15 @@ import subprocess
 
 PUERTO_CONFIG = 9200
 TIMEOUT_S = 3.0
+# set_config, cuando el servidor YA esta corriendo, no responde hasta que
+# Iniciar-Servidor termina de reiniciar el motor completo (detener + esperar
+# hasta 15s a que vuelva a levantar - ver server_engine_lib.ps1). Con solo
+# 3s de timeout el cliente se rendia ANTES de que el servidor terminara,
+# mostrando "sin respuesta del servidor" aunque el cambio si se aplicaba de
+# verdad (confirmado en vivo: 2026-09-11, "el server no respondio... pero
+# cuando abro y cierro el server si se ve el dato" - el timeout, no un bug
+# del listener, era la causa real de fondo de ese reporte).
+TIMEOUT_APLICAR_S = 20.0
 ARCHIVO_IP_SERVIDOR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server_ip.txt")
 
 
@@ -34,12 +43,12 @@ def guardar_ip_servidor(ip):
         pass
 
 
-def _pedir(ip_servidor, comando: dict):
+def _pedir(ip_servidor, comando: dict, timeout=TIMEOUT_S):
     """Manda `comando` como JSON por UDP a ip_servidor:PUERTO_CONFIG y
     espera una respuesta (tambien JSON). Devuelve (True, dict) si hubo
     respuesta valida, o (False, mensaje_de_error) si no."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(TIMEOUT_S)
+    sock.settimeout(timeout)
     try:
         payload = json.dumps(comando).encode("utf-8")
         sock.sendto(payload, (ip_servidor, PUERTO_CONFIG))
@@ -64,8 +73,10 @@ def obtener_config(ip_servidor):
 
 def aplicar_config(ip_servidor, deck_ip, modo):
     """-> (True, {"aplicado": "reiniciado"|"guardado_para_proxima_vez", ...})
-    o (False, mensaje_de_error)."""
-    return _pedir(ip_servidor, {"cmd": "set_config", "ip": deck_ip, "modo": modo})
+    o (False, mensaje_de_error). Timeout largo (ver TIMEOUT_APLICAR_S): si el
+    servidor esta corriendo, esto lo reinicia de verdad y puede tardar."""
+    return _pedir(ip_servidor, {"cmd": "set_config", "ip": deck_ip, "modo": modo},
+                  timeout=TIMEOUT_APLICAR_S)
 
 
 # ---------------------------------------------------------------------------
