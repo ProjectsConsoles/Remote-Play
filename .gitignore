@@ -35,3 +35,4 @@ windows-server/logs/
 **/CLAUDE.md
 
 .DS_Store
+**/__pycache__/

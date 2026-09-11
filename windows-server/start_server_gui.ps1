@@ -55,6 +55,13 @@ $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox     = $false
 $form.Font            = New-Object System.Drawing.Font("Segoe UI", 9)
 
+# Icono real del proyecto (2026-09-11), el mismo de branding/deck-client -
+# antes la ventana usaba el icono generico de PowerShell.
+$IconoArchivo = Join-Path $Aqui "server_icon.ico"
+if (Test-Path $IconoArchivo) {
+    try { $form.Icon = New-Object System.Drawing.Icon($IconoArchivo) } catch {}
+}
+
 $lblEstado           = New-Object System.Windows.Forms.Label
 $lblEstado.Location  = New-Object System.Drawing.Point(20, 18)
 $lblEstado.Size      = New-Object System.Drawing.Size(460, 26)
@@ -187,13 +194,18 @@ function Refrescar-Estado {
 }
 
 $btnDetener.Add_Click({
+    # Cierra la ventana tambien (2026-09-11, pedido explicito): antes solo
+    # actualizaba el estado y se quedaba abierta con el boton ya deshabilitado
+    # - "Detener servidor" ahora es un stop-y-cierra, igual de directo que el
+    # boton "Cerrar" pero deteniendo el motor primero.
     if (Detener-Servidor) {
-        Refrescar-Estado
+        $form.Close()
     } else {
         Refrescar-Estado
         [System.Windows.Forms.MessageBox]::Show(
             "No habia ningun servidor corriendo.",
             "Remote Play", "OK", "Information") | Out-Null
+        $form.Close()
     }
 })
 
@@ -260,6 +272,50 @@ $btnIniciar.Add_Click({
             "Remote Play", "OK", "Warning") | Out-Null
     }
 })
+
+# Refresco de config aplicada en remoto (2026-09-11): config_listener.ps1
+# corre en OTRO proceso, asi que si la Deck cambia el modo/IP mientras esta
+# ventana esta abierta, deck_modo.txt/deck_ip.txt cambian en disco pero esta
+# GUI (que solo leyo esos archivos UNA vez, al abrir) se queda mostrando lo
+# viejo aunque el cambio remoto se haya aplicado bien de verdad - "no se
+# actualiza el combo, a pesar de que se aplique bien la configuracion"
+# (reportado el mismo dia). Un timer cada 2s vuelve a leer esos archivos y
+# sincroniza el combo/la IP si cambiaron desde la ultima vuelta - sin pisar
+# el cuadro de IP mientras el usuario lo esta editando a mano (-not Focused).
+$script:UltimoModoVisto = $Modos[$cmbModo.SelectedIndex].Clave
+$script:UltimaIpVista   = $cmbIp.Text
+
+$timerRefrescoRemoto = New-Object System.Windows.Forms.Timer
+$timerRefrescoRemoto.Interval = 2000
+$timerRefrescoRemoto.Add_Tick({
+    $modoActual = $null
+    if (Test-Path $ArchivoModo) { $modoActual = (Get-Content $ArchivoModo -First 1 -ErrorAction SilentlyContinue) }
+    if ($modoActual) {
+        $modoActual = $modoActual.Trim()
+        if ($modoActual -ne $script:UltimoModoVisto) {
+            $script:UltimoModoVisto = $modoActual
+            for ($i = 0; $i -lt $Modos.Count; $i++) {
+                if ($Modos[$i].Clave -eq $modoActual) {
+                    $cmbModo.SelectedIndex = $i
+                    break
+                }
+            }
+        }
+    }
+
+    $ipActual = $null
+    if (Test-Path $ArchivoIp) { $ipActual = (Get-Content $ArchivoIp -First 1 -ErrorAction SilentlyContinue) }
+    if ($ipActual) {
+        $ipActual = $ipActual.Trim()
+        if ($ipActual -ne $script:UltimaIpVista) {
+            $script:UltimaIpVista = $ipActual
+            if (-not $cmbIp.Focused) { $cmbIp.Text = $ipActual }
+        }
+    }
+
+    Refrescar-Estado
+})
+$timerRefrescoRemoto.Start()
 
 Refrescar-Estado
 [void]$form.ShowDialog()
