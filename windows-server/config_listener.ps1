@@ -45,9 +45,57 @@ function Log($msg) {
     Add-Content -Path $LogArchivo -Value $linea -Encoding UTF8
 }
 
-Log "=== config_listener arrancando en el puerto $PuertoConfig ==="
+# Auto-matar la instancia anterior al arrancar (2026-09-11, pedido explicito
+# tras un bug real en produccion): este proceso se lanza con
+# CREATE_BREAKAWAY_FROM_JOB desde server_launcher.py para que sobreviva a
+# quien lo lanzo - pero eso mismo significa que si algo sale mal (una version
+# vieja con un bug, o un reinicio manual sin cerrar bien) el proceso viejo
+# puede quedar corriendo para siempre, indetectable desde fuera (nada anuncia
+# que es "el config_listener viejo") y a veces IMPOSIBLE de matar por SSH si
+# la sesion que lo lanzo no es la misma con la que se intenta pararlo -
+# confirmado en vivo: un PID asi devolvia "Acceso denegado" al pedirle
+# Stop-Process, mientras seguia rellenando el log de errores para siempre.
+# La unica limpieza confiable es que CADA arranque nuevo mate al anterior EL
+# MISMO, con sus propios permisos (mismo usuario que lo lanzo la vez pasada,
+# asi que Stop-Process si le alcanza). Se guarda el PID propio en un archivo
+# y, si ya habia uno vivo, se le pide que se detenga antes de tocar el
+# socket - asi nunca hay dos instancias peleando (o zombies) por el puerto.
+$ArchivoListenerPid = Join-Path $Aqui "logs\config_listener.pid"
+if (Test-Path $ArchivoListenerPid) {
+    $pidAnterior = Get-Content $ArchivoListenerPid -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($pidAnterior) {
+        $procAnterior = Get-Process -Id $pidAnterior -ErrorAction SilentlyContinue
+        if ($procAnterior -and $procAnterior.ProcessName -eq "powershell") {
+            try {
+                Stop-Process -Id $pidAnterior -Force -ErrorAction Stop
+                Log "Instancia anterior (PID $pidAnterior) detenida al arrancar."
+            } catch {
+                Log "No se pudo detener la instancia anterior (PID $pidAnterior): $($_.Exception.Message)"
+            }
+        }
+    }
+}
+Set-Content -Path $ArchivoListenerPid -Value $PID -Encoding Ascii
 
-$udp = New-Object System.Net.Sockets.UdpClient($PuertoConfig)
+Log "=== config_listener arrancando en el puerto $PuertoConfig (PID $PID) ==="
+
+# try/catch explicito (2026-09-11, bug real encontrado con hardware real):
+# si el puerto ya esta tomado (otra instancia de este mismo script sigue
+# viva - normal si el usuario reabre el lanzador sin haber cerrado sesion
+# de Windows antes), New-Object lanza una excepcion NO terminante por
+# default en PowerShell. Sin este try/catch, la excepcion se perdia en
+# silencio (stderr va a DEVNULL desde server_launcher.py) y $udp quedaba
+# $null - el bucle de abajo entraba igual y explotaba PARA SIEMPRE, una vez
+# por segundo, con "No se puede llamar a un metodo en una expresion con
+# valor NULL", sin dar ninguna pista de la causa real. Ahora se detecta y
+# se sale con un mensaje claro: no hace falta arreglar nada, ya hay un
+# listener corriendo.
+try {
+    $udp = New-Object System.Net.Sockets.UdpClient($PuertoConfig)
+} catch {
+    Log "No se pudo tomar el puerto $PuertoConfig (probablemente ya hay otro config_listener corriendo): $($_.Exception.Message)"
+    exit 1
+}
 $origen = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
 
 function Enviar-Respuesta($obj, [System.Net.IPEndPoint]$destino) {

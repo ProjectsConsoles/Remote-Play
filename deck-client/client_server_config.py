@@ -165,11 +165,56 @@ def main():
         else:
             lblEstado.configure(text=str(resp), fg=ROJO)
 
+    def enviar_ip():
+        # "que no sea necesario escribirla en el servidor por si cambia"
+        # (pedido 2026-09-11): manda la IP de ESTA Deck al servidor sin
+        # tocar el modo de captura - consulta el modo que ya tiene puesto
+        # el servidor y se lo vuelve a mandar junto con la IP nueva, asi
+        # Aplicar-config actualiza Guardar-Ip en la PC sin que el usuario
+        # tenga que ir a escribirla a mano ahi ni elegir un modo aca.
+        ip = entryIp.get().strip()
+        if not ip:
+            lblEstado.configure(text="Pon una IP primero.", fg=ROJO)
+            return
+        lblEstado.configure(text="Consultando modo actual del servidor...", fg=TENUE)
+        root.update_idletasks()
+        ok, resp = server_udp.obtener_config(ip)
+        if not ok:
+            lblEstado.configure(text=str(resp), fg=ROJO)
+            return
+        modo_actual = resp.get("modo") or MODOS[estado["seleccionado"]][0]
+        lblEstado.configure(text=f"Enviando IP de esta Deck ({ip_deck})...", fg=TENUE)
+        root.update_idletasks()
+        ok, resp = server_udp.aplicar_config(ip, ip_deck, modo_actual)
+        if not ok:
+            lblEstado.configure(text=str(resp), fg=ROJO)
+            return
+        server_udp.guardar_ip_servidor(ip)
+        aplicado = resp.get("aplicado")
+        if aplicado == "reiniciado":
+            lblEstado.configure(
+                text=f"IP enviada ({ip_deck}). Servidor reiniciado con el mismo modo.", fg=VERDE)
+        elif aplicado == "guardado_para_proxima_vez":
+            lblEstado.configure(
+                text=f"IP enviada ({ip_deck}). Se aplicara la proxima vez que arranque.", fg=VERDE)
+        else:
+            lblEstado.configure(text=str(resp), fg=ROJO)
+        for i, (clave, _, _) in enumerate(MODOS):
+            if clave == modo_actual:
+                estado["seleccionado"] = i
+        marcar()
+
     btnConsultar = tk.Button(filaBotones, text="Consultar estado", font=f_boton,
                               bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55",
                               activeforeground="#ffffff", relief="flat", bd=0,
                               width=16, height=2, command=consultar)
     btnConsultar.pack(side="left", padx=10)
+
+    btnEnviarIp = tk.Button(filaBotones, text="Enviar IP (Y)", font=f_boton,
+                             bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55",
+                             activeforeground="#ffffff", relief="flat", bd=0,
+                             width=14, height=2, command=enviar_ip)
+    btnEnviarIp.pack(side="left", padx=10)
 
     btnAplicar = tk.Button(filaBotones, text="Aplicar", font=f_boton,
                             bg="#2d6cdf", fg="#ffffff", activebackground="#2d6cdf",
@@ -183,7 +228,7 @@ def main():
                            width=12, height=2, command=root.destroy)
     btnVolver.pack(side="left", padx=10)
 
-    tk.Label(root, text="Flechas para elegir modo, Enter aplica, Escape vuelve.",
+    tk.Label(root, text="Flechas para elegir modo, Enter aplica, Y manda la IP, Escape vuelve.",
              font=f_pie, bg=FONDO, fg=TENUE).pack(side="bottom", pady=16)
 
     root.bind("<Left>", lambda e: elegir_modo((estado["seleccionado"] - 1) % len(MODOS)))
@@ -191,6 +236,8 @@ def main():
     root.bind("<Up>", lambda e: elegir_modo((estado["seleccionado"] - 2) % len(MODOS)))
     root.bind("<Down>", lambda e: elegir_modo((estado["seleccionado"] + 2) % len(MODOS)))
     root.bind("<Return>", lambda e: aplicar())
+    root.bind("<y>", lambda e: enviar_ip())
+    root.bind("<Y>", lambda e: enviar_ip())
     root.bind("<Escape>", lambda e: root.destroy())
 
     mando = Mando()
@@ -207,6 +254,8 @@ def main():
                 elegir_modo((estado["seleccionado"] + 2) % len(MODOS))
             elif nombre == "A":
                 aplicar()
+            elif nombre == "Y":
+                enviar_ip()
             elif nombre == "B":
                 root.destroy()
                 return

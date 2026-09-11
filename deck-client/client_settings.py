@@ -146,7 +146,14 @@ def main():
     interior = tk.Frame(canvas, bg=FONDO)
 
     interior.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-    canvas.create_window((0, 0), window=interior, anchor="nw")
+    ventana_interior = canvas.create_window((0, 0), window=interior, anchor="nw")
+    # Sin esto, "interior" solo mide lo que su contenido pide y las filas
+    # (fill="x") quedan angostas y pegadas a la izquierda dentro del canvas,
+    # con hueco vacio a la derecha - "no esta centrado, se ve a la
+    # izquierda" (reportado 2026-09-11). Igualando el ancho de la ventana
+    # interna al del canvas en cada resize, las filas ocupan todo el ancho
+    # real de la pantalla.
+    canvas.bind("<Configure>", lambda e: canvas.itemconfig(ventana_interior, width=e.width))
     canvas.configure(yscrollcommand=scrollbar.set)
     canvas.pack(side="left", fill="both", expand=True)
     scrollbar.pack(side="right", fill="y")
@@ -160,6 +167,16 @@ def main():
 
     guardado = leer_guardado()
     widgets = {}   # variable -> (tipo, getter_callable)
+    filas_nav = []  # [{"frame":.., "on_left":fn, "on_right":fn, "on_a":fn}, ...] en orden visual
+
+    def _cambiar_numero(entry, delta):
+        actual = entry.get().strip()
+        try:
+            base = int(actual) if actual else 0
+        except ValueError:
+            return
+        entry.delete(0, "end")
+        entry.insert(0, str(base + delta))
 
     for campo in CAMPOS:
         var, etiqueta, tipo, default, opciones, ayuda = campo
@@ -169,7 +186,8 @@ def main():
                      anchor="w").pack(fill="x", pady=(16, 4))
             continue
 
-        fila = tk.Frame(interior, bg=PANEL, padx=12, pady=8)
+        fila = tk.Frame(interior, bg=PANEL, padx=12, pady=8,
+                         highlightthickness=2, highlightbackground=PANEL)
         fila.pack(fill="x", pady=3)
 
         izq = tk.Frame(fila, bg=PANEL)
@@ -187,6 +205,12 @@ def main():
             entry.insert(0, valor_actual)
             entry.pack(side="right", padx=(10, 0))
             widgets[var] = ("texto", lambda e=entry: e.get().strip())
+
+            nav = {"frame": fila, "on_a": lambda e=entry: e.focus_set()}
+            if tipo == "numero":
+                nav["on_left"] = lambda e=entry: _cambiar_numero(e, -1)
+                nav["on_right"] = lambda e=entry: _cambiar_numero(e, 1)
+            filas_nav.append(nav)
 
         elif tipo == "bool":
             estado = {"v": valor_actual == "1"}
@@ -206,6 +230,8 @@ def main():
             refrescar()
             btn.pack(side="right", padx=(10, 0))
             widgets[var] = ("bool", lambda e=estado: ("1" if e["v"] else "0"))
+            filas_nav.append({"frame": fila, "on_a": alternar,
+                               "on_left": alternar, "on_right": alternar})
 
         elif tipo == "enum":
             estado = {"i": opciones.index(valor_actual) if valor_actual in opciones else 0}
@@ -216,14 +242,17 @@ def main():
             def refrescar(b=btn, e=estado, ops=opciones):
                 b.configure(text=ops[e["i"]])
 
-            def ciclar(e=estado, ops=opciones, r=refrescar):
-                e["i"] = (e["i"] + 1) % len(ops)
+            def ciclar(paso, e=estado, ops=opciones, r=refrescar):
+                e["i"] = (e["i"] + paso) % len(ops)
                 r()
 
-            btn.configure(command=ciclar)
+            btn.configure(command=lambda c=ciclar: c(1))
             refrescar()
             btn.pack(side="right", padx=(10, 0))
             widgets[var] = ("enum", lambda e=estado, ops=opciones: ops[e["i"]])
+            filas_nav.append({"frame": fila, "on_a": lambda c=ciclar: c(1),
+                               "on_left": lambda c=ciclar: c(-1),
+                               "on_right": lambda c=ciclar: c(1)})
 
     # --- botones de accion, fijos abajo (fuera del scroll) ---
     filaBotones = tk.Frame(root, bg=FONDO)
@@ -260,19 +289,60 @@ def main():
               bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55", activeforeground="#ffffff",
               relief="flat", bd=0, command=root.destroy).pack(side="left", padx=10)
 
-    tk.Label(root, text="Toca/usa teclado para editar. El mando solo mueve el scroll (arriba/abajo) y B vuelve.",
+    tk.Label(root, text="Cruceta arriba/abajo mueve el foco, izq/der cambia el valor, A activa, B vuelve.",
              font=f_pie, bg=FONDO, fg=TENUE).pack(side="bottom", pady=10)
 
+    # --- navegacion por fila (2026-09-11) -----------------------------------
+    # Antes el mando solo movia el scroll y todo lo demas era tactil/teclado -
+    # "por cada opcion deberia responder a la botonera de la Deck" (reportado
+    # el mismo dia). Con filas_nav ya armado arriba, cada fila sabe reaccionar
+    # a izquierda/derecha/A segun su tipo (bool alterna, enum cicla, numero
+    # suma/resta 1, texto solo enfoca el Entry para teclear).
+    foco = {"i": 0}
+
+    def marcar():
+        for i, nav in enumerate(filas_nav):
+            nav["frame"].configure(highlightbackground="#ffffff" if i == foco["i"] else PANEL)
+        if filas_nav:
+            fila_actual = filas_nav[foco["i"]]["frame"]
+            root.update_idletasks()
+            y = fila_actual.winfo_y()
+            alto_total = interior.winfo_height() or 1
+            canvas.yview_moveto(max(0.0, (y - 40) / alto_total))
+
+    def mover_foco(delta):
+        if not filas_nav:
+            return
+        foco["i"] = (foco["i"] + delta) % len(filas_nav)
+        marcar()
+
+    def accionar(lado):
+        if not filas_nav:
+            return
+        nav = filas_nav[foco["i"]]
+        fn = nav.get(lado)
+        if fn:
+            fn()
+
     root.bind("<Escape>", lambda e: root.destroy())
+
+    if filas_nav:
+        marcar()
 
     mando = Mando()
 
     def revisar_mando():
         for nombre in mando.nuevos():
             if nombre == "DPAD_UP":
-                _scroll(-2)
+                mover_foco(-1)
             elif nombre == "DPAD_DOWN":
-                _scroll(2)
+                mover_foco(1)
+            elif nombre == "DPAD_LEFT":
+                accionar("on_left")
+            elif nombre == "DPAD_RIGHT":
+                accionar("on_right")
+            elif nombre == "A":
+                accionar("on_a")
             elif nombre == "B":
                 root.destroy()
                 return

@@ -116,10 +116,14 @@ def main():
     # config_listener.ps1 (2026-09-11): deja configurar modo/IP del servidor
     # en remoto desde el menu de la Deck, aun con esta ventana cerrada -
     # por eso se lanza APARTE de la GUI, no dentro de ella (ver la nota
-    # larga en config_listener.ps1 sobre por que). Si ya hay uno corriendo
-    # de un lanzamiento anterior, el nuevo revienta solo al intentar tomar
-    # el puerto UDP 9200 (ya ocupado) - autolimitado, no hace falta mas
-    # logica de instancia unica para esto.
+    # larga en config_listener.ps1 sobre por que). Si ya hay uno corriendo de
+    # un lanzamiento anterior, el propio script nuevo lo mata al arrancar
+    # (PID guardado en logs\config_listener.pid) - un bug real en produccion
+    # dejo un proceso viejo con $udp en null corriendo para siempre, y como
+    # CREATE_BREAKAWAY_FROM_JOB lo hace sobrevivir a quien lo lanzo, nada de
+    # afuera lo mataba solo. Contar con que el puerto ocupado lo frene ya no
+    # alcanza: por eso ahora se mata la instancia anterior explicitamente en
+    # vez de solo confiar en que el bind falle.
     if os.path.isfile(listener_ps1):
         lanzar_oculto(listener_ps1, aqui)
 
