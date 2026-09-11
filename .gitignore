@@ -26,9 +26,12 @@ windows-server/logs/
 **/ffprobe.exe
 
 # Software de terceros con licencia propia (Remote Play oficial parcheado):
-# nunca se redistribuye en este repo.
+# nunca se redistribuye en este repo. Nombre especifico (no un patron ancho
+# tipo RemotePlay*.exe) porque eso chocaria con los .exe legitimos del
+# proyecto, como rog-ally-client/RemotePlay_Ally.exe.
 **/Remote-Play.zip
-**/RemotePlay*.exe
-**/RemotePlay*.dll
+
+# Notas internas de Claude Code, no son documentacion del proyecto.
+**/CLAUDE.md
 
 .DS_Store
