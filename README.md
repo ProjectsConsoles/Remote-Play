@@ -72,4 +72,31 @@ siguiente objetivo en la hoja de ruta.
   ("full_build"), colocado junto a los scripts del servidor.
 - Una **capturadora HDMI** compatible con DirectShow, con salida de audio
   digital.
-- Un **ESP32-S3** flasheado con el firmware de `deck-client/esp32_firmware/`.
+- Un **ESP32-S3** flasheado con el firmware de `deck-client/esp32_firmware/`
+  (ver abajo cómo).
+
+## Flashear el firmware del ESP32-S3
+
+El archivo a subir es `deck-client/esp32_firmware/ds3_controller/ds3_controller.ino`
+(los demás `.ino` de esa carpeta son pruebas de desarrollo, no hace falta
+tocarlos).
+
+1. **Antes de subir, editar en el propio `.ino`** la configuración de red:
+   ```cpp
+   const char *WIFI_SSID = "TU_RED_WIFI_2.4GHZ";
+   const char *WIFI_PASSWORD = "TU_CONTRASENA_WIFI";
+   ```
+   El ESP32-S3-WROOM-1 solo tiene radio de 2.4 GHz — tiene que ser una red
+   (o banda) de 2.4 GHz. **No commitear el `.ino` con la contraseña real
+   puesta.**
+2. En el Arduino IDE, con soporte de ESP32 instalado:
+   - **Herramientas → Board**: `ESP32S3 Dev Module`
+   - **Herramientas → USB Mode**: `USB-OTG (TinyUSB)`
+   - Instalar la librería **ArduinoJson** (Benoit Blanchon, v7.x) desde el
+     Gestor de Librerías.
+3. Conectar la placa por su **puerto USB nativo** (no el de
+   programación/COM).
+4. Para que el Arduino IDE detecte la placa y suba el sketch: mantener
+   **BOOT**, tocar **RESET**, soltar **RESET**, soltar **BOOT**, y recién
+   ahí darle a Subir (el auto-reset no entra solo por USB nativo en esta
+   placa).
