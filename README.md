@@ -1,3 +1,5 @@
+![Remote Play](branding/banner.png)
+
 # Remote Play — cualquier consola, desde un handheld
 
 Streaming de video/audio + control remoto real para jugar consolas antiguas
