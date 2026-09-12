@@ -15,9 +15,13 @@ YA es una dependencia dura de este proyecto (lee el mando) y trae su propio
 render de texto (SDL_ttf) sin depender de Tcl/Tk, se uso pygame tambien para
 dibujar el menu y la ventana de control. Efecto secundario bueno: como ahora
 todo vive en una sola libreria, el menu y el modo control quedaron
-DE UN SOLO HILO (nada de tkinter.after() cooperando con un Mando aparte) - ver
-la nota en ejecutar_modo_control() sobre por que el hilo de fondo de
-InputSender NO se usa ahi.
+DE UN SOLO HILO (nada de tkinter.after() cooperando con un Mando aparte).
+
+TODO EL PROYECTO LEE EL MANDO EN EL HILO PRINCIPAL (2026-09-11). Hubo un
+hilo de fondo (InputSender) para el envio de input durante el streaming;
+se elimino porque en Windows SDL no actualiza el estado del joystick fuera
+del hilo principal - mandaba sus 105 paquetes por segundo con todos los
+botones en cero. Ver _bombear_input_hasta_que_muera().
 
 QUE NO SE PORTEO (y por que):
   - lizard_mode: es un parametro del driver hid_steam de Valve, no existe en
@@ -50,7 +54,6 @@ import shutil
 import socket
 import subprocess
 import sys
-import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -172,101 +175,6 @@ TENUE = (138, 138, 149)
 VERDE = (63, 143, 74)
 AZUL = (45, 108, 223)
 GRIS_BOTON = (58, 58, 66)
-
-
-# ---------------------------------------------------------------------------
-# Cliente de input en hilo de fondo. SOLO se usa en modo streaming: ahi no hay
-# ninguna ventana de pygame propia (ffplay es otro proceso con su propia
-# ventana), asi que este hilo es el UNICO lugar del proceso que toca SDL/
-# pygame y no compite con nada. En modo control NO se usa (ver mas abajo).
-# ---------------------------------------------------------------------------
-
-class InputSender(threading.Thread):
-    def __init__(self):
-        super().__init__(daemon=True)
-        self._detener = threading.Event()
-
-    def _conectar(self):
-        import pygame
-        while not self._detener.is_set():
-            pygame.joystick.quit()
-            pygame.joystick.init()
-            if pygame.joystick.get_count() > 0:
-                js = pygame.joystick.Joystick(0)
-                js.init()
-                log.info("Mando conectado: %s (ejes=%d, botones=%d, hats=%d)",
-                         js.get_name(), js.get_numaxes(), js.get_numbuttons(),
-                         js.get_numhats())
-                return js
-            time.sleep(2)
-        return None
-
-    def run(self):
-        import pygame
-        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-        pygame.init()
-        pygame.joystick.init()
-
-        joystick = self._conectar()
-        if joystick is None:
-            return
-
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        interval = 1.0 / INPUT_RATE
-        log.info("Enviando input a %s:%s a %s Hz", ESP32_IP, ESP32_PORT, INPUT_RATE)
-
-        stats_last = time.time()
-        stats_ticks = 0
-        last_snapshot = None
-
-        while not self._detener.is_set():
-            start = time.time()
-            try:
-                if pygame.joystick.get_count() == 0:
-                    log.warning("Mando desconectado. Esperando reconexion...")
-                    joystick = self._conectar()
-                    if joystick is None:
-                        break
-                state = gp.build_state(joystick)
-            except Exception as e:
-                log.warning("Error leyendo el mando (%s), reintentando...", e)
-                joystick = self._conectar()
-                if joystick is None:
-                    break
-                continue
-
-            payload = json.dumps(state).encode("utf-8")
-            try:
-                sock.sendto(payload, (ESP32_IP, ESP32_PORT))
-            except OSError as e:
-                log.warning("Error de red (%s)", e)
-                time.sleep(0.5)
-                continue
-
-            snapshot = (tuple(k for k, v in state["buttons"].items() if v),
-                        state["dpad"]["x"], state["dpad"]["y"])
-            if snapshot != last_snapshot:
-                last_snapshot = snapshot
-                log.debug("[botones] %s dpad=(%s,%s)", list(snapshot[0]), snapshot[1], snapshot[2])
-
-            now = time.time()
-            stats_ticks += 1
-            if now - stats_last >= 5.0:
-                span = now - stats_last
-                log.debug("[stats] %d paquetes en %.1fs = %.1f Hz efectivos (objetivo %d)",
-                          stats_ticks, span, stats_ticks / span, INPUT_RATE)
-                stats_last, stats_ticks = now, 0
-
-            elapsed = time.time() - start
-            sleep_time = interval - elapsed
-            if sleep_time > 0:
-                self._detener.wait(sleep_time)
-
-        sock.close()
-
-    def detener(self):
-        self._detener.set()
-        self.join(timeout=2)
 
 
 # ---------------------------------------------------------------------------
@@ -1002,7 +910,7 @@ def mostrar_config_cliente():
 # Modo "solo control" - un solo hilo: lee mando, manda UDP Y dibuja, todo en
 # la misma vuelta de loop.
 #
-# POR QUE NO SE USA InputSender (hilo) ACA (2026-09-07): SDL/pygame espera que
+# POR QUE NO SE USA UN HILO DE FONDO ACA (2026-09-07): SDL/pygame espera que
 # el pump de eventos y el manejo de ventana pasen por el mismo hilo que la creo
 # (particularmente cierto en Windows, donde la ventana tiene su propio message
 # pump de Win32). Tener esta ventana en el hilo principal Y un hilo aparte
@@ -1156,6 +1064,88 @@ def ejecutar_modo_control():
 # Modo streaming: lanza ffplay y espera a que se cierre.
 # ---------------------------------------------------------------------------
 
+def _bombear_input_hasta_que_muera(proc):
+    """Lee el mando y manda su estado al ESP32 EN EL HILO PRINCIPAL, hasta
+    que ffplay (proc) se cierre.
+
+    POR QUE NO UN HILO DE FONDO (2026-09-11, medido en la Ally real). Antes
+    esto lo hacia InputSender en un hilo aparte, con el argumento de que en
+    streaming no hay ventana de pygame propia con la que pelearse. Falso: en
+    Windows, SDL no actualiza el estado del joystick fuera del hilo
+    principal, asi que el bucle corria feliz y mandaba sus ~105 paquetes por
+    segundo... TODOS con los botones en cero. Se vio clarisimo en el
+    heartbeat del ESP32: udp= subia sin parar (los paquetes llegaban) pero
+    rep=[00 00 00] cross=0 mientras el usuario apretaba botones "un monton".
+    Es exactamente la misma razon por la que el modo control ya leia el
+    mando en su propio hilo principal (ver la nota de ejecutar_modo_control).
+
+    El driver de video dummy es a proposito: le da a SDL su bomba de eventos
+    sin abrir ninguna ventana que le pelee el foco a ffplay. Ojo: esa
+    variable NO debe llegarle a ffplay (dibuja con SDL y se quedaria sin
+    ventana) - por eso el Popen de arriba le pasa un entorno limpio."""
+    if not ENABLE_INPUT:
+        proc.wait()
+        return
+
+    import pygame
+    os.environ["SDL_VIDEODRIVER"] = "dummy"
+    os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+    pygame.init()
+    pygame.display.init()
+    pygame.joystick.init()
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    interval = 1.0 / INPUT_RATE
+    log.info("Enviando input a %s:%s a %s Hz (hilo principal)",
+             ESP32_IP, ESP32_PORT, INPUT_RATE)
+
+    joystick = None
+    ultimo_aviso = 0.0
+    stats_last = time.time()
+    stats_ticks = 0
+
+    try:
+        while proc.poll() is None:
+            inicio = time.time()
+
+            if joystick is None:
+                if pygame.joystick.get_count() > 0:
+                    joystick = pygame.joystick.Joystick(0)
+                    joystick.init()
+                    log.info("Mando conectado: %s (ejes=%d, botones=%d, hats=%d)",
+                             joystick.get_name(), joystick.get_numaxes(),
+                             joystick.get_numbuttons(), joystick.get_numhats())
+                elif inicio - ultimo_aviso > 5:
+                    ultimo_aviso = inicio
+                    log.warning("Sin mando conectado; reintentando...")
+
+            if joystick is not None:
+                try:
+                    estado = gp.build_state(joystick)
+                    sock.sendto(json.dumps(estado).encode("utf-8"), (ESP32_IP, ESP32_PORT))
+                    stats_ticks += 1
+                except OSError as e:
+                    log.warning("Error de red mandando input: %s", e)
+                except Exception as e:
+                    log.warning("Error leyendo el mando (%s); reconectando...", e)
+                    joystick = None
+                    pygame.joystick.quit()
+                    pygame.joystick.init()
+
+            ahora = time.time()
+            if ahora - stats_last >= 5.0:
+                span = ahora - stats_last
+                log.debug("[stats] %d paquetes en %.1fs = %.1f Hz efectivos (objetivo %d)",
+                          stats_ticks, span, stats_ticks / span, INPUT_RATE)
+                stats_last, stats_ticks = ahora, 0
+
+            restante = interval - (time.time() - inicio)
+            if restante > 0:
+                time.sleep(restante)
+    finally:
+        sock.close()
+
+
 def ejecutar_modo_streaming():
     """Devuelve (True, "") si parece haber recibido stream de verdad, o
     (False, mensaje) si fallo (ffplay no encontrado, o se cerro solo sin
@@ -1196,11 +1186,6 @@ def ejecutar_modo_streaming():
 
     log.info("Lanzando ffplay: %s", " ".join(args))
 
-    sender = None
-    if ENABLE_INPUT:
-        sender = InputSender()
-        sender.start()
-
     try:
         # stdin tambien en DEVNULL, no solo stdout/stderr (2026-09-11): este
         # .exe se compila con --windowed, o sea sin consola, asi que sus
@@ -1217,10 +1202,10 @@ def ejecutar_modo_streaming():
         # consola, asi que ocultarla no le quita nada.
         # ENTORNO LIMPIO DE SDL (2026-09-11, LA causa de "le doy streaming y
         # no abre nada"). ffplay dibuja con SDL2, igual que pygame. Y este
-        # mismo proceso, para leer el mando sin abrir ventana propia, hace
-        # os.environ.setdefault("SDL_VIDEODRIVER", "dummy") dentro del hilo
-        # de InputSender... que arranca JUSTO ANTES de este Popen. Como el
-        # hijo hereda el entorno del padre, ffplay se encontraba con el
+        # mismo proceso pone SDL_VIDEODRIVER=dummy para leer el mando sin
+        # abrir ventana propia (antes en el hilo de InputSender, hoy en
+        # _bombear_input_hasta_que_muera). Como el hijo hereda el entorno del
+        # padre, ffplay se encontraba con el
         # driver de video "dummy" y hacia exactamente lo que se le pidio:
         # decodificar todo perfecto y no dibujar NADA. Por eso el proceso
         # quedaba vivo, sano, consumiendo el stream (medido: recibia sus
@@ -1239,7 +1224,7 @@ def ejecutar_modo_streaming():
                                 stderr=subprocess.DEVNULL,
                                 env=entorno,
                                 creationflags=subprocess.CREATE_NO_WINDOW)
-        proc.wait()
+        _bombear_input_hasta_que_muera(proc)
         if proc.returncode != 0:
             log.warning("ffplay termino con codigo %s (probable timeout: no llego video de la PC)",
                         proc.returncode)
@@ -1250,9 +1235,6 @@ def ejecutar_modo_streaming():
     except Exception as e:
         log.error("No se pudo lanzar ffplay: %s", e)
         return False, f"No se pudo lanzar ffplay: {e}"
-    finally:
-        if sender is not None:
-            sender.detener()
 
 
 # ---------------------------------------------------------------------------
