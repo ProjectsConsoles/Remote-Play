@@ -53,9 +53,31 @@ AXIS_NAMES = {
 # recorrido. Igual que TRIGGER_CLICK_THRESHOLD / UMBRAL_GATILLO en la Deck.
 TRIGGER_CLICK_THRESHOLD = -0.5
 
-# Cuanto recorrido del stick se ignora alrededor del centro. Se puede ajustar
-# con PS3RP_ZONA_MUERTA si algun mando necesita mas o menos.
-ZONA_MUERTA_STICK = float(os.environ.get("PS3RP_ZONA_MUERTA", "0.06"))
+# Cuanto recorrido del stick se ignora alrededor del centro.
+#
+# El default es CERO (2026-09-11): lo que parecia deriva del stick ("el cursor
+# se mueve solo") resulto ser el bucle de input congelandose medio segundo por
+# el sondeo de brillo - ver la nota en ejecutar_modo_control. Con eso
+# arreglado, el stick no necesita zona muerta, y cualquier zona muerta se
+# siente como que "tarda en responder".
+#
+# Se acepta por nombre (lo que elige el menu de "Configurar cliente", que en la
+# Ally se navega con el mando y no puede escribir decimales) o un numero
+# directo, por si hace falta afinarlo a mano.
+ZONAS_MUERTAS = {"nada": 0.0, "medio": 0.06, "alta": 0.12}
+
+
+def _leer_zona_muerta():
+    v = (os.environ.get("PS3RP_ZONA_MUERTA") or "nada").strip().lower()
+    if v in ZONAS_MUERTAS:
+        return ZONAS_MUERTAS[v]
+    try:
+        return max(0.0, min(0.5, float(v)))
+    except ValueError:
+        return 0.0
+
+
+ZONA_MUERTA_STICK = _leer_zona_muerta()
 
 # ---------------------------------------------------------------------------
 # Boton PS por acorde de botones (copiado tal cual de input_client_v3.py)
