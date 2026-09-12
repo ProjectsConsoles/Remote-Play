@@ -318,4 +318,11 @@ $timerRefrescoRemoto.Add_Tick({
 $timerRefrescoRemoto.Start()
 
 Refrescar-Estado
+
+# Auto-inicio y minimizado al abrir (2026-09-12, pedido explicito): usa la
+# IP/modo ya cargados en el combo (ultimos guardados) y arranca solo, sin
+# que el usuario tenga que darle click a Iniciar cada vez.
+$form.WindowState = "Minimized"
+$form.Add_Shown({ $btnIniciar.PerformClick() })
+
 [void]$form.ShowDialog()
