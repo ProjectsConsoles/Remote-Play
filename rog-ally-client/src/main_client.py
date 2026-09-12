@@ -977,6 +977,16 @@ def ejecutar_modo_control():
 
     salir = False
     ultima_sync_brillo = 0.0
+    ultima_firma = None
+    ultimo_dibujo = 0.0
+    # Instrumentacion del ritmo (2026-09-11): el input llegaba al ESP32 a ~50/s
+    # en vez de 120 y no estaba claro donde se iba el tiempo. Se mide y se deja
+    # en el log cada 5s.
+    m_vueltas = 0
+    m_envios = 0
+    m_t_leer = 0.0
+    m_t_dibujar = 0.0
+    m_desde = time.time()
 
     while not salir:
         ahora = time.time()
@@ -1024,7 +1034,9 @@ def ejecutar_modo_control():
             joystick.init()
         if joystick is not None:
             try:
+                _t0 = time.perf_counter()
                 estado = gp.build_state(joystick)
+                m_t_leer += time.perf_counter() - _t0
             except Exception:
                 joystick = None
 
@@ -1035,67 +1047,70 @@ def ejecutar_modo_control():
                     sock.sendto(json.dumps(estado).encode("utf-8"), (ESP32_IP, ESP32_PORT))
                 except OSError:
                     pass
+                m_envios += 1
                 proximo_envio = ahora + interval
         else:
             texto_pulsado = ""
 
-        # --- dibujo ---
-        screen.fill(FONDO_CONTROL)
-        _texto(pygame, screen, f_titulo, "MODO CONTROL ACTIVO", VERDE, center=(w // 2, h // 2 - 200))
-        _texto(pygame, screen, f_sub, "La Ally esta funcionando solo como mando.",
-               TEXTO, center=(w // 2, h // 2 - 140))
-        _texto(pygame, screen, f_sub, "Mira el PS3 en la tele.", TEXTO, center=(w // 2, h // 2 - 112))
-        _texto(pygame, screen, f_chico, f"Mandando al ESP32 en {ESP32_IP}:{ESP32_PORT}",
-               TENUE, center=(w // 2, h // 2 - 70))
+        # SOLO SE REDIBUJA SI CAMBIO ALGO (2026-09-11, medido). Redibujar
+        # la pantalla completa cuesta ~50 ms en la Ally, y durante ese rato
+        # el bucle no manda input: por eso al ESP32 le llegaban ~45
+        # paquetes/s aunque entre cuadro y cuadro se mandara a 120. Esta
+        # pantalla es casi toda texto fijo, asi que se redibuja solo cuando
+        # cambia lo que muestra (botones pulsados o brillo), o una vez cada
+        # medio segundo para que no se vea congelada.
+        firma = (texto_pulsado, pct_actual, arrastrando_barra)
+        if firma != ultima_firma or (ahora - ultimo_dibujo) > 0.5:
+            ultima_firma = firma
+            ultimo_dibujo = ahora
+            _td = time.perf_counter()
+            # --- dibujo ---
+            screen.fill(FONDO_CONTROL)
+            _texto(pygame, screen, f_titulo, "MODO CONTROL ACTIVO", VERDE, center=(w // 2, h // 2 - 200))
+            _texto(pygame, screen, f_sub, "La Ally esta funcionando solo como mando.",
+                   TEXTO, center=(w // 2, h // 2 - 140))
+            _texto(pygame, screen, f_sub, "Mira el PS3 en la tele.", TEXTO, center=(w // 2, h // 2 - 112))
+            _texto(pygame, screen, f_chico, f"Mandando al ESP32 en {ESP32_IP}:{ESP32_PORT}",
+                   TENUE, center=(w // 2, h // 2 - 70))
 
-        _texto(pygame, screen, f_chico, "Brillo de la pantalla", TENUE,
-               center=(barra_rect.centerx, barra_rect.top - 20))
-        if brillo.ok:
-            pygame.draw.rect(screen, (42, 42, 48), barra_rect, border_radius=8)
-            relleno = barra_rect.copy()
-            relleno.width = max(4, int(barra_rect.width * pct_actual / 100))
-            pygame.draw.rect(screen, AZUL, relleno, border_radius=8)
-            pygame.draw.rect(screen, (255, 255, 255), barra_rect, width=2, border_radius=8)
-            _texto(pygame, screen, f_chico, f"{pct_actual}%", TEXTO,
-                   center=(barra_rect.centerx, barra_rect.bottom + 20))
-        else:
-            _texto(pygame, screen, f_chico, "Brillo no disponible via WMI en este equipo",
-                   TENUE, center=(barra_rect.centerx, barra_rect.centery))
+            _texto(pygame, screen, f_chico, "Brillo de la pantalla", TENUE,
+                   center=(barra_rect.centerx, barra_rect.top - 20))
+            if brillo.ok:
+                pygame.draw.rect(screen, (42, 42, 48), barra_rect, border_radius=8)
+                relleno = barra_rect.copy()
+                relleno.width = max(4, int(barra_rect.width * pct_actual / 100))
+                pygame.draw.rect(screen, AZUL, relleno, border_radius=8)
+                pygame.draw.rect(screen, (255, 255, 255), barra_rect, width=2, border_radius=8)
+                _texto(pygame, screen, f_chico, f"{pct_actual}%", TEXTO,
+                       center=(barra_rect.centerx, barra_rect.bottom + 20))
+            else:
+                _texto(pygame, screen, f_chico, "Brillo no disponible via WMI en este equipo",
+                       TENUE, center=(barra_rect.centerx, barra_rect.centery))
 
-        pygame.draw.rect(screen, GRIS_BOTON, boton_salir, border_radius=10)
-        _texto(pygame, screen, f_boton, "Salir", (255, 255, 255), center=boton_salir.center)
-        _texto(pygame, screen, f_chico, "\"Salir\" te devuelve al selector de modo.",
-               TENUE, center=(w // 2, h - 90))
+            pygame.draw.rect(screen, GRIS_BOTON, boton_salir, border_radius=10)
+            _texto(pygame, screen, f_boton, "Salir", (255, 255, 255), center=boton_salir.center)
+            _texto(pygame, screen, f_chico, "\"Salir\" te devuelve al selector de modo.",
+                   TENUE, center=(w // 2, h - 90))
 
-        _texto(pygame, screen, f_pulsado, texto_pulsado, TEXTO, center=(w // 2, h - 40))
+            _texto(pygame, screen, f_pulsado, texto_pulsado, TEXTO, center=(w // 2, h - 40))
 
-        pygame.display.flip()
+            pygame.display.flip()
+            m_t_dibujar += time.perf_counter() - _td
 
-        # EL INPUT NO SE ATA AL DIBUJO (2026-09-11, medido en la Ally real).
-        # Antes la vuelta entera - eventos, lectura del mando, envio UDP y
-        # redibujado completo a pantalla completa - terminaba con
-        # reloj.tick(60), asi que el envio iba a la velocidad del DIBUJO. Y el
-        # dibujo a pantalla completa en la Ally cuesta: capturando el UDP real
-        # salian ~20 paquetes por segundo en vez de los 120 pedidos. A ese
-        # ritmo el PS3 recibe el estado muy grueso y las pulsaciones cortas se
-        # pierden enteras entre muestra y muestra - se siente como que "se
-        # traba y se queda pegado".
-        #
-        # Ahora se dibuja a ~30 cuadros por segundo y, ENTRE cuadro y cuadro,
-        # se sigue leyendo el mando y mandando al ritmo pedido.
-        proximo_cuadro = time.time() + (1.0 / 30.0)
-        while time.time() < proximo_cuadro:
-            entre = time.time()
-            if sock is not None and joystick is not None and entre >= proximo_envio:
-                try:
-                    sock.sendto(json.dumps(gp.build_state(joystick)).encode("utf-8"),
-                                (ESP32_IP, ESP32_PORT))
-                except OSError:
-                    pass
-                except Exception:
-                    break
-                proximo_envio = entre + interval
-            time.sleep(0.001)
+        m_vueltas += 1
+        if ahora - m_desde >= 5.0:
+            _span = ahora - m_desde
+            log.info("[ritmo] %.0f vueltas/s  %.0f envios/s  leer_mando=%.1fms/vuelta  dibujar=%.0fms total",
+                     m_vueltas / _span, m_envios / _span,
+                     (m_t_leer / max(1, m_vueltas)) * 1000.0, m_t_dibujar * 1000.0)
+            m_vueltas = m_envios = 0
+            m_t_leer = m_t_dibujar = 0.0
+            m_desde = ahora
+
+        # Con el dibujo salteado, la vuelta es barata y el envio de arriba
+        # corre a su ritmo real. El respiro es para no quemar CPU (y bateria)
+        # girando en vacio.
+        time.sleep(0.001)
 
     if sock is not None:
         sock.close()
@@ -1337,6 +1352,30 @@ def verificar_servidor_listo():
 # main
 # ---------------------------------------------------------------------------
 
+def _timer_fino(activar: bool):
+    """Sube (o baja) la resolucion del temporizador de Windows a 1 ms.
+
+    POR QUE (2026-09-11, medido): por default Windows programa los timers
+    cada ~15.6 ms, asi que un time.sleep(0.001) duerme de verdad ~15 ms y
+    ningun bucle de envio puede pasar de ~64 vueltas por segundo. Medido
+    contra el ESP32: en modo control llegaban 50-63 paquetes/s en vez de los
+    120 pedidos, y ademas irregulares - se siente trabado. En streaming
+    llegaban ~110/s SOLO porque ffplay ya estaba corriendo y el (via SDL)
+    sube esa resolucion para todo el sistema; apenas se cierra, vuelve a
+    caer. Pidiendola nosotros, el ritmo de input deja de depender de que otro
+    programa la haya subido.
+
+    Se libera al salir: es un ajuste global del sistema y dejarlo puesto
+    gasta bateria de mas en un portatil."""
+    try:
+        if activar:
+            ctypes.windll.winmm.timeBeginPeriod(1)
+        else:
+            ctypes.windll.winmm.timeEndPeriod(1)
+    except Exception as e:
+        log.debug("No se pudo ajustar la resolucion del temporizador: %s", e)
+
+
 def main():
     ya, _mutex = ya_hay_instancia()
     if ya:
@@ -1344,6 +1383,7 @@ def main():
         return
 
     log.info("=== PS3 Remote Play (Ally) iniciando ===")
+    _timer_fino(True)
 
     while True:
         modo = MODO_FIJO
@@ -1417,6 +1457,7 @@ def main():
 
     import pygame
     cerrar_ventana(pygame)
+    _timer_fino(False)
     log.info("=== Cerrando ===")
 
 

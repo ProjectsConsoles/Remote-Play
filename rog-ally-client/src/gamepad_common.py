@@ -53,6 +53,10 @@ AXIS_NAMES = {
 # recorrido. Igual que TRIGGER_CLICK_THRESHOLD / UMBRAL_GATILLO en la Deck.
 TRIGGER_CLICK_THRESHOLD = -0.5
 
+# Cuanto recorrido del stick se ignora alrededor del centro. Se puede ajustar
+# con PS3RP_ZONA_MUERTA si algun mando necesita mas o menos.
+ZONA_MUERTA_STICK = float(os.environ.get("PS3RP_ZONA_MUERTA", "0.12"))
+
 # ---------------------------------------------------------------------------
 # Boton PS por acorde de botones (copiado tal cual de input_client_v3.py)
 # ---------------------------------------------------------------------------
@@ -216,7 +220,19 @@ def _estado_por_gamecontroller(pygame, ctrl, joystick=None):
     gatillos en 0..32767; se normalizan a -1..1 (con el gatillo en reposo en
     -1.0) para que el resto del proyecto no note la diferencia."""
     def eje(const):
-        return round(ctrl.get_axis(const) / 32767.0, 4)
+        # ZONA MUERTA (2026-09-11): los sticks de la Ally no descansan
+        # exactamente en cero, y el firmware manda al PS3 lo que reciba - con
+        # el XMB eso se ve como que "el cursor se mueve solo", y de paso hace
+        # que las pulsaciones caigan donde no era (se siente como retraso y
+        # como pulsaciones perdidas). Se ignora todo lo que no pase del 12%
+        # del recorrido, y el resto se reescala para no perder alcance: al
+        # 100% fisico sigue llegando 1.0.
+        v = ctrl.get_axis(const) / 32767.0
+        if abs(v) < ZONA_MUERTA_STICK:
+            return 0.0
+        signo = 1.0 if v > 0 else -1.0
+        v = (abs(v) - ZONA_MUERTA_STICK) / (1.0 - ZONA_MUERTA_STICK)
+        return round(signo * min(1.0, v), 4)
 
     def gatillo(const):
         return round((ctrl.get_axis(const) / 32767.0) * 2.0 - 1.0, 4)
