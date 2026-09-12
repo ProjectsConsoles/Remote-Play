@@ -7,6 +7,8 @@ desde un handheld portátil, capturando la salida de video real de la
 consola por HDMI y reinyectando el control como si fuera un mando físico
 por USB. No es un emulador: la consola sigue siendo la real.
 
+[![Apóyalo en Patreon](https://img.shields.io/badge/Patreon-Apoyar-f96854?logo=patreon&logoColor=white)](https://www.patreon.com/ErickRamosCruz)
+
 ## Cómo funciona
 
 1. **PC con Windows** (`windows-server/`) — capturadora HDMI + `ffmpeg`
