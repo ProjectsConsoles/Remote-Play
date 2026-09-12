@@ -331,7 +331,15 @@ $mostrarVentana = {
     $form.WindowState = "Normal"
     $form.Activate()
 }
-$trayIcon.Add_Click($mostrarVentana)
+# MouseClick con boton izquierdo (no Click a secas): Click de NotifyIcon
+# dispara con CUALQUIER boton, asi que el clic derecho para abrir el menu
+# tambien abriria la ventana de encima. Solo abre la UI - nunca toca
+# Iniciar-Servidor ni reinicia nada.
+$trayIcon.Add_MouseClick({
+    param($s, $e)
+    if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { & $mostrarVentana }
+})
+$trayIcon.Add_DoubleClick($mostrarVentana)
 
 $script:SalirDeVerdad = $false
 
