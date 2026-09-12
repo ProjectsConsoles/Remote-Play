@@ -189,7 +189,7 @@ def modo_mapeo() -> str:
     return "gamecontroller" if _controlador() is not None else "crudo"
 
 
-def _estado_por_gamecontroller(pygame, ctrl):
+def _estado_por_gamecontroller(pygame, ctrl, joystick=None):
     """buttons/axes/dpad con los nombres del contrato del firmware, leidos con
     el mapeo normalizado de SDL. Los ejes de SDL vienen en -32768..32767 y los
     gatillos en 0..32767; se normalizan a -1..1 (con el gatillo en reposo en
@@ -229,6 +229,22 @@ def _estado_por_gamecontroller(pygame, ctrl):
           - ctrl.get_button(pygame.CONTROLLER_BUTTON_DPAD_LEFT))
     dy = (ctrl.get_button(pygame.CONTROLLER_BUTTON_DPAD_UP)
           - ctrl.get_button(pygame.CONTROLLER_BUTTON_DPAD_DOWN))
+
+    # RESPALDO POR EL HAT (2026-09-11): en la Ally, SDL reconoce el mando como
+    # GameController y mapea bien todo lo demas (A/B/X/Y, L1/R1, gatillos,
+    # SELECT/START/GUIDE - medido capturando el JSON real que sale), pero los
+    # botones DPAD_* le devuelven cero SIEMPRE: la cruceta salia en (0,0)
+    # pasara lo que pasara. El joystick crudo si expone la cruceta como hat
+    # (hats=1 en el log), asi que cuando el GameController no da nada, se lee
+    # de ahi. No se invierte el orden a proposito: si algun dia el mapeo de
+    # SDL tambien funciona, ese tiene prioridad.
+    if dx == 0 and dy == 0 and joystick is not None:
+        try:
+            if joystick.get_numhats() > 0:
+                dx, dy = joystick.get_hat(0)
+        except Exception:
+            pass
+
     return buttons, axes, (dx, dy)
 
 
@@ -242,7 +258,7 @@ def build_state(joystick) -> dict:
 
     ctrl = _controlador()
     if ctrl is not None:
-        buttons, axes, dpad_hat = _estado_por_gamecontroller(pygame, ctrl)
+        buttons, axes, dpad_hat = _estado_por_gamecontroller(pygame, ctrl, joystick)
         buttons["L2_CLICK"] = int(_gatillo_pulsado("L2_ANALOG", axes))
         buttons["R2_CLICK"] = int(_gatillo_pulsado("R2_ANALOG", axes))
         apply_ps_chord(buttons)

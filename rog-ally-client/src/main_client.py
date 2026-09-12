@@ -131,16 +131,25 @@ CAMPOS_CLIENTE = [
 
 
 def cargar_config_guardada():
+    # utf-8-sig y no utf-8 (2026-09-11, error real): cualquier editor de
+    # Windows que guarde este archivo - el Bloc de notas, o un
+    # Set-Content -Encoding UTF8 de PowerShell - le mete un BOM al principio.
+    # json.load() con encoding="utf-8" revienta con ese BOM, el except de
+    # abajo se lo tragaba en silencio y la app se quedaba usando TODOS los
+    # valores por default sin avisar: paso de verdad, y costo un buen rato
+    # porque los sintomas no apuntaban al archivo (la IP del ESP32 volvia
+    # sola a la de fabrica). utf-8-sig lee bien con BOM y sin BOM.
     if not os.path.isfile(ARCHIVO_CONFIG_CLIENTE):
         return
     try:
-        with open(ARCHIVO_CONFIG_CLIENTE, "r", encoding="utf-8") as f:
+        with open(ARCHIVO_CONFIG_CLIENTE, "r", encoding="utf-8-sig") as f:
             datos = json.load(f)
         for k, v in datos.items():
             if v not in (None, ""):
                 os.environ.setdefault(k, str(v))
-    except Exception:
-        pass
+    except Exception as e:
+        log.error("No se pudo leer %s (%s): se usan los valores por default.",
+                  ARCHIVO_CONFIG_CLIENTE, e)
 
 
 def guardar_config_cliente(valores: dict):
@@ -741,7 +750,7 @@ def mostrar_config_cliente():
     guardado = {}
     if os.path.isfile(ARCHIVO_CONFIG_CLIENTE):
         try:
-            with open(ARCHIVO_CONFIG_CLIENTE, "r", encoding="utf-8") as f:
+            with open(ARCHIVO_CONFIG_CLIENTE, "r", encoding="utf-8-sig") as f:
                 guardado = json.load(f)
         except Exception:
             guardado = {}
