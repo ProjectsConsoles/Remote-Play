@@ -674,29 +674,30 @@ unsigned long reportsFailed = 0;
 // falla para siempre. Hasta ahora la unica salida era desenchufar y volver a
 // enchufar el cable a mano.
 //
-// QUE HACE ESTO. Si ready lleva USB_ATASCADO_MS en cero (y alguna vez estuvo en
-// uno, para no pelearse con la enumeracion inicial), se intenta la recuperacion
-// en dos escalones:
-//   1) tud_disconnect() + tud_connect(): suelta y vuelve a poner el pull-up de
-//      D+, que es exactamente lo que ve el PS3 cuando se desenchufa y se vuelve
-//      a enchufar el cable - pero sin tocar nada. El PS3 re-enumera y listo.
-//   2) Si despues de dos intentos sigue sin volver, ESP.restart(). Es el
-//      remedio que ya se sabia que funciona (ver la bitacora), cuesta ~4s de
-//      WiFi y arranca todo de cero.
-// Entre intento e intento hay que esperar: re-enumerar no es instantaneo y
-// reintentar encima solo lo empeora.
-// PROBADO Y DESCARTADO (2026-09-11): se subio este umbral a 20000/15000
-// sospechando que el propio vigilante se autodesconectaba de mas en el menu
-// de OPL (que sondea mas lento que un juego). Probado contra hardware real:
-// el sintoma ("funciona unos segundos y ya no, no se recupera solo") salio
-// IDENTICO con el umbral subido. Eso descarta al vigilante como la causa -
-// se vuelve al valor original, calibrado contra el bug real de la PS3 (ver
-// la nota larga de arriba). La causa de lo de OPL sigue sin identificar.
+// QUE HACE ESTO. Si ready lleva USB_ATASCADO_MS en cero (y alguna vez estuvo
+// en uno, para no pelearse con la enumeracion inicial), se reinicia la placa
+// entera con ESP.restart() - cuesta ~4s de WiFi y arranca todo de cero.
+//
+// ANTES (hasta 2026-09-11) se probaba primero una reconexion suave
+// (tud_disconnect()+tud_connect(), soltando y volviendo a poner el pull-up
+// de D+ sin reiniciar nada) y solo se llegaba al restart tras dos intentos
+// fallidos - pensado para el caso del PS3 original, donde eso alcanzaba
+// igual que desenchufar el cable. Confirmado contra hardware real en el
+// caso de PS2/OPL (mismo dia, con el usuario conectando y flasheando en
+// vivo): la reconexion suave NUNCA sacaba al firmware del atasco - hacia
+// falta el restart completo si o si. Eso sugiere que el atasco no es solo
+// la senalizacion USB (pull-up), sino algo mas profundo del stack TinyUSB
+// que un reconnect no limpia. Se salta directo al restart: recupera mas
+// rapido (sin gastar los intentos suaves ni la espera entre ellos) y cubre
+// los dos casos.
+// PROBADO Y DESCARTADO (2026-09-11, con el umbral viejo de 3000/6000 y dos
+// intentos suaves): subir este umbral a 20000/15000 no cambio el sintoma de
+// OPL ("funciona unos segundos y ya no, no se recupera solo") - por eso se
+// descarto el umbral como causa. La causa de fondo de por que se atasca
+// tud_hid_ready() en el menu de OPL sigue sin identificarse; lo que cambio
+// aca es COMO se recupera una vez atascado, no por que se atasca.
 const unsigned long USB_ATASCADO_MS = 3000;
-const unsigned long USB_ESPERA_MS = 6000;
 unsigned long ultimoReady = 0;
-unsigned long ultimoReenganche = 0;
-unsigned long reenganches = 0;
 bool huboReadyAlgunaVez = false;
 
 // Un DS3 real manda su Input report cada ~8ms. Ese sigue siendo el ritmo de
@@ -796,32 +797,19 @@ void loop() {
     ultimoReady = now;
     huboReadyAlgunaVez = true;
   } else if (huboReadyAlgunaVez && ultimoReady != 0
-             && (now - ultimoReady) > USB_ATASCADO_MS
-             && (now - ultimoReenganche) > USB_ESPERA_MS) {
-    ultimoReenganche = now;
-    reenganches++;
-    if (reenganches <= 2) {
-      debugLog("[usb] ready=0 hace %lu ms: reenganchando USB (intento %lu)\n",
-               now - ultimoReady, reenganches);
-      tud_disconnect();
-      delay(120);
-      tud_connect();
-      // Darle tiempo a re-enumerar antes de volver a sospechar.
-      ultimoReady = now;
-    } else {
-      debugLog("[usb] el reenganche no alcanzo, reiniciando la placa\n");
-      delay(50);
-      ESP.restart();
-    }
+             && (now - ultimoReady) > USB_ATASCADO_MS) {
+    debugLog("[usb] ready=0 hace %lu ms: reiniciando la placa\n", now - ultimoReady);
+    delay(50);
+    ESP.restart();
   }
 
   if (now - lastHeartbeat >= 5000) {
     lastHeartbeat = now;
     uint8_t probe[48];
     buildInputReport(probe);
-    debugLog("[hb] udp=%lu viejos=%lu jsonOk=%lu jsonErr=%lu enviados=%lu fallidos=%lu out=%lu reeng=%lu ready=%d rep=[%02X %02X %02X] cross=%d\n",
+    debugLog("[hb] udp=%lu viejos=%lu jsonOk=%lu jsonErr=%lu enviados=%lu fallidos=%lu out=%lu ready=%d rep=[%02X %02X %02X] cross=%d\n",
              packetsReceived, packetsStale, parseOk, parseErr, reportsSent, reportsFailed,
-             outputReports, reenganches,
+             outputReports,
              (int)tud_hid_ready(), probe[1], probe[2], probe[3], (int)state.cross);
   }
 }
