@@ -52,6 +52,28 @@ lanzar el .exe (ej. un acceso directo de Windows con
 A diferencia de la Deck, **el brillo se pasa directo en 0-100** (WMI ya
 trabaja en porcentaje), no en unidades crudas del backlight.
 
+## Configurar servidor y cliente desde el menu (2026-09-11)
+
+El menu tiene ahora 4 tarjetas (2x2), no 2: ademas de Streaming/Solo control,
+estan **Configurar servidor** y **Configurar cliente** - porteo 1:1 de las
+mismas pantallas de la Deck, mismo protocolo UDP (puerto 9200) contra
+`config_listener.ps1` del lado del servidor, asi que no hace falta nada nuevo
+ahi para que funcione tambien desde la Ally.
+
+- **Configurar servidor**: elige el modo de captura de la PC (720p/1080p
+  MJPEG, o los crudos sin comprimir) y confirma la IP de esta Ally, todo por
+  red. Boton para mandar solo la IP sin tocar el modo, por si cambia.
+- **Configurar cliente**: las variables de la tabla de arriba (menos
+  `PS3RP_FFPLAY` y `PS3RP_DEBUG`, que se dejan como variables de entorno
+  nada mas), guardadas en `ally_config.json` junto al .exe. Se cargan con el
+  mismo patron "solo si no esta puesta" que la Deck: una variable de entorno
+  puesta a mano (acceso directo/`.bat`) sigue ganando sobre lo guardado aca.
+
+Navegable por completo con el mando: cruceta mueve el foco, izquierda/derecha
+cambia el valor, A confirma/edita (Enter en teclado), X restaura los
+defaults, Y guarda, B vuelve al menu. **Sin probar contra hardware real**
+(mismo estado que el resto de este cliente - ver "Lo que falta verificar").
+
 ## Diferencias de arquitectura contra la Deck (y por que)
 
 - **Un solo proceso, no varios.** La Deck orquesta con bash cuatro piezas
