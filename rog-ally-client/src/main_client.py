@@ -1215,10 +1215,29 @@ def ejecutar_modo_streaming():
         # lado del video real, que es lo que se reporto viendo. La ventana de
         # video de ffplay la abre SDL por su cuenta, no depende de la
         # consola, asi que ocultarla no le quita nada.
+        # ENTORNO LIMPIO DE SDL (2026-09-11, LA causa de "le doy streaming y
+        # no abre nada"). ffplay dibuja con SDL2, igual que pygame. Y este
+        # mismo proceso, para leer el mando sin abrir ventana propia, hace
+        # os.environ.setdefault("SDL_VIDEODRIVER", "dummy") dentro del hilo
+        # de InputSender... que arranca JUSTO ANTES de este Popen. Como el
+        # hijo hereda el entorno del padre, ffplay se encontraba con el
+        # driver de video "dummy" y hacia exactamente lo que se le pidio:
+        # decodificar todo perfecto y no dibujar NADA. Por eso el proceso
+        # quedaba vivo, sano, consumiendo el stream (medido: recibia sus
+        # 3400 paquetes/6s sin problema) pero sin ventana ni titulo.
+        #
+        # Las pantallas de pygame de este archivo ya borraban la variable
+        # antes de crear su ventana; el streaming era el unico camino que no
+        # lo hacia. Aca no alcanza con borrarla del os.environ propio (el
+        # hilo la puede volver a poner en cualquier momento): se le pasa a
+        # ffplay una copia del entorno SIN las variables de SDL.
+        entorno = {k: v for k, v in os.environ.items()
+                    if k not in ("SDL_VIDEODRIVER", "SDL_AUDIODRIVER")}
         proc = subprocess.Popen(args,
                                 stdin=subprocess.DEVNULL,
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL,
+                                env=entorno,
                                 creationflags=subprocess.CREATE_NO_WINDOW)
         proc.wait()
         if proc.returncode != 0:
