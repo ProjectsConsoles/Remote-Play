@@ -123,6 +123,10 @@ CAMPOS_CLIENTE = [
     ("PS3RP_INPUT", "Mandar control (no solo video)", "bool", "1", None),
     ("PS3RP_INPUT_RATE", "Frecuencia de envio (Hz)", "numero", "120", None),
     ("PS3RP_PS_COMBO", "Acorde para el boton PS", "texto", "SELECT+R1", None),
+    # Enum y no numero porque en la Ally no hay teclado para escribir decimales:
+    # asi se ajusta con izquierda/derecha del mando.
+    ("PS3RP_ZONA_MUERTA", "Zona muerta de los sticks", "enum", "0.06",
+     ["0.00", "0.03", "0.06", "0.09", "0.12", "0.18"]),
     ("PS3RP_STREAM_PORT", "Puerto UDP del video", "numero", "5000", None),
     ("PS3RP_FULLSCREEN", "Video en pantalla completa", "bool", "1", None),
     ("PS3RP_BRILLO", "Brillo en modo control (0-100, vacio = no tocar)", "numero", "", None),

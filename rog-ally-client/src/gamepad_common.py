@@ -55,7 +55,7 @@ TRIGGER_CLICK_THRESHOLD = -0.5
 
 # Cuanto recorrido del stick se ignora alrededor del centro. Se puede ajustar
 # con PS3RP_ZONA_MUERTA si algun mando necesita mas o menos.
-ZONA_MUERTA_STICK = float(os.environ.get("PS3RP_ZONA_MUERTA", "0.12"))
+ZONA_MUERTA_STICK = float(os.environ.get("PS3RP_ZONA_MUERTA", "0.06"))
 
 # ---------------------------------------------------------------------------
 # Boton PS por acorde de botones (copiado tal cual de input_client_v3.py)
