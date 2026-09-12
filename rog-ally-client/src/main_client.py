@@ -520,10 +520,13 @@ def mostrar_menu():
         for i, (titulo, detalle, color, _modo) in enumerate(opciones):
             r = rects[i]
             r_titulo = pygame.Rect(r.left, r.top, r.width, alto_titulo)
+            # Las 4 esquinas redondeadas (2026-09-11): antes se tapaban las de
+            # abajo con un rect cuadrado aparte, pensando que se verian
+            # "flotando" sobre el fondo oscuro - al reves, se veia raro:
+            # esquinas de abajo cuadradas debajo del marco de foco, que SI es
+            # redondo en las 4. Un solo rect redondeado sin parches queda
+            # consistente con el marco.
             pygame.draw.rect(screen, color, r_titulo, border_radius=14)
-            # Tapa las esquinas redondeadas de abajo del rect del titulo para
-            # que no queden "flotando" sobre el fondo oscuro.
-            pygame.draw.rect(screen, color, r_titulo.inflate(0, -20).move(0, 10))
             if i == foco:
                 # Solo el rect del titulo, no la tarjeta entera (2026-09-11):
                 # "en la Deck solo se marca el cuadrito de color, en la Ally
@@ -1255,10 +1258,12 @@ def verificar_servidor_listo():
     desde aca (no hay IP de servidor guardada), no se puede chequear nada:
     devuelve (True, "") y sigue como siempre, sin bloquear a nadie."""
     ip_servidor = server_udp.leer_ip_servidor_guardada()
+    log.info("verificar_servidor_listo: ip_servidor guardada = %r", ip_servidor)
     if not ip_servidor:
         return True, ""
     ip_local = server_udp.obtener_ip_local()
     ok, resp = server_udp.obtener_config(ip_servidor)
+    log.info("verificar_servidor_listo: ip_local=%r ok=%r resp=%r", ip_local, ok, resp)
     if not ok:
         return False, f"No se pudo consultar el servidor ({ip_servidor}):\n{resp}"
     if not resp.get("corriendo"):
@@ -1316,7 +1321,15 @@ def main():
             continue
 
         if modo == "streaming" and not MODO_FIJO:
-            ok, mensaje = verificar_servidor_listo()
+            try:
+                ok, mensaje = verificar_servidor_listo()
+            except Exception as e:
+                # Que un error de red al chequear no tire abajo TODO el
+                # programa (2026-09-11): mejor seguir a streaming como antes
+                # que cerrarse sin avisar nada - "se cerro y me mostro el
+                # escritorio" es peor que simplemente no chequear esta vez.
+                log.error("verificar_servidor_listo fallo, sigo sin chequear: %s", e)
+                ok, mensaje = True, ""
             if not ok:
                 log.warning("Servidor no listo para streaming: %s", mensaje)
                 try:
