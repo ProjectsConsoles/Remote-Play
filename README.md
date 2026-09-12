@@ -149,3 +149,9 @@ Archivo a subir: `deck-client/esp32_firmware/ds3_controller/ds3_controller.ino`.
 2. Conectar por el **puerto USB nativo** (no el de programación/COM).
 3. Mantener **BOOT**, tocar **RESET**, soltar **RESET**, soltar **BOOT**, y
    ahí sí darle a Subir.
+
+## Créditos
+
+El firmware del ESP32-S3 se basa en el enfoque de
+[droidshock3](https://github.com/GuillaumeMCK/droidshock3) (GuillaumeMCK)
+para emular un DualShock 3 a bajo nivel por USB.
