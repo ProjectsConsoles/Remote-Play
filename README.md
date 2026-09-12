@@ -3,9 +3,10 @@
 # Remote Play — cualquier consola, desde un handheld
 
 Streaming de video/audio + control remoto real para jugar consolas antiguas
-desde un handheld portátil (Steam Deck hoy, ROG Ally X en desarrollo),
-capturando la salida de video verdadera de la consola por HDMI y reinyectando
-el control como si fuera un mando físico conectado por USB.
+desde un handheld portátil (Steam Deck y ROG Ally X, ambos probados contra
+hardware real), capturando la salida de video verdadera de la consola por
+HDMI y reinyectando el control como si fuera un mando físico conectado por
+USB.
 
 No es un emulador. La consola sigue siendo la consola real: lo único que se
 reemplaza es la pantalla (por una capturadora HDMI + streaming) y el mando
@@ -26,8 +27,9 @@ Tres piezas que se comunican por red local:
    que la consola note diferencia con un mando físico real.
 3. **Cliente handheld** — lee el control físico del dispositivo, lo manda
    por UDP al ESP32 a alta frecuencia (120 Hz por defecto), y reproduce el
-   stream de video/audio que llega del servidor. Hoy: Steam Deck
-   (`deck-client/`). En desarrollo: ROG Ally X (`rog-ally-client/`).
+   stream de video/audio que llega del servidor. Steam Deck
+   (`deck-client/`) y ROG Ally X (`rog-ally-client/`), ambos probados
+   contra hardware real.
 
 ```
  Consola  --HDMI-->  Capturadora USB  --ffmpeg-->  PC Windows  --UDP/red-->  Handheld
@@ -48,7 +50,10 @@ Tres piezas que se comunican por red local:
   (`.exe`) para no depender de abrir PowerShell a mano.
 - **`rog-ally-client/`** — puerto del cliente a Windows para la ROG Ally X
   (Python + pygame, compilado como `.exe` único con PyInstaller).
-  **En desarrollo — todavía sin verificar contra hardware real.**
+  **Probado de punta a punta contra hardware real** (video, audio y
+  control en modo streaming, más el modo control). Ver
+  `rog-ally-client/README_ALLY.md` para el detalle de cada bug encontrado
+  y corregido durante la prueba.
 
 ## Estado actual
 
@@ -56,8 +61,9 @@ Tres piezas que se comunican por red local:
 |---|---|
 | Cliente Steam Deck | ✅ Funcional. Streaming + control probados de punta a punta, con meses de ajuste de latencia. |
 | Servidor Windows | ✅ Funcional. Interfaz gráfica + lanzador nativo para arrancar/detener sin terminal. |
-| Cliente ROG Ally X (Windows) | 🚧 En desarrollo. Compilado (mando XInput, brillo por WMI, menú, modo control, configurar servidor/cliente) pero pendiente de probar contra hardware real: mapeo de botones, brillo, latencia. |
+| Cliente ROG Ally X (Windows) | ✅ Funcional. Probado de punta a punta contra hardware real: streaming (video/audio/control) y modo control. |
 | PS2 (Open PS2 Loader / PADEMU) | ✅ Funcional en el juego (jugable en tiempo real, confirmado a 60 fps con Lossless Scaling). Pendiente: el menú de OPL a veces pierde el control por USB unos segundos (se recupera solo). |
+| Xbox 360 (RGH/JTAG + Aurora) | ✅ Funcional vía hiddriver360 (ver sección abajo). |
 
 ## Configurar servidor y cliente desde el menú de la Deck
 
