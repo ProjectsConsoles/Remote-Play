@@ -291,15 +291,13 @@ def _texto(pygame, screen, fuente, txt, color, center=None, topleft=None):
     return rect
 
 
-def _botones_nuevos(gp, joystick, prev):
-    """Botones/cruceta/stick que pasaron de sueltos a pulsados desde la
-    ultima vez. Factorizado (2026-09-11) de la logica que ya traia
-    mostrar_menu() para que las pantallas nuevas de configuracion no la
-    reescriban cada una - mismo patron que deck_gamepad.Mando.nuevos() de la
-    Deck, adaptado a pygame directo (aca no hay un lector de mando con
-    estado propio, gamepad_common.py solo define el mapeo)."""
+def _botones_pulsados(gp, joystick):
+    """Nombres de todos los botones/cruceta/stick pulsados AHORA MISMO (sin
+    comparar contra nada). Separado de _botones_nuevos() (2026-09-11) para
+    poder arrancar cada pantalla nueva con el estado REAL del mando como
+    linea de base - ver la nota larga en _botones_nuevos() sobre por que."""
     if joystick is None:
-        return set(), prev
+        return set()
     try:
         botones = set()
         for idx, nombre in gp.BUTTON_NAMES.items():
@@ -325,8 +323,32 @@ def _botones_nuevos(gp, joystick, prev):
                 botones.add("DPAD_UP")
             elif ay > 0.5:
                 botones.add("DPAD_DOWN")
+        return botones
     except Exception:
+        return set()
+
+
+def _botones_nuevos(gp, joystick, prev):
+    """Botones/cruceta/stick que pasaron de sueltos a pulsados desde la
+    ultima vez. Factorizado (2026-09-11) de la logica que ya traia
+    mostrar_menu() para que las pantallas nuevas de configuracion no la
+    reescriban cada una - mismo patron que deck_gamepad.Mando.nuevos() de la
+    Deck, adaptado a pygame directo (aca no hay un lector de mando con
+    estado propio, gamepad_common.py solo define el mapeo).
+
+    IMPORTANTE al arrancar una pantalla nueva: inicializar `prev` en `set()`
+    hace que CUALQUIER boton que siga fisicamente apretado en el primer
+    cuadro (tipico: el mismo B con el que se acaba de salir de la pantalla
+    anterior, el dedo no lo suelta tan rapido) se lea como "recien apretado"
+    y dispare esa accion de nuevo de inmediato - sintoma real reportado
+    2026-09-11: "si presiono B despues de configurar el server ya no me
+    regresa al menu, se cierra todo" (el menu se abria y el mismo B, todavia
+    apretado, lo cerraba en el primer cuadro). La correccion es usar
+    _botones_pulsados() como linea de base de `prev` al ENTRAR a cada
+    pantalla, no `set()` - ver donde se llama mas abajo."""
+    if joystick is None:
         return set(), prev
+    botones = _botones_pulsados(gp, joystick)
     return botones - prev, botones
 
 
@@ -433,7 +455,7 @@ def mostrar_menu():
                                   ancho_tarjeta, alto_tarjeta))
 
     joystick = _joystick_activo(pygame, None)
-    prev_botones = set()
+    prev_botones = _botones_pulsados(gp, joystick)
 
     corriendo = True
     while corriendo:
@@ -699,7 +721,7 @@ def mostrar_config_servidor():
                 estado["seleccionado"] = i
 
     joystick = _joystick_activo(pygame, None)
-    prev_botones = set()
+    prev_botones = _botones_pulsados(gp, joystick)
     reloj = pygame.time.Clock()
     consultar()
 
@@ -892,7 +914,7 @@ def mostrar_config_cliente():
         pygame.display.flip()
 
     joystick = _joystick_activo(pygame, None)
-    prev_botones = set()
+    prev_botones = _botones_pulsados(gp, joystick)
     reloj = pygame.time.Clock()
 
     corriendo = True
@@ -1127,12 +1149,26 @@ def ejecutar_modo_control():
 # ---------------------------------------------------------------------------
 
 def ejecutar_modo_streaming():
+    """Devuelve (True, "") si parece haber recibido stream de verdad, o
+    (False, mensaje) si fallo (ffplay no encontrado, o se cerro solo sin
+    recibir nada) - para que main() decida si volver al menu o cerrar todo.
+    Antes esto no devolvia nada y el programa se cerraba entero pasara lo
+    que pasara con ffplay: si el servidor no tenia la IP de esta Ally
+    puesta, ffplay se quedaba COLGADO para siempre esperando el primer
+    paquete UDP (sin timeout, avformat_open_input bloquea ahi mismo, antes
+    de crear ninguna ventana) - "ni la pantalla de ffplay me salio", y la
+    unica salida era matar el proceso a mano. Ahora la URL UDP lleva un
+    timeout (ver mas abajo) para que ffplay se rinda solo en vez de colgarse
+    para siempre."""
     ffplay = find_ffplay()
     if not ffplay:
         log.error("No se encontro ffplay.exe (ver PS3RP_FFPLAY, o ponerlo junto al .exe).")
-        return
+        return False, "No se encontro ffplay.exe junto al programa."
 
-    url = f"udp://0.0.0.0:{STREAM_PORT}?fifo_size=1500&overrun_nonfatal=1"
+    # timeout=8000000 (2026-09-11): microsegundos que el protocolo udp de
+    # ffmpeg espera el primer paquete antes de rendirse con ETIMEDOUT, en vez
+    # de bloquear para siempre si el servidor le manda el video a otra IP.
+    url = f"udp://0.0.0.0:{STREAM_PORT}?fifo_size=1500&overrun_nonfatal=1&timeout=8000000"
     args = [
         ffplay,
         "-fflags", "nobuffer",
@@ -1177,8 +1213,16 @@ def ejecutar_modo_streaming():
                                 stderr=subprocess.DEVNULL,
                                 creationflags=subprocess.CREATE_NO_WINDOW)
         proc.wait()
+        if proc.returncode != 0:
+            log.warning("ffplay termino con codigo %s (probable timeout: no llego video de la PC)",
+                        proc.returncode)
+            return False, ("No llego video del servidor en 8 segundos.\n\n"
+                            "Revisa que el servidor este transmitiendo y que tenga puesta "
+                            "la IP de esta Ally (usa \"Configurar servidor\" para mandarsela).")
+        return True, ""
     except Exception as e:
         log.error("No se pudo lanzar ffplay: %s", e)
+        return False, f"No se pudo lanzar ffplay: {e}"
     finally:
         if sender is not None:
             sender.detener()
@@ -1233,8 +1277,20 @@ def main():
         # el streaming.
         import pygame
         cerrar_ventana(pygame)
-        ejecutar_modo_streaming()
-        break
+        ok, mensaje = ejecutar_modo_streaming()
+        if ok or MODO_FIJO:
+            # Si vino de PS3RP_MODO=streaming (sin menu), respeta esa
+            # intencion y cierra igual aunque haya fallado - no hay a que
+            # menu volver.
+            break
+        # "deberia decirme que no se pudo conectar y mandarme al inicio, no
+        # solo cerrarse y no hacer nada" (reportado 2026-09-11): antes esto
+        # siempre hacia break sin importar el resultado.
+        try:
+            ctypes.windll.user32.MessageBoxW(0, mensaje, "PS3 Remote Play", 0x30)
+        except Exception:
+            pass
+        continue
 
     import pygame
     cerrar_ventana(pygame)
