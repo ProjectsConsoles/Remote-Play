@@ -370,5 +370,13 @@ $form.Add_Shown({
     $form.Hide()
 })
 
-[void]$form.ShowDialog()
+
+# Application.Run y NO ShowDialog() (2026-09-12, causa real de "se cierra
+# todo al ocultarla"): ShowDialog() liga su bucle modal a la visibilidad de
+# la ventana - en cuanto se llama $form.Hide(), Windows Forms lo trata como
+# si el dialogo hubiera terminado y cierra el proceso entero (se llevaba el
+# icono de la bandeja con el). Application.Run mantiene vivo el programa
+# mientras la ventana este oculta; solo termina cuando el form se CIERRA de
+# verdad (el "Salir" del menu de la bandeja).
+[System.Windows.Forms.Application]::Run($form)
 $trayIcon.Dispose()
