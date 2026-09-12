@@ -56,7 +56,8 @@ Tres piezas que se comunican por red local:
 |---|---|
 | Cliente Steam Deck | ✅ Funcional. Streaming + control probados de punta a punta, con meses de ajuste de latencia. |
 | Servidor Windows | ✅ Funcional. Interfaz gráfica + lanzador nativo para arrancar/detener sin terminal. |
-| Cliente ROG Ally X (Windows) | 🚧 En desarrollo. Compilado (mando XInput, brillo por WMI, menú, modo control) pero pendiente de probar contra hardware real: mapeo de botones, brillo, latencia. |
+| Cliente ROG Ally X (Windows) | 🚧 En desarrollo. Compilado (mando XInput, brillo por WMI, menú, modo control, configurar servidor/cliente) pero pendiente de probar contra hardware real: mapeo de botones, brillo, latencia. |
+| PS2 (Open PS2 Loader / PADEMU) | ✅ Funcional en el juego (jugable en tiempo real, confirmado a 60 fps con Lossless Scaling). Pendiente: el menú de OPL a veces pierde el control por USB unos segundos (se recupera solo). |
 
 ## Configurar servidor y cliente desde el menú de la Deck
 
@@ -77,11 +78,57 @@ completa por el mando (cruceta + A/B, izquierda/derecha cambia cada valor):
   (documentadas en `deck-client/OPCIONES.md`), en una pantalla con scroll en
   vez de tener que ponerlas como opciones de lanzamiento de Steam cada vez.
 
-## Próxima consola objetivo: PS2
+## PS2 (via Open PS2 Loader / PADEMU)
 
 El diseño (capturadora HDMI/componente + microcontrolador emulando el mando
-original) es deliberadamente genérico por consola. El soporte de PS2 es el
-siguiente objetivo en la hoja de ruta.
+original) es deliberadamente genérico por consola: el **mismo ESP32-S3**
+que emula un DualShock 3 para el PS3 sirve también para PS2, sin cambiar
+nada de hardware — sólo hace falta que la consola tenga [Open PS2
+Loader](https://github.com/ps2homebrew/Open-PS2-Loader) (OPL) instalado.
+
+**Confirmado jugable en tiempo real (2026-09-11)**, incluso a 60 fps
+activando el toggle de Lossless Scaling / generación de cuadros
+(`PS3RP_LSFG` en "Configurar cliente" de la Deck, ver más arriba).
+
+### Por qué hace falta un ajuste específico de USB
+
+Un DualShock 3 real reporta su clase de dispositivo USB como `0xE0`
+("Wireless Controller"), no como HID genérico — es una rareza de diseño del
+propio chip de Sony (el mismo hace Bluetooth). El driver PADEMU de OPL
+revisa esa clase explícitamente, así que un mando emulado con la clase
+genérica de HID **no lo reconoce**, aunque funcione perfecto en un PC. El
+firmware de este proyecto (`deck-client/esp32_firmware/ds3_controller/ds3_controller.ino`)
+ya declara la clase correcta (`0xE0`/`0x01`/`0x01`, copiada del propio código
+fuente de OPL) — no hace falta tocar nada para esto, ya viene resuelto.
+
+### Requisitos y configuración
+
+1. **OPL 1.0.0 o más nuevo** — PADEMU (el driver que traduce DualShock 3/4 a
+   mando de PS2) se agregó en esa versión. Con una copia más vieja de OPL,
+   el ESP32-S3 no va a aparecer como mando en absoluto.
+2. Conectar el ESP32-S3 al puerto USB del PS2 (el más alejado del panel
+   frontal suele dar mejores resultados si hay más de uno disponible),
+   igual que con el PS3.
+3. Dentro de OPL, entrar a la configuración de PADEMU del juego (vive en los
+   ajustes **del juego**, no en la configuración global de OPL) y:
+   - Elegir modo **USB** (no Bluetooth) para el puerto que se vaya a usar.
+   - Activarlo y guardar la configuración antes de arrancar el juego.
+4. Cargar el juego — PADEMU toma el control desde ahí.
+
+Los nombres exactos de los menús pueden variar un poco entre builds de OPL;
+si algo no coincide, la [wiki del propio
+proyecto](https://github.com/ps2homebrew/Open-PS2-Loader/wiki) y su
+changelog son la referencia más al día.
+
+### Limitación conocida, sin resolver
+
+El **menú de OPL** (el navegador de juegos, antes de cargar uno) a veces deja
+de leer el control por USB después de unos segundos. **Dentro del juego,
+con PADEMU activo, no pasa** — es un problema puntual del menú del propio
+OPL, no del firmware ni de la consola. El ESP32-S3 tiene un vigilante que
+detecta cuando el USB se atasca y se reinicia solo para recuperarse (tarda
+unos segundos); mientras tanto, cargar el juego también lo destraba. La
+causa de fondo todavía no se identificó.
 
 ## Qué hace falta para correrlo (no incluido en este repo)
 
