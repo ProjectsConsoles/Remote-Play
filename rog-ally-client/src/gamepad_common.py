@@ -182,6 +182,27 @@ def _controlador():
     return _ctrl["obj"]
 
 
+def reiniciar_mapeo():
+    """Olvida el Controller cacheado (y la calibracion de gatillos) para que
+    se vuelva a abrir en el contexto de SDL actual.
+
+    Hace falta cada vez que el proceso rehace su subsistema de video/joystick
+    (2026-09-11): el modo streaming cierra la ventana del menu y reinicia SDL
+    con el driver dummy, y el Controller abierto ANTES de eso queda invalido -
+    medido contra el PS3 real, se quedaba devolviendo valores pegados (el
+    reporte DS3 salia con cruceta ABAJO y X pisadas para siempre, con el mando
+    en reposo sobre la mesa). En modo control no se notaba porque ahi el
+    dispositivo se abre en el mismo contexto en el que se usa."""
+    try:
+        if _ctrl["obj"] is not None:
+            _ctrl["obj"].quit()
+    except Exception:
+        pass
+    _ctrl["obj"] = None
+    _ctrl["intentado"] = False
+    _gatillo_reposo.clear()
+
+
 def modo_mapeo() -> str:
     """'gamecontroller' si SDL reconocio el mando y se usa su mapeo
     normalizado, 'crudo' si se cayo a los indices de las tablas de arriba.

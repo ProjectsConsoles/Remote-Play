@@ -1110,6 +1110,10 @@ def _bombear_input_hasta_que_muera(proc):
     pygame.init()
     pygame.display.init()
     pygame.joystick.init()
+    # SDL se acaba de rehacer (se cerro la ventana del menu y se reinicio con
+    # el driver dummy): el mando abierto en el contexto anterior quedo
+    # invalido y devolvia valores pegados - ver reiniciar_mapeo().
+    gp.reiniciar_mapeo()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     interval = 1.0 / INPUT_RATE
