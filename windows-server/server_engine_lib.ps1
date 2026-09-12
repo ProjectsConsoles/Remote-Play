@@ -83,6 +83,35 @@ function Servidor-Corriendo {
     return ((Procesos-Servidor | Measure-Object).Count -gt 0)
 }
 
+# ------------------------------------------------------------
+#  ¿De verdad esta saliendo video? (2026-09-11)
+# ------------------------------------------------------------
+#  Servidor-Corriendo solo dice si EXISTE un proceso ffmpeg, y eso
+#  se puede quedar corto de una forma muy fea: si el ffmpeg nuevo
+#  arranca antes de que la capturadora se libere del anterior, se
+#  queda COLGADO en silencio - proceso vivo, log en 0 bytes, ni un
+#  cuadro capturado, ni un paquete UDP al cliente. Medido en vivo el
+#  2026-09-11: el cliente de la Ally recibio 0 paquetes en 6 segundos
+#  mientras el servidor reportaba "corriendo: true" tan campante, asi
+#  que el cliente se quedaba esperando un video que no iba a llegar
+#  nunca.
+#
+#  La prueba honesta es el log de progreso: el .bat lo va escribiendo
+#  a medida que ffmpeg codifica, asi que si crecio hace poco, hay
+#  video de verdad. Un ffmpeg colgado deja ese archivo en 0 bytes y
+#  sin tocar desde que arranco.
+function Servidor-Transmitiendo {
+    param([int]$SegundosFrescura = 12)
+
+    if (-not (Servidor-Corriendo)) { return $false }
+
+    $ultimo = Get-ChildItem (Join-Path $Aqui "logs\progreso-*.log") -ErrorAction SilentlyContinue |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $ultimo) { return $false }
+    if ($ultimo.Length -le 0) { return $false }
+    return (((Get-Date) - $ultimo.LastWriteTime).TotalSeconds -le $SegundosFrescura)
+}
+
 function Detener-Servidor {
     $mato = $false
 
@@ -152,7 +181,19 @@ function Iniciar-Servidor($ip, $modo, [scriptblock]$avisar = {}) {
     # La capturadora no siempre se libera al instante despues de matar al
     # ffmpeg anterior; si el nuevo la abre demasiado pronto, dshow contesta
     # "device in use" y el arranque falla.
-    Start-Sleep -Milliseconds 900
+    #
+    # 900 ms FIJOS NO ALCANZABAN (2026-09-11, medido en vivo): al cambiar la
+    # IP de destino con el servidor corriendo, el ffmpeg nuevo arrancaba
+    # demasiado pronto y se quedaba colgado EN SILENCIO - proceso vivo, log
+    # en 0 bytes, cero paquetes al cliente. Y como habia proceso,
+    # Servidor-Corriendo decia "si" y todo el mundo se lo creia. Ahora se
+    # espera a que los procesos viejos desaparezcan de verdad (hasta 5s) y
+    # recien despues se le dan 2 segundos mas a la capturadora para soltarse.
+    for ($i = 0; $i -lt 25; $i++) {
+        if (-not (Servidor-Corriendo)) { break }
+        Start-Sleep -Milliseconds 200
+    }
+    Start-Sleep -Milliseconds 2000
 
     Guardar-Ip $ip
     Set-Content -Path $ArchivoModo -Value $modo -Encoding Ascii
@@ -165,14 +206,30 @@ function Iniciar-Servidor($ip, $modo, [scriptblock]$avisar = {}) {
     $proc = Start-Process -FilePath $Bat -WorkingDirectory $Aqui -WindowStyle Hidden -PassThru
     Set-Content -Path $ArchivoPid -Value $proc.Id -Encoding Ascii
 
+    # Se espera VIDEO DE VERDAD, no solo que exista el proceso (2026-09-11):
+    # un ffmpeg colgado por la capturadora ocupada cumple "existe el proceso"
+    # perfectamente y hacia que esta funcion devolviera $true aunque no
+    # saliera un solo cuadro - el cliente se quedaba esperando para siempre.
+    # Servidor-Transmitiendo mira el log de progreso, que solo crece si de
+    # verdad se esta codificando.
     $arranco = $false
     for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep -Milliseconds 500
-        if (Servidor-Corriendo) { $arranco = $true; break }
+        if (Servidor-Transmitiendo) { $arranco = $true; break }
     }
 
-    if ($arranco) { & $avisar "Servidor corriendo." }
-    else { & $avisar "No arranco en 15 segundos." }
+    if ($arranco) {
+        & $avisar "Servidor corriendo."
+    } else {
+        # Dejar un ffmpeg colgado seria peor que no haber arrancado: el
+        # proximo intento lo vuelve a encontrar "corriendo" y ademas sigue
+        # ocupando la capturadora. Se limpia antes de reportar el fallo.
+        if (Servidor-Corriendo) {
+            & $avisar "Arranco pero no sale video; cerrando el ffmpeg colgado."
+            [void](Detener-Servidor)
+        }
+        & $avisar "No arranco (sin video en 15 segundos)."
+    }
 
     return $arranco
 }

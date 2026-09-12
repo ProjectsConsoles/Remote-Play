@@ -115,6 +115,38 @@ def apply_ps_chord(buttons: dict) -> None:
         buttons[ancla] = 0
 
 
+# ---------------------------------------------------------------------------
+# Gatillos con umbral auto-calibrado (2026-09-11)
+# ---------------------------------------------------------------------------
+# TRIGGER_CLICK_THRESHOLD = -0.5 da por hecho que un gatillo en reposo vale
+# -1.0 (lo estandar de XInput, y lo que hace la Deck). En la ROG Ally real eso
+# NO se cumplio: "en modo control siempre aparece el L2 presionado" - o sea
+# que el eje descansa en un valor > -0.5 (tipicamente 0.0, que es como lo
+# reportan algunos drivers/capas cuando el pad no pasa por XInput puro), y con
+# el umbral fijo el gatillo se leia pulsado para siempre, mandandole L2
+# pisado al PS3 todo el tiempo.
+#
+# En vez de adivinar el valor de reposo de cada mando, se aprende solo: el
+# MINIMO visto en el eje es el reposo, y el maximo siempre es +1.0 (eso si lo
+# garantiza SDL). El umbral queda al 30% de ese recorrido:
+#     reposo -1.0  ->  umbral -0.4   (como antes)
+#     reposo  0.0  ->  umbral  0.3
+# Si al arrancar el usuario tuviera el gatillo pisado, el minimo empieza alto
+# y el gatillo se lee SUELTO hasta que lo suelte una vez - falla hacia el lado
+# seguro (nunca "pegado"), que es justo lo contrario del bug reportado.
+_gatillo_reposo = {}
+
+
+def _gatillo_pulsado(nombre: str, axes: dict) -> bool:
+    if nombre not in axes:
+        return False
+    valor = axes[nombre]
+    previo = _gatillo_reposo.get(nombre)
+    reposo = valor if previo is None else min(previo, valor)
+    _gatillo_reposo[nombre] = reposo
+    return valor > (reposo + 0.3 * (1.0 - reposo))
+
+
 def build_state(joystick) -> dict:
     """Igual que build_state() de la Deck, pero con un solo mapeo (xinput)."""
     import pygame
@@ -132,8 +164,8 @@ def build_state(joystick) -> dict:
 
     # El pad XInput no tiene boton digital de gatillo; sin esto el firmware
     # nunca ve L2/R2 (el analogico solo se usa para el byte de presion).
-    buttons["L2_CLICK"] = int(axes.get("L2_ANALOG", -1.0) > TRIGGER_CLICK_THRESHOLD)
-    buttons["R2_CLICK"] = int(axes.get("R2_ANALOG", -1.0) > TRIGGER_CLICK_THRESHOLD)
+    buttons["L2_CLICK"] = int(_gatillo_pulsado("L2_ANALOG", axes))
+    buttons["R2_CLICK"] = int(_gatillo_pulsado("R2_ANALOG", axes))
 
     apply_ps_chord(buttons)
 

@@ -114,12 +114,18 @@ function Estado-Actual {
     if (Test-Path $ArchivoIp) { $ipActual = [string](Get-Content $ArchivoIp -First 1 -ErrorAction SilentlyContinue) }
     $modoActual = ""
     if (Test-Path $ArchivoModo) { $modoActual = [string](Get-Content $ArchivoModo -First 1 -ErrorAction SilentlyContinue) }
+    # transmitiendo (2026-09-11): "corriendo" solo dice que EXISTE un proceso
+    # ffmpeg, y eso puede mentir feo - un ffmpeg colgado por la capturadora
+    # ocupada existe pero no manda un solo paquete. Los clientes usan este
+    # campo nuevo para no lanzarse a esperar un video que no va a llegar (y
+    # los que no lo conozcan simplemente lo ignoran, sin romperse).
     return [pscustomobject]@{
-        ok        = $true
-        ip        = $ipActual
-        modo      = $modoActual
-        corriendo = (Servidor-Corriendo)
-        modos     = @($Modos | ForEach-Object { $_.Clave })
+        ok            = $true
+        ip            = $ipActual
+        modo          = $modoActual
+        corriendo     = (Servidor-Corriendo)
+        transmitiendo = (Servidor-Transmitiendo)
+        modos         = @($Modos | ForEach-Object { $_.Clave })
     }
 }
 

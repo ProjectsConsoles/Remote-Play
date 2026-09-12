@@ -213,6 +213,15 @@ def verificar_servidor_listo():
     if not resp.get("corriendo"):
         return False, (f"El servidor ({ip_servidor}) no esta transmitiendo ahora mismo.\n\n"
                         "Prendelo desde la PC, o revisa \"Configurar servidor\".")
+    # "transmitiendo" (2026-09-11): el servidor lo agrego para no mentir
+    # cuando su ffmpeg quedo colgado (proceso vivo pero sin sacar un solo
+    # cuadro, ver server_engine_lib.ps1). Solo se exige si el servidor
+    # mando el campo: si es una version vieja del listener, no esta y no se
+    # bloquea nada.
+    if resp.get("transmitiendo") is False:
+        return False, (f"El servidor ({ip_servidor}) dice estar prendido pero no esta "
+                        "sacando video (se le colgo la captura).\n\n"
+                        "Detenlo y vuelvelo a iniciar desde la PC.")
     if ip_local and resp.get("ip") != ip_local:
         return False, (f"El servidor esta mandando el video a {resp.get('ip')}, "
                         f"no a esta Deck ({ip_local}).\n\n"
