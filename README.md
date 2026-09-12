@@ -130,6 +130,75 @@ detecta cuando el USB se atasca y se reinicia solo para recuperarse (tarda
 unos segundos); mientras tanto, cargar el juego también lo destraba. La
 causa de fondo todavía no se identificó.
 
+## Xbox 360 (RGH/JTAG + Aurora, vía hiddriver360)
+
+El mismo ESP32-S3 también sirve para conectar un DualShock 3 (real o
+emulado) a una Xbox 360 modificada (RGH o JTAG), usando el plugin de
+terceros [hiddriver360](https://github.com/EinTim23/hiddriver360). **No
+hace falta ningún chip adicional** — solo el cable USB de datos que ya
+tienes.
+
+### Requisitos
+
+- Xbox 360 con RGH/JTAG, dashboard [Aurora](https://www.aurora-project.org/)
+  y **DashLaunch** instalado (el loader que lee `launch.ini` y carga
+  plugins antes de que arranque el dashboard).
+- El plugin `hiddriver.xex` — usa la versión parchada de la comunidad
+  ([sudoxyz/hiddriver360 v0.6-patch](https://github.com/sudoxyz/hiddriver360/releases/tag/v0.6-patch)),
+  no la v0.6-beta oficial: esa versión tiene un bug (pide el Report
+  Descriptor con el índice de interfaz mal puesto) que hace que **ningún**
+  control HID genérico se llegue a reconocer.
+
+### Instalación (el paso que más cuesta)
+
+1. Copia `hiddriver.xex` a la **misma unidad USB desde la que arranca
+   DashLaunch** (`Usb:\hiddriver.xex`, por ejemplo) — **no al disco duro
+   interno** (`Hdd1:`). DashLaunch carga los plugins de `[Plugins]` antes
+   de que el disco duro interno termine de montarse, así que un plugin
+   ahí simplemente nunca se carga, sin ningún error visible.
+2. Agrega una línea en la sección `[Plugins]` del **`launch.ini` que
+   DashLaunch usa de verdad** — ojo, puede haber más de una copia de
+   `launch.ini` en distintas unidades (`Hdd1:`, `Usb0:`, etc.) y solo una
+   está activa. Para confirmar cuál es sin adivinar, conéctate por XBDM
+   (puerto 730) y pide la lista de módulos cargados:
+   ```
+   modules
+   ```
+   Si `Xbdm.xex`/`JRPC2.xex` u otros plugins ya aparecen cargados, compara
+   sus rutas en cada copia de `launch.ini` contra esa lista para encontrar
+   la que realmente está en efecto, y agrega ahí:
+   ```ini
+   [Plugins]
+   plugin2 = Usb:\hiddriver.xex
+   ```
+3. Reinicia la consola por completo (apagado real, no solo salir de un
+   juego). Vuelve a pedir `modules` por XBDM — si `hiddriver.xex` aparece
+   en la lista, el plugin ya está activo.
+4. Conecta el DualShock 3 (real o el emulado por este proyecto) por USB.
+
+### Por qué también hace falta el selector de modo del ESP32-S3
+
+Un DualShock 3 real reporta su clase de dispositivo USB como genérica
+(`0x00`/`0x00`/`0x00`) al conectarse por cable — hiddriver360 exige
+exactamente eso para reconocerlo. Esto **choca con lo que necesita PS2**
+(clase `0xE0`, ver arriba), así que ya no hay un solo ajuste de firmware
+que sirva para las tres consolas a la vez.
+
+El firmware resuelve esto con un selector guardado en memoria flash,
+usando el mismo botón **BOOT** que ya trae la placa (no hace falta
+hardware nuevo):
+
+1. Con el ESP32-S3 ya encendido y corriendo (nunca al conectarlo/resetear
+   — `BOOT` es un pin de arranque del chip), mantén **BOOT** presionado
+   ~1.5 segundos.
+2. El LED empieza a ciclar de color cada ~0.7s: **amarillo = PS3**,
+   **azul = PS2/OPL**, **morado = Xbox 360**.
+3. Suelta el botón en el color que quieras — la placa guarda el modo y se
+   reinicia sola para aplicarlo.
+
+El modo elegido queda guardado permanentemente (sobrevive apagados y
+reflasheos del firmware) hasta que se vuelva a cambiar a mano.
+
 ## Qué hace falta para correrlo (no incluido en este repo)
 
 - **ffmpeg** — no se incluye por tamaño (ver abajo cómo instalarlo).

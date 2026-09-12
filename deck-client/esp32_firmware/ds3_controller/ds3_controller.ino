@@ -37,6 +37,7 @@
 #include <WiFiUdp.h>
 #include <ArduinoJson.h>
 #include <stdarg.h>
+#include <Preferences.h>
 
 // ---------------------------------------------------------------------------
 // Configuracion de red - EDITAR antes de subir
@@ -46,6 +47,103 @@ const char *WIFI_PASSWORD = "TU_CONTRASENA_WIFI";
 const uint16_t UDP_PORT = 9000;  // debe coincidir con --port de input_client_v3.py
 
 #define RGB_LED_PIN 48
+#define BOOT_BUTTON_PIN 0  // el mismo boton BOOT de la placa, GPIO0 - solo se lee en RUNTIME, nunca al resetear (ver nota abajo)
+
+// ---------------------------------------------------------------------------
+// SELECTOR DE CONSOLA (2026-09-12): PS2/OPL necesita la clase USB de
+// DEVICE en 0xE0 (ver nota grande junto a USB.usbClass mas abajo), pero
+// PS3 y Xbox 360 (con hiddriver360) necesitan la clase generica 0x00 - ya
+// no hay un solo ajuste que sirva para las tres consolas. Se elige con el
+// boton BOOT (GPIO0, el mismo que ya existe en la placa para entrar al
+// bootloader - NO se agrega hardware nuevo) y queda guardado en flash.
+//
+// GESTO: mantener BOOT presionado ~1.5s EN CUALQUIER MOMENTO mientras el
+// firmware ya esta corriendo (nunca al encender/resetear - GPIO0 es un pin
+// de strapping, si esta en LOW justo en ese instante el chip entra al
+// bootloader de fabrica en vez de correr este programa). Al pasar el 1.5s
+// el LED empieza a ciclar de color cada ~700ms; se suelta el boton en el
+// color deseado para confirmar, y la placa se reinicia sola para aplicar
+// el modo nuevo limpio (USB.begin() no se puede reconfigurar sin reiniciar).
+// ---------------------------------------------------------------------------
+enum ModoConsola : uint8_t { MODO_PS3 = 0, MODO_PS2 = 1, MODO_XBOX360 = 2 };
+Preferences prefsModo;
+ModoConsola modoActual = MODO_PS3;
+
+const char *nombreModo(ModoConsola m) {
+  switch (m) {
+    case MODO_PS2:     return "PS2/OPL";
+    case MODO_XBOX360: return "Xbox360";
+    default:           return "PS3";
+  }
+}
+
+// Mismo brillo (32) que ya usaba el LED de wifi-conectado, solo cambia el color.
+void colorParaModo(ModoConsola m, uint8_t &r, uint8_t &g, uint8_t &b) {
+  switch (m) {
+    case MODO_PS2:     r = 0;  g = 0;  b = 32; break;  // azul
+    case MODO_XBOX360: r = 20; g = 0;  b = 32; break;  // morado
+    default:           r = 32; g = 22; b = 0;  break;  // amarillo (PS3)
+  }
+}
+
+void cargarModoGuardado() {
+  prefsModo.begin("ds3cfg", true);
+  modoActual = (ModoConsola)prefsModo.getUChar("modo", MODO_PS3);
+  prefsModo.end();
+}
+
+void guardarModo(ModoConsola m) {
+  prefsModo.begin("ds3cfg", false);
+  prefsModo.putUChar("modo", (uint8_t)m);
+  prefsModo.end();
+}
+
+// Se llama desde loop() en cada vuelta. Solo actua si el boton BOOT (GPIO0)
+// se mantiene presionado - en uso normal (boton suelto) es una lectura de
+// pin y nada mas, no le cuesta nada al ritmo del loop.
+void revisarSelectorModo() {
+  static unsigned long presionadoDesde = 0;
+  static bool enSeleccion = false;
+  static ModoConsola candidato = MODO_PS3;
+  static unsigned long ultimoCambio = 0;
+
+  bool presionado = (digitalRead(BOOT_BUTTON_PIN) == LOW);
+
+  if (!enSeleccion) {
+    if (presionado) {
+      if (presionadoDesde == 0) presionadoDesde = millis();
+      if (millis() - presionadoDesde > 1500) {
+        enSeleccion = true;
+        candidato = modoActual;
+        ultimoCambio = millis();
+        uint8_t r, g, b;
+        colorParaModo(candidato, r, g, b);
+        neopixelWrite(RGB_LED_PIN, r, g, b);
+        debugLog("[modo] entrando a seleccion, empieza en %s\n", nombreModo(candidato));
+      }
+    } else {
+      presionadoDesde = 0;
+    }
+    return;
+  }
+
+  if (presionado) {
+    if (millis() - ultimoCambio > 700) {
+      candidato = (ModoConsola)((candidato + 1) % 3);
+      ultimoCambio = millis();
+      uint8_t r, g, b;
+      colorParaModo(candidato, r, g, b);
+      neopixelWrite(RGB_LED_PIN, r, g, b);
+      debugLog("[modo] candidato=%s\n", nombreModo(candidato));
+    }
+  } else {
+    modoActual = candidato;
+    guardarModo(modoActual);
+    debugLog("[modo] guardado modo=%s, reiniciando para aplicarlo\n", nombreModo(modoActual));
+    delay(300);
+    ESP.restart();
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Descriptor HID del DualShock 3 - EXACTO al de un DS3 real (148 bytes),
@@ -106,8 +204,24 @@ extern "C" uint16_t ds3_hid_load_descriptor(uint8_t *dst, uint8_t *itf) {
 
 extern "C" const uint8_t *tud_hid_descriptor_report_cb(uint8_t instance) {
   (void)instance;
+  debugLog("[usb] host pidio el REPORT DESCRIPTOR (instance=%d)\n", (int)instance);
   return DS3_REPORT_DESCRIPTOR;
 }
+
+// ---------------------------------------------------------------------------
+// Ciclo de vida USB (2026-09-12): agregado para diagnosticar un host que deja
+// tud_hid_ready()=0 para siempre sin que el dispositivo se entere de por que
+// (medido contra una Xbox 360 con hiddriver360 - mismo sintoma de fondo que
+// el menu de OPL nunca resuelto: se atasca con ciertos hosts, PS3/Windows
+// nunca). Sin esto no habia forma de ver si el host hace enumeracion,
+// suspende, o directamente nunca completa el mount.
+// ---------------------------------------------------------------------------
+extern "C" void tud_mount_cb(void) { debugLog("[usb] MOUNT (enumeracion completa)\n"); }
+extern "C" void tud_umount_cb(void) { debugLog("[usb] UMOUNT (se desconecto/reseteo)\n"); }
+extern "C" void tud_suspend_cb(bool remote_wakeup_en) {
+  debugLog("[usb] SUSPEND remote_wakeup=%d\n", (int)remote_wakeup_en);
+}
+extern "C" void tud_resume_cb(void) { debugLog("[usb] RESUME\n"); }
 
 // ---------------------------------------------------------------------------
 // Respuestas REALES de un DualShock 3 fisico a cada feature report, dumpeadas
@@ -565,6 +679,10 @@ void setup() {
   Serial.begin(115200);
   neopixelWrite(RGB_LED_PIN, 32, 0, 0);
 
+  pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
+  cargarModoGuardado();
+  debugLog("[setup] modo consola = %s\n", nombreModo(modoActual));
+
   WiFi.mode(WIFI_STA);
 
   // APAGAR EL AHORRO DE ENERGIA DEL WIFI. Sin esto son 30-100ms de retraso en
@@ -607,7 +725,11 @@ void setup() {
     IPAddress ip = WiFi.localIP();
     debugBroadcastIP = IPAddress(ip[0], ip[1], ip[2], 255);
   }
-  neopixelWrite(RGB_LED_PIN, 0, 32, 0);
+  {
+    uint8_t r, g, b;
+    colorParaModo(modoActual, r, g, b);
+    neopixelWrite(RGB_LED_PIN, r, g, b);
+  }
   // Trazas de arranque: el WiFi corre en su propia tarea de FreeRTOS, asi que
   // el ESP32 puede responder ping aunque setup()/loop() esten colgados. Estas
   // lineas dicen exactamente hasta donde llega el arranque.
@@ -630,9 +752,22 @@ void setup() {
   // include/ds34common.h del repo de OPL (ps2homebrew/Open-PS2-Loader).
   // Poner los valores reales no deberia romper nada del lado del PS3: es
   // MAS fiel al DS3 autentico, no menos.
-  USB.usbClass(0xE0);
-  USB.usbSubClass(0x01);
-  USB.usbProtocol(0x01);
+  // XBOX360 (2026-09-12) CONFIRMADO: con hiddriver.xex realmente cargado
+  // (el bug real era el launch.ini equivocado, ver
+  // [[xbox360_hiddriver_setup]]), la Xbox 360 SI necesita la clase
+  // generica 0x00 (como un DS3 real) - con 0xE0 nunca negociaba. Como
+  // OPL/PS2 necesita 0xE0 y PS3/Xbox360 necesitan 0x00, ya no hay un solo
+  // valor que sirva para las tres consolas - se elige con el selector de
+  // modo (boton BOOT, ver arriba) y se guarda en flash.
+  if (modoActual == MODO_PS2) {
+    USB.usbClass(0xE0);
+    USB.usbSubClass(0x01);
+    USB.usbProtocol(0x01);
+  } else {
+    USB.usbClass(0x00);
+    USB.usbSubClass(0x00);
+    USB.usbProtocol(0x00);
+  }
   USB.usbAttributes(0x80);
 
   initFeatureStoreFromRealDS3();
@@ -717,6 +852,8 @@ void loop() {
     firstLoop = false;
     debugLog("[loop] primera vuelta\n");
   }
+
+  revisarSelectorModo();
 
   // -------------------------------------------------------------------------
   // VACIAR LA COLA UDP ENTERA Y QUEDARSE CON EL ULTIMO PAQUETE
