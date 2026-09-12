@@ -57,6 +57,17 @@ import sys
 import threading
 import time
 
+# SDL_JOYSTICK_RAWINPUT=0 (2026-09-12, tiene que ir ANTES de cualquier
+# pygame.joystick.init() - el menu ya inicializa el joystick antes que
+# streaming, y el hint solo se lee la primera vez). Sin ventana real (driver
+# dummy) durante streaming, solo los gatillos (ejes) llegaban - ni un boton
+# digital, confirmado con captura real. Sospecha: el backend RawInput de SDL
+# para botones en Windows necesita que la ventana tenga foco/sea foreground
+# para recibir WM_INPUT, cosa que una ventana dummy invisible nunca tiene;
+# los ejes se leen via XInputGetState, que no le importa el foco. Forzando
+# XInput puro (sin RawInput) los botones deberian leerse igual que los ejes.
+os.environ.setdefault("SDL_JOYSTICK_RAWINPUT", "0")
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gamepad_common as gp        # noqa: E402
 from brightness_win import Brillo, PCT_MIN   # noqa: E402
@@ -1132,7 +1143,7 @@ def ejecutar_modo_control():
         m_vueltas += 1
         if ahora - m_desde >= 5.0:
             _span = ahora - m_desde
-            log.info("[ritmo] %.0f vueltas/s  %.0f envios/s  leer_mando=%.1fms/vuelta  dibujar=%.0fms total",
+            log.debug("[ritmo] %.0f vueltas/s  %.0f envios/s  leer_mando=%.1fms/vuelta  dibujar=%.0fms total",
                      m_vueltas / _span, m_envios / _span,
                      (m_t_leer / max(1, m_vueltas)) * 1000.0, m_t_dibujar * 1000.0)
             m_vueltas = m_envios = 0
@@ -1153,28 +1164,26 @@ def ejecutar_modo_control():
 # Modo streaming: lanza ffplay y espera a que se cierre.
 # ---------------------------------------------------------------------------
 
-def _bombear_input_hasta_que_muera(proc):
-    """Lee el mando y manda su estado al ESP32 EN EL HILO PRINCIPAL, hasta
-    que ffplay (proc) se cierre.
+def _iniciar_input_streaming():
+    """Abre SDL/el mando ANTES de lanzar ffplay - devuelve (sock, socket UDP)
+    o None si ENABLE_INPUT esta apagado.
 
-    POR QUE NO UN HILO DE FONDO (2026-09-11, medido en la Ally real). Antes
-    esto lo hacia InputSender en un hilo aparte, con el argumento de que en
-    streaming no hay ventana de pygame propia con la que pelearse. Falso: en
-    Windows, SDL no actualiza el estado del joystick fuera del hilo
-    principal, asi que el bucle corria feliz y mandaba sus ~105 paquetes por
-    segundo... TODOS con los botones en cero. Se vio clarisimo en el
-    heartbeat del ESP32: udp= subia sin parar (los paquetes llegaban) pero
-    rep=[00 00 00] cross=0 mientras el usuario apretaba botones "un monton".
-    Es exactamente la misma razon por la que el modo control ya leia el
-    mando en su propio hilo principal (ver la nota de ejecutar_modo_control).
-
-    El driver de video dummy es a proposito: le da a SDL su bomba de eventos
-    sin abrir ninguna ventana que le pelee el foco a ffplay. Ojo: esa
-    variable NO debe llegarle a ffplay (dibuja con SDL y se quedaria sin
-    ventana) - por eso el Popen de arriba le pasa un entorno limpio."""
+    ORDEN CRITICO (2026-09-12, LA causa de "solo jala el gatillo en
+    streaming"). Capturando el JSON real que sale durante streaming de
+    verdad (con ffplay corriendo, no en loopback): los EJES (L2_ANALOG/
+    R2_ANALOG, via SDL_GameController) llegaban perfectos, pero NINGUN
+    boton digital (A/B/X/Y/L1/R1, ni la cruceta por el hat) aparecia
+    pulsado nunca, por mas que se apretaran. La diferencia con modo control
+    (donde todo funciona) es que ahi no hay ningun otro proceso tocando el
+    mando; en streaming, ffplay (tambien SDL2) se lanzaba ANTES de que este
+    proceso abriera el joystick - y en Windows, el primero en abrir un HID
+    gamepad puede quedarse con acceso exclusivo a los REPORTES DE BOTONES
+    (los ejes, que muchos drivers exponen por un canal XInput mas simple,
+    no se ven afectados igual). O sea: ffplay se quedaba con los botones.
+    Se invierte el orden: este proceso abre el mando PRIMERO, ffplay se
+    lanza despues y ya no tiene con que competir."""
     if not ENABLE_INPUT:
-        proc.wait()
-        return
+        return None
 
     import pygame
     os.environ["SDL_VIDEODRIVER"] = "dummy"
@@ -1186,8 +1195,18 @@ def _bombear_input_hasta_que_muera(proc):
     # el driver dummy): el mando abierto en el contexto anterior quedo
     # invalido y devolvia valores pegados - ver reiniciar_mapeo().
     gp.reiniciar_mapeo()
+    return socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+def _bombear_input_hasta_que_muera(proc, sock):
+    """Lee el mando y manda su estado al ESP32 EN EL HILO PRINCIPAL, hasta
+    que ffplay (proc) se cierre. El mando ya viene abierto por
+    _iniciar_input_streaming() - ver ahi el por que del orden."""
+    if sock is None:
+        proc.wait()
+        return
+
+    import pygame
     interval = 1.0 / INPUT_RATE
     log.info("Enviando input a %s:%s a %s Hz (hilo principal)",
              ESP32_IP, ESP32_PORT, INPUT_RATE)
@@ -1229,8 +1248,9 @@ def _bombear_input_hasta_que_muera(proc):
             ahora = time.time()
             if ahora - stats_last >= 5.0:
                 span = ahora - stats_last
-                log.debug("[stats] %d paquetes en %.1fs = %.1f Hz efectivos (objetivo %d)",
-                          stats_ticks, span, stats_ticks / span, INPUT_RATE)
+                log.info("[stats] %d envios en %.1fs = %.1f Hz (objetivo %d) mando=%s ffplay_vivo=%s",
+                         stats_ticks, span, stats_ticks / span, INPUT_RATE,
+                         joystick is not None, proc.poll() is None)
                 stats_last, stats_ticks = ahora, 0
 
             restante = interval - (time.time() - inicio)
@@ -1312,13 +1332,14 @@ def ejecutar_modo_streaming():
         # ffplay una copia del entorno SIN las variables de SDL.
         entorno = {k: v for k, v in os.environ.items()
                     if k not in ("SDL_VIDEODRIVER", "SDL_AUDIODRIVER")}
+        sock_input = _iniciar_input_streaming()
         proc = subprocess.Popen(args,
                                 stdin=subprocess.DEVNULL,
                                 stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL,
                                 env=entorno,
                                 creationflags=subprocess.CREATE_NO_WINDOW)
-        _bombear_input_hasta_que_muera(proc)
+        _bombear_input_hasta_que_muera(proc, sock_input)
         if proc.returncode != 0:
             log.warning("ffplay termino con codigo %s (probable timeout: no llego video de la PC)",
                         proc.returncode)
