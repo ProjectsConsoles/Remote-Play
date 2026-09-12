@@ -54,6 +54,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -971,12 +972,41 @@ def ejecutar_modo_control():
     interval = 1.0 / INPUT_RATE
     proximo_envio = time.time()
 
+    # EL BRILLO SE LEE EN UN HILO APARTE (2026-09-11, LA causa de "se siente
+    # trabado"). brillo.leer_pct() lanza un proceso de PowerShell - en Windows
+    # eso cuesta entre 300 y 600 ms - y se llamaba UNA VEZ POR SEGUNDO dentro
+    # de este mismo bucle. O sea que el bucle de input se congelaba medio
+    # segundo, cada segundo: por eso al ESP32 le llegaban ~50 estados/s en vez
+    # de 120, los botones respondian tarde, se perdian pulsaciones, y una
+    # direccion de la cruceta se quedaba "sonando" mas tiempo del que se
+    # tocaba (el ESP32 sigue reenviando el ultimo estado recibido), que es lo
+    # que se sentia como que el cursor se movia solo.
+    #
+    # La Deck no lo sufre porque ahi el brillo sale de un archivo de sysfs, que
+    # se lee al instante. Aca se hace en un hilo: no toca SDL ni pygame (solo
+    # subprocess y un numero), asi que no aplica la regla de "el mando solo se
+    # lee en el hilo principal".
+    _parar_brillo = threading.Event()
+    _brillo_visto = {"pct": None}
+
+    def _leer_brillo_en_segundo_plano():
+        while not _parar_brillo.is_set():
+            try:
+                v = brillo.leer_pct()
+                if v is not None:
+                    _brillo_visto["pct"] = v
+            except Exception:
+                pass
+            _parar_brillo.wait(1.0)
+
+    if brillo.ok:
+        threading.Thread(target=_leer_brillo_en_segundo_plano, daemon=True).start()
+
     arrastrando_barra = False
     ultimo_toque_barra = 0.0
     texto_pulsado = ""
 
     salir = False
-    ultima_sync_brillo = 0.0
     ultima_firma = None
     ultimo_dibujo = 0.0
     # Instrumentacion del ritmo (2026-09-11): el input llegaba al ESP32 a ~50/s
@@ -1019,12 +1049,10 @@ def ejecutar_modo_control():
 
         # Sincronizar con el brillo real del sistema si el usuario no la esta
         # tocando (por si algo mas en Windows lo cambio), igual que en la Deck.
-        if brillo.ok and not arrastrando_barra and (ahora - ultimo_toque_barra) > 3 \
-                and (ahora - ultima_sync_brillo) > 1:
-            real = brillo.leer_pct()
+        if brillo.ok and not arrastrando_barra and (ahora - ultimo_toque_barra) > 3:
+            real = _brillo_visto["pct"]
             if real is not None and abs(real - pct_actual) >= 1:
                 pct_actual = real
-            ultima_sync_brillo = ahora
 
         # Un solo pump/lectura del mando por vuelta: se usa para mandar UDP y
         # para el indicador. Reconecta solo si hace falta.
@@ -1112,6 +1140,7 @@ def ejecutar_modo_control():
         # girando en vacio.
         time.sleep(0.001)
 
+    _parar_brillo.set()
     if sock is not None:
         sock.close()
 
