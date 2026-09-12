@@ -341,7 +341,22 @@ def _joystick_activo(pygame, joystick):
     return None
 
 
+# Ventana compartida entre pantallas (2026-09-11): antes cada pantalla
+# (menu/config servidor/config cliente/modo control) hacia su propio
+# pygame.display.quit() al salir y _abrir_ventana() volvia a crear una
+# ventana nueva desde cero - eso deja un instante SIN ninguna ventana SDL
+# entre pantalla y pantalla, y en ese instante se ve el escritorio de
+# Windows de fondo ("parpadeo" reportado 2026-09-11 con la Ally real). Ahora
+# la ventana se crea UNA sola vez y se reutiliza mientras se navega entre
+# pantallas; solo se cierra de verdad antes de lanzar streaming (ffplay
+# maneja su propia ventana) o al salir del programa - ver cerrar_ventana().
+_VENTANA = {"screen": None}
+
+
 def _abrir_ventana(pygame, titulo):
+    if _VENTANA["screen"] is not None:
+        pygame.display.set_caption(titulo)
+        return _VENTANA["screen"]
     pygame.display.init()
     pygame.font.init()
     pygame.joystick.init()
@@ -352,7 +367,14 @@ def _abrir_ventana(pygame, titulo):
         screen = pygame.display.set_mode((1000, 650))
     pygame.display.set_caption(titulo)
     pygame.mouse.set_visible(True)
+    _VENTANA["screen"] = screen
     return screen
+
+
+def cerrar_ventana(pygame):
+    if _VENTANA["screen"] is not None:
+        pygame.display.quit()
+        _VENTANA["screen"] = None
 
 
 # ---------------------------------------------------------------------------
@@ -378,13 +400,18 @@ def mostrar_menu():
     # nuevos de configuracion remota - mismo protocolo/UDP que la Deck contra
     # el mismo config_listener.ps1, asi que no hace falta nada nuevo del lado
     # del servidor de Windows.
+    # Mismos colores que client_menu.py de la Deck (#8e5fd6/#c07d2f), para que
+    # las dos maquinas se vean parecidas - "se ve feo, no tienen color como
+    # en la Deck" (reportado 2026-09-11, con foto real de la Ally).
+    MORADO = (142, 95, 214)
+    NARANJA = (192, 125, 47)
     opciones = [
         ("Streaming", "Video y audio del PS3, mas el control.", AZUL, "streaming"),
         ("Solo control", "La Ally funciona solo como mando.", VERDE, "control"),
         ("Configurar servidor", "Elige el modo de captura de la PC sin ir a tocarla.",
-         (58, 58, 66), "config_servidor"),
+         MORADO, "config_servidor"),
         ("Configurar cliente", "Variables PS3RP_* de este lado (ESP32, input, video).",
-         (58, 58, 66), "config_cliente"),
+         NARANJA, "config_cliente"),
     ]
     foco = 0
     reloj = pygame.time.Clock()
@@ -461,12 +488,23 @@ def mostrar_menu():
         _texto(pygame, screen, f_titulo, "PS3 Remote Play", TEXTO, center=(w // 2, y0 - 90))
         _texto(pygame, screen, f_ayuda, "Que quieres hacer?", TENUE, center=(w // 2, y0 - 40))
 
+        # El color solo va en la franja del titulo (2026-09-11): antes el
+        # texto de detalle (TENUE, gris) se dibujaba encima del color de la
+        # tarjeta y casi no se veia - "los textos descriptivos casi no se
+        # ven" (reportado con foto real). La Deck resuelve esto igual:
+        # boton coloreado arriba, detalle en un Label aparte con el fondo
+        # oscuro de la pagina, no el color de la tarjeta.
+        alto_titulo = 64
         for i, (titulo, detalle, color, _modo) in enumerate(opciones):
             r = rects[i]
-            pygame.draw.rect(screen, color, r, border_radius=14)
+            r_titulo = pygame.Rect(r.left, r.top, r.width, alto_titulo)
+            pygame.draw.rect(screen, color, r_titulo, border_radius=14)
+            # Tapa las esquinas redondeadas de abajo del rect del titulo para
+            # que no queden "flotando" sobre el fondo oscuro.
+            pygame.draw.rect(screen, color, r_titulo.inflate(0, -20).move(0, 10))
             if i == foco:
                 pygame.draw.rect(screen, (255, 255, 255), r, width=4, border_radius=14)
-            _texto(pygame, screen, f_boton, titulo, (255, 255, 255), center=(r.centerx, r.centery - 20))
+            _texto(pygame, screen, f_boton, titulo, (255, 255, 255), center=r_titulo.center)
             palabras = detalle.split()
             lineas, linea = [], ""
             for p in palabras:
@@ -479,7 +517,8 @@ def mostrar_menu():
             if linea:
                 lineas.append(linea)
             for j, ln in enumerate(lineas):
-                _texto(pygame, screen, f_ayuda, ln, TENUE, center=(r.centerx, r.centery + 20 + j * 20))
+                _texto(pygame, screen, f_ayuda, ln, TENUE,
+                       center=(r.centerx, r_titulo.bottom + 22 + j * 20))
 
         pie = "Flechas/stick + Enter/A, Escape/B cancela.   (mouse/touch siempre funciona)"
         _texto(pygame, screen, f_pie, pie, TENUE, center=(w // 2, h - 30))
@@ -487,7 +526,6 @@ def mostrar_menu():
         pygame.display.flip()
         reloj.tick(30)
 
-    pygame.display.quit()
     return resultado
 
 
@@ -530,7 +568,13 @@ def mostrar_config_servidor():
               "editando_ip": False, "seleccionado": 0,
               "txt": "Sin consultar todavia.", "color": TENUE}
 
-    ancho_t, alto_t = 260, 120
+    # 340x150 (2026-09-11, antes 260x120): con 260 de ancho el titulo de cada
+    # modo ("1280x720 - MJPEG (recomendado)") no cabia en una sola linea y no
+    # se estaba envolviendo (solo el detalle se envolvia) - "los textos se
+    # salen de los cuadros" (reportado con foto real, los titulos chocaban
+    # con la tarjeta de al lado). Ahora el titulo tambien se envuelve (ver
+    # _envolver() en dibujar) y ademas hay mas espacio de entrada.
+    ancho_t, alto_t = 340, 150
     esp_x, esp_y = 30, 24
     columnas = 2
     total_ancho = ancho_t * columnas + esp_x
@@ -557,25 +601,32 @@ def mostrar_config_servidor():
         _texto(pygame, screen, f_label, estado["txt"], estado["color"],
                center=(w // 2, campo_ip_rect.bottom + 26))
 
-        for i, (_clave, nombre, detalle) in enumerate(MODOS_SERVIDOR):
-            r = rects[i]
-            pygame.draw.rect(screen, (40, 44, 56), r, border_radius=10)
-            if i == estado["seleccionado"]:
-                pygame.draw.rect(screen, (255, 255, 255), r, width=3, border_radius=10)
-            _texto(pygame, screen, f_modo_t, nombre, TEXTO, center=(r.centerx, r.top + 26))
-            palabras = detalle.split()
+        def _envolver(fuente, texto, ancho_max):
+            palabras = texto.split()
             lineas, linea = [], ""
             for p in palabras:
                 prueba = (linea + " " + p).strip()
-                if f_modo_d.size(prueba)[0] > r.width - 20:
+                if fuente.size(prueba)[0] > ancho_max:
                     lineas.append(linea)
                     linea = p
                 else:
                     linea = prueba
             if linea:
                 lineas.append(linea)
+            return lineas
+
+        for i, (_clave, nombre, detalle) in enumerate(MODOS_SERVIDOR):
+            r = rects[i]
+            pygame.draw.rect(screen, (40, 44, 56), r, border_radius=10)
+            if i == estado["seleccionado"]:
+                pygame.draw.rect(screen, (255, 255, 255), r, width=3, border_radius=10)
+            lineas_titulo = _envolver(f_modo_t, nombre, r.width - 20)
+            for j, ln in enumerate(lineas_titulo):
+                _texto(pygame, screen, f_modo_t, ln, TEXTO, center=(r.centerx, r.top + 24 + j * 22))
+            y_detalle = r.top + 24 + len(lineas_titulo) * 22 + 16
+            lineas = _envolver(f_modo_d, detalle, r.width - 20)
             for j, ln in enumerate(lineas):
-                _texto(pygame, screen, f_modo_d, ln, TENUE, center=(r.centerx, r.top + 55 + j * 18))
+                _texto(pygame, screen, f_modo_d, ln, TENUE, center=(r.centerx, y_detalle + j * 18))
 
         pie = "Flechas elige modo, A aplica, X consulta, Y manda IP, toca el cuadro edita la IP, B vuelve."
         _texto(pygame, screen, f_pie, pie, TENUE, center=(w // 2, h - 30))
@@ -716,7 +767,6 @@ def mostrar_config_servidor():
         reloj.tick(30)
 
     pygame.key.stop_text_input()
-    pygame.display.quit()
 
 
 # ---------------------------------------------------------------------------
@@ -916,7 +966,6 @@ def mostrar_config_cliente():
         reloj.tick(30)
 
     pygame.key.stop_text_input()
-    pygame.display.quit()
 
 
 # ---------------------------------------------------------------------------
@@ -1071,7 +1120,6 @@ def ejecutar_modo_control():
 
     if sock is not None:
         sock.close()
-    pygame.display.quit()
 
 
 # ---------------------------------------------------------------------------
@@ -1117,10 +1165,17 @@ def ejecutar_modo_streaming():
         # invalidos y se cuelga. Costo un buen rato descubrirlo del lado del
         # servidor, donde el motor no arrancaba nunca y no dejaba ni un log;
         # aca ffplay habria hecho lo mismo.
+        # CREATE_NO_WINDOW (2026-09-11): ffplay.exe es una app de consola; sin
+        # esto Windows le crea una consola nueva propia (este .exe no tiene
+        # ninguna que heredar, al ser --windowed) - un cuadro negro vacio al
+        # lado del video real, que es lo que se reporto viendo. La ventana de
+        # video de ffplay la abre SDL por su cuenta, no depende de la
+        # consola, asi que ocultarla no le quita nada.
         proc = subprocess.Popen(args,
                                 stdin=subprocess.DEVNULL,
                                 stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL)
+                                stderr=subprocess.DEVNULL,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
         proc.wait()
     except Exception as e:
         log.error("No se pudo lanzar ffplay: %s", e)
@@ -1173,9 +1228,16 @@ def main():
             continue
 
         log.info("--- modo STREAMING ---")
+        # Cerrar la ventana propia antes: ffplay abre y maneja la suya, y
+        # dejar la nuestra abierta de fondo no sirve de nada mientras dura
+        # el streaming.
+        import pygame
+        cerrar_ventana(pygame)
         ejecutar_modo_streaming()
         break
 
+    import pygame
+    cerrar_ventana(pygame)
     log.info("=== Cerrando ===")
 
 
