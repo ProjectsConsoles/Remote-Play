@@ -42,7 +42,8 @@ import sys
 # por stdout, que es justo por donde este script devuelve la eleccion.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from deck_gamepad import Mando            # noqa: E402
-from server_udp import obtener_ip_local, obtener_red_wifi  # noqa: E402
+from server_udp import (obtener_ip_local, obtener_red_wifi,  # noqa: E402
+                         obtener_config, leer_ip_servidor_guardada)
 
 FONDO = "#101014"
 TEXTO = "#e8e8ea"
@@ -187,6 +188,39 @@ def mostrar_menu():
     return eleccion["modo"]
 
 
+def verificar_servidor_listo():
+    """Antes de streaming (2026-09-11): confirma con el servidor (mismo
+    protocolo UDP de "Configurar servidor", puerto 9200) que tiene puesta la
+    IP de ESTA Deck y que esta transmitiendo - en vez de lanzar ffplay a
+    esperar un video que puede no llegar nunca si el servidor le manda los
+    paquetes a otra maquina. Alternativa mas segura que ponerle un timeout a
+    la propia conexion UDP de ffplay (eso arriesgaria cortar una partida real
+    si la wifi tiene un corte de mas de unos segundos, ver la nota en
+    OPCIONES.md/discusion del 2026-09-11) - esto solo mira el ESTADO
+    declarado del servidor, nunca toca el pipeline de video en si.
+
+    Devuelve (True, "") si esta todo bien (o si nunca se configuro el
+    servidor desde aca y no hay como chequear - se sigue como siempre, sin
+    bloquear a nadie que no use la pantalla nueva), o (False, mensaje) si
+    hay algo que el usuario deberia arreglar antes de intentar streaming."""
+    ip_servidor = leer_ip_servidor_guardada()
+    if not ip_servidor:
+        return True, ""
+    ip_local = obtener_ip_local()
+    ok, resp = obtener_config(ip_servidor)
+    if not ok:
+        return False, f"No se pudo consultar el servidor ({ip_servidor}):\n{resp}"
+    if not resp.get("corriendo"):
+        return False, (f"El servidor ({ip_servidor}) no esta transmitiendo ahora mismo.\n\n"
+                        "Prendelo desde la PC, o revisa \"Configurar servidor\".")
+    if ip_local and resp.get("ip") != ip_local:
+        return False, (f"El servidor esta mandando el video a {resp.get('ip')}, "
+                        f"no a esta Deck ({ip_local}).\n\n"
+                        "Entra a \"Configurar servidor\" y manda tu IP con el boton "
+                        "de enviar IP.")
+    return True, ""
+
+
 def main():
     # Bucle (2026-09-11): "Configurar servidor"/"Configurar cliente" abren su
     # propia pantalla y, al cerrarse, vuelven aca en vez de salir - por eso
@@ -213,6 +247,16 @@ def main():
             except Exception as e:
                 print(f"pantalla de config del cliente fallo: {e}", file=sys.stderr)
             continue
+
+        if modo == "streaming":
+            ok, mensaje = verificar_servidor_listo()
+            if not ok:
+                try:
+                    from tkinter import messagebox
+                    messagebox.showwarning("Remote Play", mensaje)
+                except Exception as e:
+                    print(f"aviso de servidor no listo: {mensaje} ({e})", file=sys.stderr)
+                continue
 
         print(modo)
         return 0
