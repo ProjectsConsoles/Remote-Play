@@ -12,6 +12,7 @@ el SSID en el menu)."""
 import json
 import os
 import socket
+import sys
 
 PUERTO_CONFIG = 9200
 TIMEOUT_S = 3.0
@@ -21,7 +22,27 @@ TIMEOUT_S = 3.0
 # servidor). Con solo 3s de timeout el cliente se rendia ANTES de que el
 # servidor terminara - ver la nota igual de larga en deck-client/server_udp.py.
 TIMEOUT_APLICAR_S = 20.0
-ARCHIVO_IP_SERVIDOR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server_ip.txt")
+
+
+def _app_dir():
+    # NO se puede usar __file__ a secas aca (2026-09-11, bug real
+    # encontrado con la Ally): en un .exe --onefile de PyInstaller, los
+    # modulos bundleados se extraen a una carpeta TEMPORAL (_MEIxxxxxx) que
+    # se borra sola al cerrar el programa, y __file__ apunta ahi, no al
+    # .exe real. server_ip.txt se escribia bien (sin excepcion, por eso
+    # "Configurar servidor" se veia funcionar) pero en esa carpeta temporal
+    # - desaparecia al cerrar, y la siguiente corrida (con OTRA carpeta
+    # temporal, nombre distinto cada vez) nunca lo encontraba:
+    # leer_ip_servidor_guardada() devolvia None para siempre, silenciando
+    # el aviso de "el servidor le manda el video a otra IP" que dependia de
+    # esto. Igual que app_dir() de main_client.py: con sys.frozen, la
+    # carpeta real es la de sys.executable.
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+ARCHIVO_IP_SERVIDOR = os.path.join(_app_dir(), "server_ip.txt")
 
 
 def leer_ip_servidor_guardada():
