@@ -118,29 +118,64 @@ mirar `vq`/`aq`/`A-V`).
 Tampoco se porteo el watchdog de "video atascado" que reinicia ffplay solo -
 se puede agregar despues si hace falta en la practica.
 
-## Lo que falta verificar (no se pudo probar sin la Ally)
+## Probado ya contra la Ally real (2026-09-11)
 
-1. **Mapeo de botones/ejes.** `gamepad_common.py` asume que SDL ve el mando de
-   la Ally exactamente como un XInput/Xbox 360 estandar. Correr con
-   `PS3RP_DEBUG=1`, entrar en modo control, apretar cada boton y mirar
-   `ps3rp_ally_client.log` (o el indicador en pantalla) contra lo que
-   deberia ser. Si algo sale mal mapeado, se ajusta en
-   `gamepad_common.BUTTON_NAMES` / `AXIS_NAMES`.
-2. **Brillo via WMI.** Puede que el driver de pantalla de la Ally no exponga
-   `WmiMonitorBrightnessMethods` (pasa en algunos paneles). Si la barra sale
-   deshabilitada con "no disponible via WMI", hay que buscar la alternativa
-   especifica de ASUS (Armoury Crate expone su propio control; puede que
-   haga falta llamar a su SDK/CLI en vez de WMI generico).
-3. **Latencia real end-to-end.** Ningun numero de `OPCIONES.md` de la Deck
-   aplica tal cual aca (ver arriba). Hay que medir de cero.
-4. **Pantalla completa (`-fs`) con el compositor de Windows.** No se sabe si
-   tapa la barra de tareas limpio o si hace falta `PS3RP_FULLSCREEN=0` +
-   maximizar a mano en la practica.
-5. **El acorde del boton PS (`SELECT+R1`).** En la Deck existe porque Steam
-   Input intercepta START antes de llegar a pygame. Si en la Ally se lanza
-   por fuera de Steam, es posible que START llegue entero y el acorde ni
-   haga falta - probar primero si START solo ya funciona como boton PS antes
-   de asumir que hace falta el acorde.
+Primera sesion con la Ally en la red. Esto es lo que se encontro y arreglo
+midiendo de verdad, no teorizando - vale la pena leerlo antes de tocar el
+cliente, porque varias trampas no son obvias:
+
+- **El mando NO se mapea por indices crudos.** La Ally expone **16 botones**
+  (un XInput estandar expone 11), asi que las tablas heredadas de la Deck no
+  correspondian: solo la A caia en su lugar por casualidad. Ahora se usa la
+  API de **SDL_GameController**, que trae el mapeo normalizado por
+  dispositivo. En el log queda `mapeo=gamecontroller` o `mapeo=crudo`.
+- **La cruceta va por el hat.** SDL reconoce el mando pero sus botones
+  `DPAD_*` devuelven cero siempre; el hat del joystick crudo si funciona, y
+  se usa como respaldo.
+- **El mando se lee SOLO desde el hilo principal.** Hubo un hilo de fondo
+  para el input durante el streaming: mandaba sus ~105 paquetes/s con todos
+  los botones en cero, porque en Windows SDL no actualiza el estado del
+  joystick fuera del hilo principal.
+- **ffplay no debe heredar `SDL_VIDEODRIVER=dummy`.** Este proceso lo pone
+  para leer el mando sin abrir ventana; ffplay dibuja con SDL, asi que al
+  heredarlo decodificaba el video perfecto y no dibujaba nada (proceso vivo,
+  sin ventana). Se le pasa un entorno limpio.
+- **Nada que tarde puede vivir en el bucle de input.** Leer el brillo lanza
+  un proceso de PowerShell (300-600 ms) y se hacia una vez por segundo
+  DENTRO del bucle: congelaba el input medio segundo por segundo. Se sentia
+  como retraso, pulsaciones perdidas y "el cursor se mueve solo" (el ESP32
+  sigue reenviando el ultimo estado recibido). Ahora va en un hilo aparte.
+- **`SDL_JOYSTICK_RAWINPUT=0` es obligatorio para streaming.** Sin ventana
+  real (driver dummy), SDL entregaba los EJES (gatillos) perfectos pero
+  NINGUN boton digital - confirmado capturando el trafico real durante
+  streaming. El backend RawInput de SDL para botones necesita foco/ventana
+  foreground en Windows; los ejes se leen via XInputGetState y no les
+  importa. Se fuerza XInput puro. Tiene que ir a NIVEL DE MODULO, antes de
+  la primera llamada a `pygame.joystick.init()` (el menu ya la hace) - el
+  hint solo se lee la primera vez que se inicializa el joystick.
+- **El archivo de config se lee con `utf-8-sig`.** Si se edita desde
+  PowerShell o el Bloc de notas queda con BOM, y `json.load` reventaba en
+  silencio: la app usaba todos los valores por default sin avisar.
+
+Ritmo medido despues de todo esto, en modo control: ~570 vueltas/s del
+bucle, ~108 envios/s al ESP32, leer el mando cuesta 0.1 ms. Con
+`PS3RP_DEBUG=1` queda una linea `[ritmo]` en el log cada 5s con esos
+numeros.
+
+## Lo que falta verificar
+
+1. **Latencia real end-to-end del video.** Ningun numero de `OPCIONES.md` de
+   la Deck aplica tal cual aca (ver arriba): la Deck tiene meses de ajuste
+   fino de Mesa/gamescope que no existe en Windows/DWM. Hay que medir de
+   cero.
+2. **Brillo via WMI.** Funciona, pero cada lectura cuesta un proceso de
+   PowerShell. Si alguna vez hace falta leerlo seguido, conviene buscar la
+   via especifica de ASUS (Armoury Crate) en vez de WMI generico.
+3. **El acorde del boton PS (`SELECT+R1`).** Sigue sin confirmarse si en la
+   Ally hace falta o si START llega entero por fuera de Steam.
+4. **Microcortes de USB del ESP32.** Se vio `ready=0` intermitente y el
+   contador `fallidos` creciendo en el heartbeat. Es del lado del ESP32/PS3,
+   no del cliente, pero conviene vigilarlo.
 
 ## Recompilar tras un cambio
 
