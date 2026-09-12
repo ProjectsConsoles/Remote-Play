@@ -319,10 +319,48 @@ $timerRefrescoRemoto.Start()
 
 Refrescar-Estado
 
-# Auto-inicio y minimizado al abrir (2026-09-12, pedido explicito): usa la
-# IP/modo ya cargados en el combo (ultimos guardados) y arranca solo, sin
-# que el usuario tenga que darle click a Iniciar cada vez.
-$form.WindowState = "Minimized"
-$form.Add_Shown({ $btnIniciar.PerformClick() })
+# Icono en la bandeja del sistema (2026-09-12): al auto-iniciar, la ventana
+# se OCULTA (no minimiza) y queda este icono; un click la vuelve a mostrar.
+$trayIcon = New-Object System.Windows.Forms.NotifyIcon
+$trayIcon.Text = "Remote Play - Servidor"
+$trayIcon.Icon = if ($form.Icon) { $form.Icon } else { [System.Drawing.SystemIcons]::Application }
+$trayIcon.Visible = $true
+
+$mostrarVentana = {
+    $form.Show()
+    $form.WindowState = "Normal"
+    $form.Activate()
+}
+$trayIcon.Add_Click($mostrarVentana)
+
+$script:SalirDeVerdad = $false
+
+$menuTray = New-Object System.Windows.Forms.ContextMenuStrip
+[void]$menuTray.Items.Add("Abrir", $null, $mostrarVentana)
+[void]$menuTray.Items.Add("Salir", $null, { $script:SalirDeVerdad = $true; $form.Close() })
+$trayIcon.ContextMenuStrip = $menuTray
+
+# Cerrar (la X, el boton "Cerrar", o esta pantalla) oculta a la bandeja en
+# vez de salir del todo - "Salir" del menu de la bandeja (arriba) es la
+# unica forma de cerrar de verdad. El motor sigue corriendo aparte de todos
+# modos (ver la nota de arriba sobre por que cerrar la ventana no lo apaga).
+$form.Add_FormClosing({
+    param($s, $e)
+    if (-not $script:SalirDeVerdad) {
+        $e.Cancel = $true
+        $form.Hide()
+    } else {
+        $trayIcon.Visible = $false
+    }
+})
+
+# Auto-inicio y ocultado al abrir (2026-09-12, pedido explicito): usa la
+# IP/modo ya cargados en el combo (ultimos guardados), arranca solo y se
+# oculta a la bandeja en vez de dejar la ventana abierta o minimizada.
+$form.Add_Shown({
+    $btnIniciar.PerformClick()
+    $form.Hide()
+})
 
 [void]$form.ShowDialog()
+$trayIcon.Dispose()
