@@ -276,3 +276,8 @@ tocarlos).
    **BOOT**, tocar **RESET**, soltar **RESET**, soltar **BOOT**, y recién
    ahí darle a Subir (el auto-reset no entra solo por USB nativo en esta
    placa).
+
+Una vez flasheado, el mismo botón **BOOT** (ya con el firmware corriendo,
+sin resetear) sirve para elegir a qué consola se conecta la placa — ver
+"Por qué también hace falta el selector de modo del ESP32-S3" en la
+sección de Xbox 360 más arriba para los colores del LED y el gesto exacto.
