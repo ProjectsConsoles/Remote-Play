@@ -975,7 +975,6 @@ def ejecutar_modo_control():
     ultimo_toque_barra = 0.0
     texto_pulsado = ""
 
-    reloj = pygame.time.Clock()
     salir = False
     ultima_sync_brillo = 0.0
 
@@ -1071,7 +1070,32 @@ def ejecutar_modo_control():
         _texto(pygame, screen, f_pulsado, texto_pulsado, TEXTO, center=(w // 2, h - 40))
 
         pygame.display.flip()
-        reloj.tick(60)
+
+        # EL INPUT NO SE ATA AL DIBUJO (2026-09-11, medido en la Ally real).
+        # Antes la vuelta entera - eventos, lectura del mando, envio UDP y
+        # redibujado completo a pantalla completa - terminaba con
+        # reloj.tick(60), asi que el envio iba a la velocidad del DIBUJO. Y el
+        # dibujo a pantalla completa en la Ally cuesta: capturando el UDP real
+        # salian ~20 paquetes por segundo en vez de los 120 pedidos. A ese
+        # ritmo el PS3 recibe el estado muy grueso y las pulsaciones cortas se
+        # pierden enteras entre muestra y muestra - se siente como que "se
+        # traba y se queda pegado".
+        #
+        # Ahora se dibuja a ~30 cuadros por segundo y, ENTRE cuadro y cuadro,
+        # se sigue leyendo el mando y mandando al ritmo pedido.
+        proximo_cuadro = time.time() + (1.0 / 30.0)
+        while time.time() < proximo_cuadro:
+            entre = time.time()
+            if sock is not None and joystick is not None and entre >= proximo_envio:
+                try:
+                    sock.sendto(json.dumps(gp.build_state(joystick)).encode("utf-8"),
+                                (ESP32_IP, ESP32_PORT))
+                except OSError:
+                    pass
+                except Exception:
+                    break
+                proximo_envio = entre + interval
+            time.sleep(0.001)
 
     if sock is not None:
         sock.close()
