@@ -1229,6 +1229,45 @@ def ejecutar_modo_streaming():
 
 
 # ---------------------------------------------------------------------------
+# Verificacion previa al streaming - porteo del mismo chequeo de
+# client_menu.py de la Deck (2026-09-11).
+# ---------------------------------------------------------------------------
+# El timeout de 8s en la URL UDP de ffplay (ver ejecutar_modo_streaming) NO
+# alcanzo solo: probado en vivo contra la Ally real, ffplay se quedo colgado
+# de todos modos mas alla de los 8s (el proceso nunca volvio de proc.wait())
+# - mande la IP al servidor, le di Streaming, y se quedo igual de trabado
+# que antes del fix, con el mismo mutex atascado bloqueando reabrir. En vez
+# de perseguir por que el timeout del protocolo udp de ffmpeg no se dispara
+# como se esperaba, se copia la solucion que SI funciono en la Deck: antes
+# de intentar streaming, preguntarle al servidor (mismo protocolo UDP,
+# puerto 9200) si esta transmitiendo Y a la IP correcta - si no, avisar y
+# quedarse en el menu, sin llegar a lanzar ffplay para nada. El timeout de
+# la URL se deja de todos modos como red de seguridad extra, no hace dano
+# aunque no dispare.
+def verificar_servidor_listo():
+    """Devuelve (True, "") si el servidor esta corriendo y mandandole a esta
+    Ally, o (False, mensaje) si no. Si nunca se uso "Configurar servidor"
+    desde aca (no hay IP de servidor guardada), no se puede chequear nada:
+    devuelve (True, "") y sigue como siempre, sin bloquear a nadie."""
+    ip_servidor = server_udp.leer_ip_servidor_guardada()
+    if not ip_servidor:
+        return True, ""
+    ip_local = server_udp.obtener_ip_local()
+    ok, resp = server_udp.obtener_config(ip_servidor)
+    if not ok:
+        return False, f"No se pudo consultar el servidor ({ip_servidor}):\n{resp}"
+    if not resp.get("corriendo"):
+        return False, (f"El servidor ({ip_servidor}) no esta transmitiendo ahora mismo.\n\n"
+                        "Prendelo desde la PC, o revisa \"Configurar servidor\".")
+    if ip_local and resp.get("ip") != ip_local:
+        return False, (f"El servidor esta mandando el video a {resp.get('ip')}, "
+                        f"no a esta Ally ({ip_local}).\n\n"
+                        "Entra a \"Configurar servidor\" y manda tu IP con el boton "
+                        "de enviar IP.")
+    return True, ""
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -1270,6 +1309,16 @@ def main():
             except Exception as e:
                 log.error("Error en configurar cliente: %s", e)
             continue
+
+        if modo == "streaming" and not MODO_FIJO:
+            ok, mensaje = verificar_servidor_listo()
+            if not ok:
+                log.warning("Servidor no listo para streaming: %s", mensaje)
+                try:
+                    ctypes.windll.user32.MessageBoxW(0, mensaje, "PS3 Remote Play", 0x30)
+                except Exception:
+                    pass
+                continue
 
         log.info("--- modo STREAMING ---")
         # Cerrar la ventana propia antes: ffplay abre y maneja la suya, y
