@@ -203,37 +203,45 @@ def _botones_pulsados(gp, joystick):
     """Nombres de todos los botones/cruceta/stick pulsados AHORA MISMO (sin
     comparar contra nada). Separado de _botones_nuevos() (2026-09-11) para
     poder arrancar cada pantalla nueva con el estado REAL del mando como
-    linea de base - ver la nota larga en _botones_nuevos() sobre por que."""
+    linea de base - ver la nota larga en _botones_nuevos() sobre por que.
+
+    Se apoya en gp.build_state() a proposito, y no en los indices crudos del
+    joystick: asi el menu usa EXACTAMENTE el mismo mapeo normalizado de
+    SDL_GameController que el envio de input al ESP32 (ver la nota en
+    gamepad_common.py sobre por que los indices crudos no sirven en la Ally,
+    donde el mando expone 16 botones y solo la A caia en su lugar)."""
     if joystick is None:
         return set()
     try:
-        botones = set()
-        for idx, nombre in gp.BUTTON_NAMES.items():
-            if idx < joystick.get_numbuttons() and joystick.get_button(idx):
-                botones.add(nombre)
-        for hnum in range(joystick.get_numhats()):
-            hx, hy = joystick.get_hat(hnum)
-            if hx < 0:
-                botones.add("DPAD_LEFT")
-            elif hx > 0:
-                botones.add("DPAD_RIGHT")
-            if hy > 0:
-                botones.add("DPAD_UP")
-            elif hy < 0:
-                botones.add("DPAD_DOWN")
-        if joystick.get_numaxes() > 1:
-            ax, ay = joystick.get_axis(0), joystick.get_axis(1)
-            if ax < -0.5:
-                botones.add("DPAD_LEFT")
-            elif ax > 0.5:
-                botones.add("DPAD_RIGHT")
-            if ay < -0.5:
-                botones.add("DPAD_UP")
-            elif ay > 0.5:
-                botones.add("DPAD_DOWN")
-        return botones
+        estado = gp.build_state(joystick)
     except Exception:
         return set()
+
+    botones = {nombre for nombre, v in estado["buttons"].items() if v}
+
+    dx, dy = estado["dpad"]["x"], estado["dpad"]["y"]
+    if dx < 0:
+        botones.add("DPAD_LEFT")
+    elif dx > 0:
+        botones.add("DPAD_RIGHT")
+    if dy > 0:
+        botones.add("DPAD_UP")
+    elif dy < 0:
+        botones.add("DPAD_DOWN")
+
+    # El stick izquierdo tambien mueve el foco, como en la Deck.
+    ax = estado["axes"].get("LSTICK_X", 0.0)
+    ay = estado["axes"].get("LSTICK_Y", 0.0)
+    if ax < -0.5:
+        botones.add("DPAD_LEFT")
+    elif ax > 0.5:
+        botones.add("DPAD_RIGHT")
+    if ay < -0.5:
+        botones.add("DPAD_UP")
+    elif ay > 0.5:
+        botones.add("DPAD_DOWN")
+
+    return botones
 
 
 def _botones_nuevos(gp, joystick, prev):
@@ -1112,9 +1120,10 @@ def _bombear_input_hasta_que_muera(proc):
                 if pygame.joystick.get_count() > 0:
                     joystick = pygame.joystick.Joystick(0)
                     joystick.init()
-                    log.info("Mando conectado: %s (ejes=%d, botones=%d, hats=%d)",
+                    log.info("Mando conectado: %s (ejes=%d, botones=%d, hats=%d) mapeo=%s",
                              joystick.get_name(), joystick.get_numaxes(),
-                             joystick.get_numbuttons(), joystick.get_numhats())
+                             joystick.get_numbuttons(), joystick.get_numhats(),
+                             gp.modo_mapeo())
                 elif inicio - ultimo_aviso > 5:
                     ultimo_aviso = inicio
                     log.warning("Sin mando conectado; reintentando...")

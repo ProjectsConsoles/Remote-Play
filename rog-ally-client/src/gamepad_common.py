@@ -147,10 +147,111 @@ def _gatillo_pulsado(nombre: str, axes: dict) -> bool:
     return valor > (reposo + 0.3 * (1.0 - reposo))
 
 
+# ---------------------------------------------------------------------------
+# Mapeo por SDL_GameController (2026-09-11) - ver por que abajo
+# ---------------------------------------------------------------------------
+# Las tablas BUTTON_NAMES/AXIS_NAMES de arriba son indices CRUDOS de joystick,
+# heredados del mapeo "xinput" de la Deck y nunca verificados contra la Ally.
+# Medido en la Ally real: su mando expone DIECISEIS botones (un XInput
+# estandar expone 11), asi que los indices no corresponden - de todos los
+# botones solo la A caia en el lugar correcto por casualidad ("el x(a) si jalo
+# los demas nada").
+#
+# En vez de medir a mano los indices de ESTE mando y hardcodearlos (fragil, y
+# solo sirve para este modelo), se usa la API de GameController de SDL, que ya
+# trae el mapeo normalizado por dispositivo: se le pide "el boton A" y SDL
+# sabe cual es, sea cual sea el orden crudo. Tambien resuelve los gatillos, que
+# ahi son ejes conocidos (TRIGGERLEFT/RIGHT) en vez de un indice adivinado.
+#
+# Si el mando no fuera reconocido como GameController, se cae al camino viejo
+# de indices crudos - que al menos deja la A funcionando, como hasta ahora.
+_ctrl = {"obj": None, "intentado": False, "avisado": False}
+
+
+def _controlador():
+    if _ctrl["obj"] is not None or _ctrl["intentado"]:
+        return _ctrl["obj"]
+    _ctrl["intentado"] = True
+    try:
+        from pygame._sdl2 import controller as sdl_controller
+        sdl_controller.init()
+        if sdl_controller.get_count() > 0 and sdl_controller.is_controller(0):
+            _ctrl["obj"] = sdl_controller.Controller(0)
+    except Exception:
+        _ctrl["obj"] = None
+    return _ctrl["obj"]
+
+
+def modo_mapeo() -> str:
+    """'gamecontroller' si SDL reconocio el mando y se usa su mapeo
+    normalizado, 'crudo' si se cayo a los indices de las tablas de arriba.
+    Solo para dejarlo en el log y no tener que adivinar cual se uso."""
+    return "gamecontroller" if _controlador() is not None else "crudo"
+
+
+def _estado_por_gamecontroller(pygame, ctrl):
+    """buttons/axes/dpad con los nombres del contrato del firmware, leidos con
+    el mapeo normalizado de SDL. Los ejes de SDL vienen en -32768..32767 y los
+    gatillos en 0..32767; se normalizan a -1..1 (con el gatillo en reposo en
+    -1.0) para que el resto del proyecto no note la diferencia."""
+    def eje(const):
+        return round(ctrl.get_axis(const) / 32767.0, 4)
+
+    def gatillo(const):
+        return round((ctrl.get_axis(const) / 32767.0) * 2.0 - 1.0, 4)
+
+    axes = {
+        "LSTICK_X": eje(pygame.CONTROLLER_AXIS_LEFTX),
+        "LSTICK_Y": eje(pygame.CONTROLLER_AXIS_LEFTY),
+        "RSTICK_X": eje(pygame.CONTROLLER_AXIS_RIGHTX),
+        "RSTICK_Y": eje(pygame.CONTROLLER_AXIS_RIGHTY),
+        "L2_ANALOG": gatillo(pygame.CONTROLLER_AXIS_TRIGGERLEFT),
+        "R2_ANALOG": gatillo(pygame.CONTROLLER_AXIS_TRIGGERRIGHT),
+    }
+
+    buttons = {
+        "A": ctrl.get_button(pygame.CONTROLLER_BUTTON_A),
+        "B": ctrl.get_button(pygame.CONTROLLER_BUTTON_B),
+        "X": ctrl.get_button(pygame.CONTROLLER_BUTTON_X),
+        "Y": ctrl.get_button(pygame.CONTROLLER_BUTTON_Y),
+        "L1": ctrl.get_button(pygame.CONTROLLER_BUTTON_LEFTSHOULDER),
+        "R1": ctrl.get_button(pygame.CONTROLLER_BUTTON_RIGHTSHOULDER),
+        "SELECT": ctrl.get_button(pygame.CONTROLLER_BUTTON_BACK),
+        "START": ctrl.get_button(pygame.CONTROLLER_BUTTON_START),
+        "STEAM": ctrl.get_button(pygame.CONTROLLER_BUTTON_GUIDE),
+        "L3_CLICK": ctrl.get_button(pygame.CONTROLLER_BUTTON_LEFTSTICK),
+        "R3_CLICK": ctrl.get_button(pygame.CONTROLLER_BUTTON_RIGHTSTICK),
+    }
+
+    # La cruceta aca son botones, no un hat: se traduce al mismo (x, y) que
+    # espera el firmware.
+    dx = (ctrl.get_button(pygame.CONTROLLER_BUTTON_DPAD_RIGHT)
+          - ctrl.get_button(pygame.CONTROLLER_BUTTON_DPAD_LEFT))
+    dy = (ctrl.get_button(pygame.CONTROLLER_BUTTON_DPAD_UP)
+          - ctrl.get_button(pygame.CONTROLLER_BUTTON_DPAD_DOWN))
+    return buttons, axes, (dx, dy)
+
+
 def build_state(joystick) -> dict:
-    """Igual que build_state() de la Deck, pero con un solo mapeo (xinput)."""
+    """Estado del mando con los nombres del contrato del firmware.
+
+    Prefiere el mapeo normalizado de SDL_GameController; si el mando no es
+    reconocido, cae a los indices crudos de las tablas de arriba."""
     import pygame
     pygame.event.pump()
+
+    ctrl = _controlador()
+    if ctrl is not None:
+        buttons, axes, dpad_hat = _estado_por_gamecontroller(pygame, ctrl)
+        buttons["L2_CLICK"] = int(_gatillo_pulsado("L2_ANALOG", axes))
+        buttons["R2_CLICK"] = int(_gatillo_pulsado("R2_ANALOG", axes))
+        apply_ps_chord(buttons)
+        return {
+            "t": time.time(),
+            "axes": axes,
+            "buttons": buttons,
+            "dpad": {"x": dpad_hat[0], "y": dpad_hat[1]},
+        }
 
     axes = {}
     for i in range(joystick.get_numaxes()):
