@@ -525,7 +525,12 @@ def mostrar_menu():
             # que no queden "flotando" sobre el fondo oscuro.
             pygame.draw.rect(screen, color, r_titulo.inflate(0, -20).move(0, 10))
             if i == foco:
-                pygame.draw.rect(screen, (255, 255, 255), r, width=4, border_radius=14)
+                # Solo el rect del titulo, no la tarjeta entera (2026-09-11):
+                # "en la Deck solo se marca el cuadrito de color, en la Ally
+                # se marca todo" - en la Deck el resaltado va en el propio
+                # boton (highlightbackground de tk.Button), que no incluye
+                # el Label del detalle de abajo.
+                pygame.draw.rect(screen, (255, 255, 255), r_titulo, width=4, border_radius=14)
             _texto(pygame, screen, f_boton, titulo, (255, 255, 255), center=r_titulo.center)
             palabras = detalle.split()
             lineas, linea = [], ""
