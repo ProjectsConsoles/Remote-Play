@@ -134,9 +134,19 @@ def main():
         server_udp.guardar_ip_servidor(ip)
         corriendo = "SI" if resp.get("corriendo") else "no"
         modo_actual = resp.get("modo") or "(ninguno guardado)"
-        lblEstado.configure(
-            text=f"Corriendo: {corriendo}  ·  Modo actual: {modo_actual}",
-            fg=VERDE if resp.get("corriendo") else TENUE)
+        texto = f"Corriendo: {corriendo}  ·  Modo actual: {modo_actual}"
+        # IP sincronizada (2026-09-13): solo tiene sentido mostrarla si el
+        # servidor esta corriendo - apagado, "ip" es la ultima que quedo
+        # guardada de una corrida vieja, no algo que este mandando video
+        # ahorita, y compararla confundiria mas de lo que ayuda.
+        if resp.get("corriendo"):
+            ip_servidor_tiene = resp.get("ip")
+            if ip_servidor_tiene == ip_deck:
+                texto += f"\nIP sincronizada: SI (le manda el video a {ip_deck})"
+            else:
+                texto += (f"\nIP sincronizada: NO (le manda el video a "
+                           f"{ip_servidor_tiene or '?'}, no a esta Deck)")
+        lblEstado.configure(text=texto, fg=VERDE if resp.get("corriendo") else TENUE)
         for i, (clave, _, _) in enumerate(MODOS):
             if clave == resp.get("modo"):
                 estado["seleccionado"] = i
@@ -207,6 +217,38 @@ def main():
                 estado["seleccionado"] = i
         marcar()
 
+    def reiniciar_servidor():
+        # Reusa el mismo camino que "Enviar IP" (set_config con el modo
+        # actual sin cambiarlo) - config_listener.ps1 ya reinicia el motor
+        # cuando esto llega con el servidor corriendo (ver
+        # server_engine_lib.ps1 / Iniciar-Servidor). No hace falta un
+        # comando nuevo del lado de Windows para esto.
+        ip = entryIp.get().strip()
+        if not ip:
+            lblEstado.configure(text="Pon una IP primero.", fg=ROJO)
+            return
+        lblEstado.configure(text="Consultando servidor antes de reiniciar...", fg=TENUE)
+        root.update_idletasks()
+        ok, resp = server_udp.obtener_config(ip)
+        if not ok:
+            lblEstado.configure(text=str(resp), fg=ROJO)
+            return
+        if not resp.get("corriendo"):
+            lblEstado.configure(text="El servidor no esta corriendo; no hay nada que reiniciar.", fg=TENUE)
+            return
+        modo_actual = resp.get("modo") or MODOS[estado["seleccionado"]][0]
+        lblEstado.configure(text="Reiniciando servidor... puede tardar unos segundos.", fg=TENUE)
+        root.update_idletasks()
+        ok, resp2 = server_udp.aplicar_config(ip, ip_deck, modo_actual)
+        if not ok:
+            lblEstado.configure(text=str(resp2), fg=ROJO)
+            return
+        server_udp.guardar_ip_servidor(ip)
+        if resp2.get("aplicado") == "reiniciado":
+            lblEstado.configure(text="Listo: servidor reiniciado.", fg=VERDE)
+        else:
+            lblEstado.configure(text=str(resp2), fg=ROJO)
+
     btnConsultar = tk.Button(filaBotones, text="Consultar estado", font=f_boton,
                               bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55",
                               activeforeground="#ffffff", relief="flat", bd=0,
@@ -225,13 +267,20 @@ def main():
                             width=16, height=2, command=aplicar)
     btnAplicar.pack(side="left", padx=10)
 
+    btnReiniciar = tk.Button(filaBotones, text="Reiniciar servidor (X)", font=f_boton,
+                              bg="#a04a2d", fg="#ffffff", activebackground="#b5552f",
+                              activeforeground="#ffffff", relief="flat", bd=0,
+                              width=18, height=2, command=reiniciar_servidor)
+    btnReiniciar.pack(side="left", padx=10)
+
     btnVolver = tk.Button(filaBotones, text="Volver", font=f_boton,
                            bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55",
                            activeforeground="#ffffff", relief="flat", bd=0,
                            width=12, height=2, command=root.destroy)
     btnVolver.pack(side="left", padx=10)
 
-    tk.Label(root, text="Flechas para elegir modo, Enter aplica, Y manda la IP, Escape vuelve.",
+    tk.Label(root, text="Flechas para elegir modo, Enter aplica, Y manda la IP, "
+                         "X reinicia el servidor, Escape vuelve.",
              font=f_pie, bg=FONDO, fg=TENUE).pack(side="bottom", pady=16)
 
     root.bind("<Left>", lambda e: elegir_modo((estado["seleccionado"] - 1) % len(MODOS)))
@@ -241,6 +290,8 @@ def main():
     root.bind("<Return>", lambda e: aplicar())
     root.bind("<y>", lambda e: enviar_ip())
     root.bind("<Y>", lambda e: enviar_ip())
+    root.bind("<x>", lambda e: reiniciar_servidor())
+    root.bind("<X>", lambda e: reiniciar_servidor())
     root.bind("<Escape>", lambda e: root.destroy())
 
     mando = Mando()
@@ -259,6 +310,8 @@ def main():
                 aplicar()
             elif nombre == "Y":
                 enviar_ip()
+            elif nombre == "X":
+                reiniciar_servidor()
             elif nombre == "B":
                 root.destroy()
                 return
