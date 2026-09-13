@@ -194,27 +194,50 @@ def mostrar_menu():
         ventana.grab_set()
 
     opciones = [b_stream, b_control, b_config_srv, b_config_cli]
-    foco = {"i": 0}
+
+    btnInfo = tk.Button(root, text="Info: colores del ESP32-S3", font=f_pie,
+                         bg=FONDO, fg=TENUE, activebackground=FONDO, activeforeground=TEXTO,
+                         relief="flat", bd=0, highlightthickness=3, highlightbackground=FONDO,
+                         command=mostrar_info)
+    btnInfo.pack(side="bottom", pady=(0, 4))
+
+    # zona="grid"/"info" (2026-09-13, "otra vez el boton solo es tactil, no
+    # puedo focusearlo" - mismo patron ya usado en client_server_config.py y
+    # client_settings.py): bajar desde la fila de abajo de la grilla 2x2
+    # entra al boton de Info; arriba desde ahi regresa a la grilla.
+    foco = {"zona": "grid", "i": 0}
 
     def marcar():
         for i, b in enumerate(opciones):
-            b.configure(highlightbackground="#ffffff" if i == foco["i"] else FONDO)
-        opciones[foco["i"]].focus_set()
+            en_foco = foco["zona"] == "grid" and i == foco["i"]
+            b.configure(highlightbackground="#ffffff" if en_foco else FONDO)
+        btnInfo.configure(highlightbackground="#ffffff" if foco["zona"] == "info" else FONDO)
+        if foco["zona"] == "grid":
+            opciones[foco["i"]].focus_set()
+        else:
+            btnInfo.focus_set()
 
     def mover(dx, dy):
+        if foco["zona"] == "info":
+            if dy < 0:
+                foco["zona"] = "grid"
+                marcar()
+            return
         fila, col = divmod(foco["i"], 2)
+        if dy > 0 and fila == 1:
+            foco["zona"] = "info"
+            marcar()
+            return
         fila = (fila + dy) % 2
         col = (col + dx) % 2
         foco["i"] = fila * 2 + col
         marcar()
 
     def confirmar():
+        if foco["zona"] == "info":
+            mostrar_info()
+            return
         opciones[foco["i"]].invoke()
-
-    btnInfo = tk.Button(root, text="Info: colores del ESP32-S3 (Y)", font=f_pie,
-                         bg=FONDO, fg=TENUE, activebackground=FONDO, activeforeground=TEXTO,
-                         relief="flat", bd=0, command=mostrar_info)
-    btnInfo.pack(side="bottom", pady=(0, 4))
 
     pie = tk.Label(root, font=f_pie, bg=FONDO, fg=TENUE)
     pie.pack(side="bottom", pady=24)
