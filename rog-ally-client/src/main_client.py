@@ -420,6 +420,8 @@ def mostrar_menu():
                 elif evento.key == pygame.K_ESCAPE:
                     resultado = None
                     corriendo = False
+                elif evento.key == pygame.K_y:
+                    mostrar_info_esp32()
             elif evento.type == pygame.MOUSEBUTTONDOWN:
                 for i, r in enumerate(rects):
                     if r.collidepoint(evento.pos):
@@ -443,6 +445,8 @@ def mostrar_menu():
         if "A" in nuevos:
             resultado = opciones[foco][3]
             corriendo = False
+        if "Y" in nuevos:
+            mostrar_info_esp32()
         if "B" in nuevos:
             resultado = None
             corriendo = False
@@ -491,13 +495,88 @@ def mostrar_menu():
                 _texto(pygame, screen, f_ayuda, ln, TENUE,
                        center=(r.centerx, r_titulo.bottom + 22 + j * 20))
 
-        pie = "Flechas/stick + Enter/A, Escape/B cancela.   (mouse/touch siempre funciona)"
+        pie = ("Flechas/stick + Enter/A, Escape/B cancela, Y colores del ESP32.   "
+               "(mouse/touch siempre funciona)")
         _texto(pygame, screen, f_pie, pie, TENUE, center=(w // 2, h - 30))
 
         pygame.display.flip()
         reloj.tick(30)
 
     return resultado
+
+
+# ---------------------------------------------------------------------------
+# Info: colores del selector de modo del ESP32-S3 (2026-09-13, "se me
+# olvidan los colores" - porteo de la pantalla equivalente agregada a
+# client_menu.py de la Deck). Loop propio y bloqueante, igual que las demas
+# pantallas de este archivo: al volver (A o B), quien la llamo sigue
+# exactamente donde estaba, sin nada que sincronizar entre ventanas (a
+# diferencia de la Deck, que usa tkinter con un Toplevel aparte).
+# ---------------------------------------------------------------------------
+
+def mostrar_info_esp32():
+    import pygame
+    screen = _abrir_ventana(pygame, "Info: ESP32-S3")
+    w, h = screen.get_size()
+
+    f_titulo = _fuente(pygame, 32, True)
+    f_texto = _fuente(pygame, 18)
+    f_nombre = _fuente(pygame, 20, True)
+    f_consola = _fuente(pygame, 14)
+    f_pie = _fuente(pygame, 14)
+
+    colores = [
+        ((212, 177, 6), "Amarillo", "PS3"),
+        (AZUL, "Azul", "PS2 / OPL"),
+        ((142, 95, 214), "Morado", "Xbox 360"),
+    ]
+
+    joystick = _joystick_activo(pygame, None)
+    prev_botones = _botones_pulsados(gp, joystick)
+    reloj = pygame.time.Clock()
+
+    corriendo = True
+    while corriendo:
+        for evento in pygame.event.get():
+            if evento.type == pygame.QUIT:
+                corriendo = False
+            elif evento.type == pygame.KEYDOWN and evento.key in (pygame.K_ESCAPE, pygame.K_RETURN):
+                corriendo = False
+            elif evento.type == pygame.JOYDEVICEADDED:
+                joystick = pygame.joystick.Joystick(evento.device_index)
+                joystick.init()
+
+        joystick = _joystick_activo(pygame, joystick)
+        nuevos, prev_botones = _botones_nuevos(gp, joystick, prev_botones)
+        if "B" in nuevos or "A" in nuevos:
+            corriendo = False
+
+        screen.fill(FONDO)
+        _texto(pygame, screen, f_titulo, "Selector de modo del ESP32-S3", TEXTO, center=(w // 2, 70))
+        _texto(pygame, screen, f_texto,
+               "Con la placa ya encendida (nunca al conectarla/resetear),", TENUE, center=(w // 2, 120))
+        _texto(pygame, screen, f_texto,
+               "manten BOOT ~1.5s. El LED cicla de color cada ~0.7s;", TENUE, center=(w // 2, 146))
+        _texto(pygame, screen, f_texto,
+               "suelta el boton en el color que corresponda.", TENUE, center=(w // 2, 172))
+
+        cx = w // 2
+        espacio = 200
+        base_x = cx - espacio
+        for i, (color, nombre, consola) in enumerate(colores):
+            x = base_x + i * espacio
+            rect = pygame.Rect(x - 30, 240, 60, 60)
+            pygame.draw.rect(screen, color, rect, border_radius=8)
+            pygame.draw.rect(screen, TEXTO, rect, width=2, border_radius=8)
+            _texto(pygame, screen, f_nombre, nombre, TEXTO, center=(x, 330))
+            _texto(pygame, screen, f_consola, consola, TENUE, center=(x, 356))
+
+        _texto(pygame, screen, f_texto,
+               "El modo elegido queda guardado en la placa hasta que se cambie a mano.",
+               TENUE, center=(w // 2, 420))
+        _texto(pygame, screen, f_pie, "A o B para volver.", TENUE, center=(w // 2, h - 30))
+        pygame.display.flip()
+        reloj.tick(30)
 
 
 # ---------------------------------------------------------------------------
@@ -537,7 +616,8 @@ def mostrar_config_servidor():
     ip_ally = server_udp.obtener_ip_local() or "?"
     estado = {"ip_servidor": server_udp.leer_ip_servidor_guardada() or IP_SERVIDOR_DEFAULT,
               "editando_ip": False, "seleccionado": 0,
-              "txt": "Sin consultar todavia.", "color": TENUE}
+              "txt": "Sin consultar todavia.", "color": TENUE,
+              "txt2": "", "color2": TENUE}
 
     # 340x150 (2026-09-11, antes 260x120): con 260 de ancho el titulo de cada
     # modo ("1280x720 - MJPEG (recomendado)") no cabia en una sola linea y no
@@ -571,6 +651,9 @@ def mostrar_config_servidor():
         _texto(pygame, screen, f_label, estado["ip_servidor"], TEXTO, center=campo_ip_rect.center)
         _texto(pygame, screen, f_label, estado["txt"], estado["color"],
                center=(w // 2, campo_ip_rect.bottom + 26))
+        if estado["txt2"]:
+            _texto(pygame, screen, f_pie, estado["txt2"], estado["color2"],
+                   center=(w // 2, campo_ip_rect.bottom + 48))
 
         def _envolver(fuente, texto, ancho_max):
             palabras = texto.split()
@@ -599,7 +682,8 @@ def mostrar_config_servidor():
             for j, ln in enumerate(lineas):
                 _texto(pygame, screen, f_modo_d, ln, TENUE, center=(r.centerx, y_detalle + j * 18))
 
-        pie = "Flechas elige modo, A aplica, X consulta, Y manda IP, toca el cuadro edita la IP, B vuelve."
+        pie = ("Flechas elige modo, A aplica, X consulta, Y manda IP, L1 reinicia el servidor, "
+               "toca el cuadro edita la IP, B vuelve.")
         _texto(pygame, screen, f_pie, pie, TENUE, center=(w // 2, h - 30))
         pygame.display.flip()
 
@@ -615,6 +699,20 @@ def mostrar_config_servidor():
         modo_actual = resp.get("modo") or "(ninguno guardado)"
         estado["txt"] = f"Corriendo: {corriendo_txt}  ·  Modo actual: {modo_actual}"
         estado["color"] = VERDE if resp.get("corriendo") else TENUE
+        # IP sincronizada (2026-09-13, mismo dato/logica que client_server_config.py
+        # de la Deck): solo tiene sentido si el servidor esta corriendo -
+        # apagado, "ip" es la ultima que quedo guardada de una corrida vieja.
+        if resp.get("corriendo"):
+            ip_servidor_tiene = resp.get("ip")
+            if ip_servidor_tiene == ip_ally:
+                estado["txt2"] = f"IP sincronizada: SI (le manda el video a {ip_ally})"
+                estado["color2"] = VERDE
+            else:
+                estado["txt2"] = (f"IP sincronizada: NO (le manda el video a "
+                                   f"{ip_servidor_tiene or '?'}, no a esta Ally)")
+                estado["color2"] = (200, 80, 60)
+        else:
+            estado["txt2"] = ""
         for i, (clave, _, _) in enumerate(MODOS_SERVIDOR):
             if clave == resp.get("modo"):
                 estado["seleccionado"] = i
@@ -668,6 +766,34 @@ def mostrar_config_servidor():
         for i, (clave, _, _) in enumerate(MODOS_SERVIDOR):
             if clave == modo_actual:
                 estado["seleccionado"] = i
+
+    def reiniciar_servidor():
+        # Mismo mecanismo que "Enviar IP" (set_config con el modo actual sin
+        # cambiarlo, ver server_engine_lib.ps1/Iniciar-Servidor del lado de
+        # Windows) - porteo de client_server_config.py de la Deck. A/B/X/Y
+        # ya estan ocupados aca (Aplicar/Volver/Consultar/Enviar IP), asi
+        # que esto va en L1.
+        estado["txt"], estado["color"] = "Consultando servidor antes de reiniciar...", TENUE
+        dibujar()
+        ok, resp = server_udp.obtener_config(estado["ip_servidor"])
+        if not ok:
+            estado["txt"], estado["color"] = str(resp), (200, 80, 60)
+            return
+        if not resp.get("corriendo"):
+            estado["txt"], estado["color"] = "El servidor no esta corriendo; no hay nada que reiniciar.", TENUE
+            return
+        modo_actual = resp.get("modo") or MODOS_SERVIDOR[estado["seleccionado"]][0]
+        estado["txt"], estado["color"] = "Reiniciando servidor... puede tardar unos segundos.", TENUE
+        dibujar()
+        ok, resp2 = server_udp.aplicar_config(estado["ip_servidor"], ip_ally, modo_actual)
+        if not ok:
+            estado["txt"], estado["color"] = str(resp2), (200, 80, 60)
+            return
+        server_udp.guardar_ip_servidor(estado["ip_servidor"])
+        if resp2.get("aplicado") == "reiniciado":
+            estado["txt"], estado["color"] = "Listo: servidor reiniciado.", VERDE
+        else:
+            estado["txt"], estado["color"] = str(resp2), (200, 80, 60)
 
     joystick = _joystick_activo(pygame, None)
     prev_botones = _botones_pulsados(gp, joystick)
@@ -731,6 +857,8 @@ def mostrar_config_servidor():
                 consultar()
             if "Y" in nuevos:
                 enviar_ip()
+            if "L1" in nuevos:
+                reiniciar_servidor()
             if "B" in nuevos:
                 corriendo = False
 
