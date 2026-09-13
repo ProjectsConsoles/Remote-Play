@@ -153,6 +153,16 @@ FD_SALTO="${PS3RP_FD_SALTO:-6}"
 LSFG_CONF="${PS3RP_LSFG_CONF:-$HOME/.config/lsfg-vk/conf.toml}"
 LSFG_PAUSA="${PS3RP_LSFG_PAUSA:-4}"
 LSFG_PAUSA_SCRIPT="$SCRIPT_DIR/lsfg_pausa_temporal.sh"
+# Veda ENTRE disparos del ajuste de lsfg (2026-09-13, distinta de "espera"/
+# VQ_ESPERA de arriba - esas gobiernan el reinicio de ffplay, que aca ya no
+# pasa). Medido en vivo contra el juego ICO (bastante mas inestable que
+# otros): la mayoria de las rafagas reales quedan MUY separadas (91 a 485s),
+# pero un mismo evento a veces genera dos saltos de fd seguidos ~16s
+# despues del primero - con la veda vieja de 15s (compartida con el
+# reinicio de ffplay) esos pares disparaban dos veces. 25s los trata como
+# un solo evento sin tapar rafagas de verdad distintas (todas las medidas
+# quedaron muy por encima de eso).
+LSFG_VEDA="${PS3RP_LSFG_VEDA:-25}"
 
 VENV_PY="$SCRIPT_DIR/ps3rp-env/bin/python3"
 INPUT_SCRIPT="$SCRIPT_DIR/input_client_v3.py"
@@ -944,9 +954,10 @@ stamp() {
              -v cada="$STATS_EVERY" -v fdsalto="$FD_SALTO" \
              -v lsfgon="${PS3RP_LSFG:-0}" -v lsfgperfil="${LSFG_PROCESS:-}" \
              -v lsfgconf="$LSFG_CONF" -v lsfgscript="$LSFG_PAUSA_SCRIPT" \
-             -v lsfgpausa="$LSFG_PAUSA" '
+             -v lsfgpausa="$LSFG_PAUSA" -v lsfgveda="$LSFG_VEDA" '
               BEGIN {
                   RS = "[\r\n]"; last = 0; muestras = 0; seguidas = 0; ultimaStat = 0; fdAnterior = -1
+                  ultimoLsfg = -999999
                   # Chequeo UNA vez al arrancar, no en cada muestra: si esto
                   # corre bajo ~/lsfg de verdad (lsfgperfil viene puesto) y el
                   # ajustador existe, preferimos el ajuste sin parpadeo sobre
@@ -963,7 +974,19 @@ stamp() {
                   muestras = 0
                   fdAnterior = -1
               }
-              function bajarLsfgTemporal(motivo) {
+              function bajarLsfgTemporal(motivo,   t2) {
+                  t2 = systime()
+                  if (t2 - ultimoLsfg < lsfgveda + 0) {
+                      # Veda propia (2026-09-13, distinta de "espera"): un
+                      # mismo evento a veces genera dos saltos de fd seguidos
+                      # ~16s aparte (medido en vivo con ICO) - esto los trata
+                      # como uno solo en vez de bajar el multiplier dos veces.
+                      printf("%s [watchdog] %s (en veda de lsfg, %ds desde el ultimo ajuste - se ignora, mismo evento).\n",
+                             strftime("[%H:%M:%S]"), motivo, t2 - ultimoLsfg)
+                      fflush()
+                      return
+                  }
+                  ultimoLsfg = t2
                   printf("%s [watchdog] %s Bajando generacion de cuadros de lsfg %ss (perfil %s) en vez de reiniciar ffplay.\n",
                          strftime("[%H:%M:%S]"), motivo, lsfgpausa, lsfgperfil)
                   fflush()
