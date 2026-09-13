@@ -283,11 +283,12 @@ def main():
 
     # highlightthickness/highlightbackground (2026-09-13, "quiero que TODOS
     # los botones sean ejecutables [y focuseables]"): antes estos 3 botones
-    # solo se alcanzaban con mouse/tactil, fuera del sistema de foco de
-    # filas_nav. Se agregan al MISMO filas_nav (mas abajo) para que la
-    # cruceta siga bajando hacia ellos despues de la ultima opcion - el
-    # highlight funciona igual que en las filas de arriba porque es el mismo
-    # truco (highlightbackground blanco = foco).
+    # solo se alcanzaban con mouse/tactil. Primer intento los agrego a
+    # filas_nav como si fueran una fila mas (arriba/abajo los recorria) -
+    # "no puedo navegar en ellos con izq/der, solo con arriba/abajo"
+    # (reportado el mismo dia): estan uno al lado del otro, no uno debajo
+    # del otro, asi que van en su PROPIA zona horizontal (botones_nav),
+    # igual que se hizo en client_server_config.py para sus botones.
     btnGuardar = tk.Button(filaBotones, text="Guardar", font=f_boton, width=14, height=2,
                             bg=AZUL, fg="#ffffff", activebackground=AZUL, activeforeground="#ffffff",
                             relief="flat", bd=0, highlightthickness=3, highlightbackground=FONDO,
@@ -304,32 +305,37 @@ def main():
                            command=root.destroy)
     btnVolver.pack(side="left", padx=10)
 
-    # Cuantas filas de OPCIONES hay (antes de agregar los botones) - marcar()
-    # solo intenta desplazar el scroll del canvas para las primeras
-    # "total_opciones" entradas; los botones viven fuera del scroll (fijos
-    # abajo), asi que desplazar el canvas por ellos no tendria sentido (sus
-    # coordenadas ni siquiera son relativas al mismo canvas).
-    total_opciones = len(filas_nav)
-    filas_nav.append({"frame": btnGuardar, "on_a": guardar_todo})
-    filas_nav.append({"frame": btnRestaurar, "on_a": restaurar_defaults})
-    filas_nav.append({"frame": btnVolver, "on_a": root.destroy})
+    botones_nav = [
+        (btnGuardar, guardar_todo),
+        (btnRestaurar, restaurar_defaults),
+        (btnVolver, root.destroy),
+    ]
 
-    tk.Label(root, text="Cruceta arriba/abajo mueve el foco, izq/der cambia el valor, A activa, B vuelve.",
+    tk.Label(root, text="Cruceta arriba/abajo mueve el foco (baja hasta los botones), "
+                         "izq/der cambia el valor o el boton, A activa, B vuelve.",
              font=f_pie, bg=FONDO, fg=TENUE).pack(side="bottom", pady=10)
 
-    # --- navegacion por fila (2026-09-11) -----------------------------------
+    # --- navegacion (2026-09-11, zonas agregadas 2026-09-13) ----------------
     # Antes el mando solo movia el scroll y todo lo demas era tactil/teclado -
     # "por cada opcion deberia responder a la botonera de la Deck" (reportado
-    # el mismo dia). Con filas_nav ya armado arriba, cada fila sabe reaccionar
+    # el 2026-09-11). Con filas_nav armado arriba, cada fila sabe reaccionar
     # a izquierda/derecha/A segun su tipo (bool alterna, enum cicla, numero
     # suma/resta 1, texto solo enfoca el Entry para teclear).
-    foco = {"i": 0}
+    #
+    # zona="opciones": arriba/abajo recorre filas_nav (como siempre);
+    # bajar desde la ULTIMA fila entra a zona="botones" (foco=0). Ahi
+    # izq/der recorre los 3 botones y A ejecuta el marcado; arriba regresa
+    # a la ultima fila de opciones.
+    foco = {"zona": "opciones", "i": 0, "boton": 0}
 
     def marcar():
         for i, nav in enumerate(filas_nav):
-            color_apagado = PANEL if i < total_opciones else FONDO
-            nav["frame"].configure(highlightbackground="#ffffff" if i == foco["i"] else color_apagado)
-        if filas_nav and foco["i"] < total_opciones:
+            en_foco = foco["zona"] == "opciones" and i == foco["i"]
+            nav["frame"].configure(highlightbackground="#ffffff" if en_foco else PANEL)
+        for i, (widget, _) in enumerate(botones_nav):
+            en_foco = foco["zona"] == "botones" and i == foco["boton"]
+            widget.configure(highlightbackground="#ffffff" if en_foco else FONDO)
+        if foco["zona"] == "opciones" and filas_nav:
             fila_actual = filas_nav[foco["i"]]["frame"]
             root.update_idletasks()
             y = fila_actual.winfo_y()
@@ -337,12 +343,40 @@ def main():
             canvas.yview_moveto(max(0.0, (y - 40) / alto_total))
 
     def mover_foco(delta):
+        """Arriba/abajo. Dentro de zona="botones" solo entiende "arriba"
+        (regresa a opciones) - los botones no tienen mas filas entre si."""
+        if foco["zona"] == "botones":
+            if delta < 0:
+                foco["zona"] = "opciones"
+                marcar()
+            return
         if not filas_nav:
             return
-        foco["i"] = (foco["i"] + delta) % len(filas_nav)
+        nuevo = foco["i"] + delta
+        if nuevo >= len(filas_nav) and botones_nav:
+            foco["zona"] = "botones"
+            foco["boton"] = 0
+            marcar()
+            return
+        foco["i"] = nuevo % len(filas_nav)
         marcar()
 
+    def mover_lateral(delta):
+        """Izquierda/derecha. En zona="botones" recorre los 3 botones; en
+        zona="opciones" cambia el valor de la fila (comportamiento de
+        siempre, via accionar)."""
+        if foco["zona"] == "botones":
+            if botones_nav:
+                foco["boton"] = (foco["boton"] + delta) % len(botones_nav)
+                marcar()
+            return
+        accionar("on_left" if delta < 0 else "on_right")
+
     def accionar(lado):
+        if foco["zona"] == "botones":
+            if lado == "on_a" and botones_nav:
+                botones_nav[foco["boton"]][1]()
+            return
         if not filas_nav:
             return
         nav = filas_nav[foco["i"]]
@@ -364,9 +398,9 @@ def main():
             elif nombre == "DPAD_DOWN":
                 mover_foco(1)
             elif nombre == "DPAD_LEFT":
-                accionar("on_left")
+                mover_lateral(-1)
             elif nombre == "DPAD_RIGHT":
-                accionar("on_right")
+                mover_lateral(1)
             elif nombre == "A":
                 accionar("on_a")
             elif nombre == "B":
