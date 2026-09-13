@@ -181,6 +181,8 @@ def mostrar_menu():
         btnCerrar = tk.Button(ventana, text="Volver", font=f_boton,
                                bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55",
                                activeforeground="#ffffff", relief="flat", bd=0,
+                               highlightthickness=3, highlightbackground="#ffffff",
+                               highlightcolor="#ffffff",
                                width=12, height=2, command=cerrar_info)
         btnCerrar.pack(pady=30)
         btnCerrar.focus_set()
@@ -198,7 +200,7 @@ def mostrar_menu():
     btnInfo = tk.Button(root, text="Info: colores del ESP32-S3", font=f_pie,
                          bg=FONDO, fg=TENUE, activebackground=FONDO, activeforeground=TEXTO,
                          relief="flat", bd=0, highlightthickness=3, highlightbackground=FONDO,
-                         command=mostrar_info)
+                         highlightcolor="#ffffff", command=mostrar_info)
     btnInfo.pack(side="bottom", pady=(0, 4))
 
     # zona="grid"/"info" (2026-09-13, "otra vez el boton solo es tactil, no
