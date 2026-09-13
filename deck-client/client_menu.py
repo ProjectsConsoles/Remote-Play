@@ -124,6 +124,75 @@ def mostrar_menu():
         "Variables de latencia de esta Deck (VSYNC, watchdog, etc.).",
         "#c07d2f", "config_cliente")
 
+    # Info del selector de modo del ESP32-S3 (2026-09-13, "se me olvidan los
+    # colores"): boton aparte, NO metido en la grilla 2x2 de arriba (esa
+    # tiene su propia matematica de foco por fila/columna, meterle un 5to
+    # elemento la complicaria sin necesidad) - mismo patron que Y/X en las
+    # otras pantallas (atajo fijo, no parte de la navegacion principal).
+    # "abierta"/"cerrar" (no solo un bool): revisar_mando esta fuera del
+    # scope de mostrar_info y necesita poder cerrar la ventana de info al
+    # apretar B sin destruir TAMBIEN el menu de atras (los dos escuchan al
+    # mismo mando via el mainloop de tkinter, sin importar cual ventana
+    # tiene el foco - sin esto, B cerraba las dos de un jalon).
+    info_estado = {"abierta": False, "cerrar": None}
+
+    def mostrar_info():
+        info_estado["abierta"] = True
+        ventana = tk.Toplevel(root)
+        ventana.title("Selector de modo del ESP32-S3")
+        ventana.configure(bg=FONDO)
+        try:
+            ventana.attributes("-fullscreen", True)
+        except Exception:
+            ventana.geometry("700x500")
+
+        tk.Label(ventana, text="Selector de modo del ESP32-S3", font=f_titulo,
+                 bg=FONDO, fg=TEXTO).pack(pady=(40, 10))
+        tk.Label(ventana,
+                 text="Con la placa ya encendida (nunca al conectarla/resetear),\n"
+                      "mantén BOOT ~1.5s. El LED cicla de color cada ~0.7s;\n"
+                      "suelta el botón en el color que corresponda.",
+                 font=f_ayuda, bg=FONDO, fg=TENUE, justify="center").pack(pady=(0, 30))
+
+        colores = [
+            ("#d4b106", "Amarillo", "PS3"),
+            ("#2d6cdf", "Azul", "PS2 / OPL"),
+            ("#8e5fd6", "Morado", "Xbox 360"),
+        ]
+        filaColores = tk.Frame(ventana, bg=FONDO)
+        filaColores.pack(pady=10)
+        for color, nombre, consola in colores:
+            marco = tk.Frame(filaColores, bg=FONDO)
+            marco.pack(side="left", padx=24)
+            tk.Frame(marco, bg=color, width=48, height=48,
+                     highlightthickness=2, highlightbackground=TEXTO).pack()
+            tk.Label(marco, text=nombre, font=f_boton, bg=FONDO, fg=TEXTO).pack(pady=(10, 0))
+            tk.Label(marco, text=consola, font=f_detalle, bg=FONDO, fg=TENUE).pack()
+
+        tk.Label(ventana, text="El modo elegido queda guardado en la placa hasta que se cambie a mano.",
+                 font=f_pie, bg=FONDO, fg=TENUE).pack(pady=(30, 0))
+
+        def cerrar_info():
+            info_estado["abierta"] = False
+            ventana.destroy()
+
+        info_estado["cerrar"] = cerrar_info
+
+        btnCerrar = tk.Button(ventana, text="Volver", font=f_boton,
+                               bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55",
+                               activeforeground="#ffffff", relief="flat", bd=0,
+                               width=12, height=2, command=cerrar_info)
+        btnCerrar.pack(pady=30)
+        btnCerrar.focus_set()
+
+        tk.Label(ventana, text="B o Escape para volver.", font=f_pie,
+                 bg=FONDO, fg=TENUE).pack(side="bottom", pady=16)
+
+        ventana.bind("<Escape>", lambda e: cerrar_info())
+        ventana.bind("<Return>", lambda e: cerrar_info())
+        ventana.protocol("WM_DELETE_WINDOW", cerrar_info)
+        ventana.grab_set()
+
     opciones = [b_stream, b_control, b_config_srv, b_config_cli]
     foco = {"i": 0}
 
@@ -142,6 +211,11 @@ def mostrar_menu():
     def confirmar():
         opciones[foco["i"]].invoke()
 
+    btnInfo = tk.Button(root, text="Info: colores del ESP32-S3 (Y)", font=f_pie,
+                         bg=FONDO, fg=TENUE, activebackground=FONDO, activeforeground=TEXTO,
+                         relief="flat", bd=0, command=mostrar_info)
+    btnInfo.pack(side="bottom", pady=(0, 4))
+
     pie = tk.Label(root, font=f_pie, bg=FONDO, fg=TENUE)
     pie.pack(side="bottom", pady=24)
 
@@ -152,17 +226,26 @@ def mostrar_menu():
     root.bind("<Tab>", lambda e: mover(1, 0))
     root.bind("<Return>", lambda e: confirmar())
     root.bind("<space>", lambda e: confirmar())
+    root.bind("<y>", lambda e: mostrar_info())
+    root.bind("<Y>", lambda e: mostrar_info())
     root.bind("<Escape>", lambda e: root.destroy())
 
     mando = Mando()
     pie.configure(
-        text=("Cruceta/stick para moverte, confirma con A, cancela con B."
+        text=("Cruceta/stick para moverte, confirma con A, cancela con B, info con Y."
               if mando.ok else
               "Toca la pantalla para elegir.")
         + "   (el tactil siempre funciona)")
 
     def revisar_mando():
         for nombre in mando.nuevos():
+            # Mientras la ventana de info esta abierta, el mando solo la
+            # cierra (B) - todo lo demas (mover el foco, A) es del menu de
+            # atras y no deberia colar mientras se esta leyendo la info.
+            if info_estado["abierta"]:
+                if nombre == "B" and info_estado["cerrar"]:
+                    info_estado["cerrar"]()
+                continue
             if nombre == "DPAD_LEFT":
                 mover(-1, 0)
             elif nombre == "DPAD_RIGHT":
@@ -174,6 +257,8 @@ def mostrar_menu():
             elif nombre == "A":
                 confirmar()
                 return          # la ventana ya se destruyo
+            elif nombre == "Y":
+                mostrar_info()
             elif nombre == "B":
                 root.destroy()
                 return
