@@ -281,15 +281,38 @@ def main():
         root.destroy()
         main()  # reabre la pantalla limpia, releyendo (ya no hay archivo) los defaults
 
-    tk.Button(filaBotones, text="Guardar", font=f_boton, width=14, height=2,
-              bg=AZUL, fg="#ffffff", activebackground=AZUL, activeforeground="#ffffff",
-              relief="flat", bd=0, command=guardar_todo).pack(side="left", padx=10)
-    tk.Button(filaBotones, text="Restaurar defaults", font=f_boton, width=18, height=2,
-              bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55", activeforeground="#ffffff",
-              relief="flat", bd=0, command=restaurar_defaults).pack(side="left", padx=10)
-    tk.Button(filaBotones, text="Volver", font=f_boton, width=10, height=2,
-              bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55", activeforeground="#ffffff",
-              relief="flat", bd=0, command=root.destroy).pack(side="left", padx=10)
+    # highlightthickness/highlightbackground (2026-09-13, "quiero que TODOS
+    # los botones sean ejecutables [y focuseables]"): antes estos 3 botones
+    # solo se alcanzaban con mouse/tactil, fuera del sistema de foco de
+    # filas_nav. Se agregan al MISMO filas_nav (mas abajo) para que la
+    # cruceta siga bajando hacia ellos despues de la ultima opcion - el
+    # highlight funciona igual que en las filas de arriba porque es el mismo
+    # truco (highlightbackground blanco = foco).
+    btnGuardar = tk.Button(filaBotones, text="Guardar", font=f_boton, width=14, height=2,
+                            bg=AZUL, fg="#ffffff", activebackground=AZUL, activeforeground="#ffffff",
+                            relief="flat", bd=0, highlightthickness=3, highlightbackground=FONDO,
+                            command=guardar_todo)
+    btnGuardar.pack(side="left", padx=10)
+    btnRestaurar = tk.Button(filaBotones, text="Restaurar defaults", font=f_boton, width=18, height=2,
+                              bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55", activeforeground="#ffffff",
+                              relief="flat", bd=0, highlightthickness=3, highlightbackground=FONDO,
+                              command=restaurar_defaults)
+    btnRestaurar.pack(side="left", padx=10)
+    btnVolver = tk.Button(filaBotones, text="Volver", font=f_boton, width=10, height=2,
+                           bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55", activeforeground="#ffffff",
+                           relief="flat", bd=0, highlightthickness=3, highlightbackground=FONDO,
+                           command=root.destroy)
+    btnVolver.pack(side="left", padx=10)
+
+    # Cuantas filas de OPCIONES hay (antes de agregar los botones) - marcar()
+    # solo intenta desplazar el scroll del canvas para las primeras
+    # "total_opciones" entradas; los botones viven fuera del scroll (fijos
+    # abajo), asi que desplazar el canvas por ellos no tendria sentido (sus
+    # coordenadas ni siquiera son relativas al mismo canvas).
+    total_opciones = len(filas_nav)
+    filas_nav.append({"frame": btnGuardar, "on_a": guardar_todo})
+    filas_nav.append({"frame": btnRestaurar, "on_a": restaurar_defaults})
+    filas_nav.append({"frame": btnVolver, "on_a": root.destroy})
 
     tk.Label(root, text="Cruceta arriba/abajo mueve el foco, izq/der cambia el valor, A activa, B vuelve.",
              font=f_pie, bg=FONDO, fg=TENUE).pack(side="bottom", pady=10)
@@ -304,8 +327,9 @@ def main():
 
     def marcar():
         for i, nav in enumerate(filas_nav):
-            nav["frame"].configure(highlightbackground="#ffffff" if i == foco["i"] else PANEL)
-        if filas_nav:
+            color_apagado = PANEL if i < total_opciones else FONDO
+            nav["frame"].configure(highlightbackground="#ffffff" if i == foco["i"] else color_apagado)
+        if filas_nav and foco["i"] < total_opciones:
             fila_actual = filas_nav[foco["i"]]["frame"]
             root.update_idletasks()
             y = fila_actual.winfo_y()

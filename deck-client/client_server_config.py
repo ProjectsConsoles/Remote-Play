@@ -91,11 +91,21 @@ def main():
     fila = tk.Frame(root, bg=FONDO)
     fila.pack(expand=True)
 
-    estado = {"seleccionado": 0}
+    # "zona"/"boton" (2026-09-13, "quiero que TODOS los botones sean
+    # ejecutables y focuseables"): antes la cruceta solo se movia entre las
+    # 4 tarjetas de modo, y los botones de abajo (Consultar, Enviar IP,
+    # Aplicar, Reiniciar, Volver) solo se alcanzaban con mouse/tactil o los
+    # atajos fijos que ya existian (Y/X/Enter, que se quedan igual). Ahora
+    # bajar desde la fila de abajo de tarjetas mete el foco a la fila de
+    # botones (zona="botones"), izq/der se mueve entre ellos, A ejecuta el
+    # que este marcado, y arriba desde ahi regresa a las tarjetas.
+    estado = {"seleccionado": 0, "zona": "tarjetas", "boton": 0}
     tarjetas = []
+    botones_nav = []  # se llena mas abajo, tras crear los botones: [(widget, funcion), ...]
 
     def elegir_modo(i):
         estado["seleccionado"] = i
+        estado["zona"] = "tarjetas"
         marcar()
 
     for i, (clave, nombre, detalle) in enumerate(MODOS):
@@ -114,7 +124,46 @@ def main():
 
     def marcar():
         for i, m in enumerate(tarjetas):
-            m.configure(highlightbackground="#ffffff" if i == estado["seleccionado"] else FONDO)
+            if estado["zona"] == "tarjetas" and i == estado["seleccionado"]:
+                color = "#ffffff"
+            elif i == estado["seleccionado"]:
+                # elegido pero el foco esta en los botones - se queda visible
+                # cual es el modo activo sin competir con el foco de verdad.
+                color = "#5a5a66"
+            else:
+                color = FONDO
+            m.configure(highlightbackground=color)
+        for i, (widget, _) in enumerate(botones_nav):
+            en_foco = estado["zona"] == "botones" and i == estado["boton"]
+            widget.configure(highlightbackground="#ffffff" if en_foco else FONDO)
+
+    def mover(dx, dy):
+        if estado["zona"] == "tarjetas":
+            fila_actual = estado["seleccionado"] // 2
+            if dy > 0 and fila_actual == 1:
+                estado["zona"] = "botones"
+                estado["boton"] = 0
+                marcar()
+                return
+            if dy != 0:
+                estado["seleccionado"] = (estado["seleccionado"] + dy * 2) % len(MODOS)
+            if dx != 0:
+                estado["seleccionado"] = (estado["seleccionado"] + dx) % len(MODOS)
+            marcar()
+        else:
+            if dy < 0:
+                estado["zona"] = "tarjetas"
+                marcar()
+                return
+            if dx != 0 and botones_nav:
+                estado["boton"] = (estado["boton"] + dx) % len(botones_nav)
+                marcar()
+
+    def accionar():
+        if estado["zona"] == "botones" and botones_nav:
+            botones_nav[estado["boton"]][1]()
+        else:
+            aplicar()
 
     # --- Botones de accion ---
     filaBotones = tk.Frame(root, bg=FONDO)
@@ -252,42 +301,55 @@ def main():
     btnConsultar = tk.Button(filaBotones, text="Consultar estado", font=f_boton,
                               bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55",
                               activeforeground="#ffffff", relief="flat", bd=0,
+                              highlightthickness=3, highlightbackground=FONDO,
                               width=16, height=2, command=consultar)
     btnConsultar.pack(side="left", padx=10)
 
     btnEnviarIp = tk.Button(filaBotones, text="Enviar IP (Y)", font=f_boton,
                              bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55",
                              activeforeground="#ffffff", relief="flat", bd=0,
+                             highlightthickness=3, highlightbackground=FONDO,
                              width=14, height=2, command=enviar_ip)
     btnEnviarIp.pack(side="left", padx=10)
 
     btnAplicar = tk.Button(filaBotones, text="Aplicar", font=f_boton,
                             bg="#2d6cdf", fg="#ffffff", activebackground="#2d6cdf",
                             activeforeground="#ffffff", relief="flat", bd=0,
+                            highlightthickness=3, highlightbackground=FONDO,
                             width=16, height=2, command=aplicar)
     btnAplicar.pack(side="left", padx=10)
 
     btnReiniciar = tk.Button(filaBotones, text="Reiniciar servidor (X)", font=f_boton,
                               bg="#a04a2d", fg="#ffffff", activebackground="#b5552f",
                               activeforeground="#ffffff", relief="flat", bd=0,
+                              highlightthickness=3, highlightbackground=FONDO,
                               width=18, height=2, command=reiniciar_servidor)
     btnReiniciar.pack(side="left", padx=10)
 
     btnVolver = tk.Button(filaBotones, text="Volver", font=f_boton,
                            bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55",
                            activeforeground="#ffffff", relief="flat", bd=0,
+                           highlightthickness=3, highlightbackground=FONDO,
                            width=12, height=2, command=root.destroy)
     btnVolver.pack(side="left", padx=10)
 
-    tk.Label(root, text="Flechas para elegir modo, Enter aplica, Y manda la IP, "
-                         "X reinicia el servidor, Escape vuelve.",
+    botones_nav.extend([
+        (btnConsultar, consultar),
+        (btnEnviarIp, enviar_ip),
+        (btnAplicar, aplicar),
+        (btnReiniciar, reiniciar_servidor),
+        (btnVolver, root.destroy),
+    ])
+
+    tk.Label(root, text="Cruceta: elige modo o (bajando) botones. A ejecuta. "
+                         "Y manda la IP, X reinicia el servidor, Escape vuelve.",
              font=f_pie, bg=FONDO, fg=TENUE).pack(side="bottom", pady=16)
 
-    root.bind("<Left>", lambda e: elegir_modo((estado["seleccionado"] - 1) % len(MODOS)))
-    root.bind("<Right>", lambda e: elegir_modo((estado["seleccionado"] + 1) % len(MODOS)))
-    root.bind("<Up>", lambda e: elegir_modo((estado["seleccionado"] - 2) % len(MODOS)))
-    root.bind("<Down>", lambda e: elegir_modo((estado["seleccionado"] + 2) % len(MODOS)))
-    root.bind("<Return>", lambda e: aplicar())
+    root.bind("<Left>", lambda e: mover(-1, 0))
+    root.bind("<Right>", lambda e: mover(1, 0))
+    root.bind("<Up>", lambda e: mover(0, -1))
+    root.bind("<Down>", lambda e: mover(0, 1))
+    root.bind("<Return>", lambda e: accionar())
     root.bind("<y>", lambda e: enviar_ip())
     root.bind("<Y>", lambda e: enviar_ip())
     root.bind("<x>", lambda e: reiniciar_servidor())
@@ -299,15 +361,15 @@ def main():
     def revisar_mando():
         for nombre in mando.nuevos():
             if nombre == "DPAD_LEFT":
-                elegir_modo((estado["seleccionado"] - 1) % len(MODOS))
+                mover(-1, 0)
             elif nombre == "DPAD_RIGHT":
-                elegir_modo((estado["seleccionado"] + 1) % len(MODOS))
+                mover(1, 0)
             elif nombre == "DPAD_UP":
-                elegir_modo((estado["seleccionado"] - 2) % len(MODOS))
+                mover(0, -1)
             elif nombre == "DPAD_DOWN":
-                elegir_modo((estado["seleccionado"] + 2) % len(MODOS))
+                mover(0, 1)
             elif nombre == "A":
-                aplicar()
+                accionar()
             elif nombre == "Y":
                 enviar_ip()
             elif nombre == "X":
