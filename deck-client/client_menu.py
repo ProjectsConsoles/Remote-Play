@@ -280,8 +280,19 @@ def mostrar_menu():
             elif nombre == "DPAD_DOWN":
                 mover(0, 1)
             elif nombre == "A":
+                # OJO (2026-09-13): "return" sin re-programar solo es
+                # correcto cuando confirmar() destruye root de verdad (elegir
+                # una tarjeta real). Para zona="info", confirmar() solo abre
+                # el Toplevel de info - root sigue viva, y si no se
+                # re-programa revisar_mando(), el mando se queda MUDO para
+                # siempre (ni B adentro de info, ni nada al volver por
+                # touch) - "no funciona la navegacion, solo el touch"
+                # (reportado en vivo). Se distingue ANTES de llamar
+                # confirmar(), porque confirmar() puede cambiar la zona.
+                era_info = foco["zona"] == "info"
                 confirmar()
-                return          # la ventana ya se destruyo
+                if not era_info:
+                    return      # la ventana ya se destruyo
             elif nombre == "Y":
                 mostrar_info()
             elif nombre == "B":
