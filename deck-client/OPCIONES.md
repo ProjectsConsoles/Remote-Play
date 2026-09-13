@@ -107,6 +107,7 @@ Reinicia `ffplay` solo si el video se queda atrasado.
 | `PS3RP_VQ_MAX` | `100` | KB de video encolado a partir de los cuales sospecha. |
 | `PS3RP_VQ_SECS` | `10` | Segundos seguidos por encima del tope antes de actuar. |
 | `PS3RP_VQ_ESPERA` | `90` | Veda tras un reinicio, para que no se realimente. |
+| `PS3RP_FD_SALTO` | `6` | Salto en `fd=` (cuadros descartados por ffplay) en 1s que reinicia ffplay de golpe - detecta rafagas del servidor que descuadran Lossless Scaling sin llenar vq/aq. |
 
 > **El reinicio se autoalimenta**: reiniciar sube la cola, lo que dispara otro
 > reinicio. La veda de 90 s es lo que rompe el bucle. Si algún día se retocan
