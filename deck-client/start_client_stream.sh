@@ -129,6 +129,17 @@ WATCHDOG="${PS3RP_WATCHDOG:-1}"  # 0 = no reiniciar ffplay solo, nunca
 VQ_MAX="${PS3RP_VQ_MAX:-100}"    # KB de video encolado a partir de los cuales se sospecha
 VQ_SECS="${PS3RP_VQ_SECS:-10}"   # segundos seguidos por encima del tope antes de actuar
 VQ_ESPERA="${PS3RP_VQ_ESPERA:-90}"  # segundos de veda despues de un reinicio, para no realimentarse
+# Salto en fd= (cuadros descartados por ffplay) que dispara un reinicio DE
+# GOLPE, sin esperar vqsecs (2026-09-13, ver la nota larga junto al lazo de
+# ffplay: rafagas de cuadros del servidor - cambio de consola/juego, pantalla
+# negra de HDMI - no llenan vq ni aq (ffplay las absorbe bien solo), pero
+# descuadran a Lossless Scaling (~/lsfg), que necesita ritmo parejo para
+# interpolar y se queda "trabado" de una forma que ningun contador de ffplay
+# mide directo. fd SI salta de golpe en esas rafagas (confirmado en vivo:
+# fd=52 con vq=0KB/aq=0KB durante el problema) - reiniciar ffplay ahi
+# tambien resetea el enganche de Vulkan de lsfg, que es lo que de verdad
+# estaba atascado.
+FD_SALTO="${PS3RP_FD_SALTO:-6}"
 
 VENV_PY="$SCRIPT_DIR/ps3rp-env/bin/python3"
 INPUT_SCRIPT="$SCRIPT_DIR/input_client_v3.py"
@@ -910,11 +921,25 @@ stamp() {
         #   - seguidas >= vqsecs : exigir que el atasco PERSISTA. Un pico suelto
         #     de vq es una rafaga de wifi que se drena sola; lo que buscamos es
         #     la meseta que ya no baja nunca.
+        #   - salto en fd= : dispara DE GOLPE, sin esperar que persista (ver
+        #     PS3RP_FD_SALTO arriba) - una rafaga de cuadros del servidor deja
+        #     vq/aq en 0 (ffplay la absorbe bien solo) pero descuadra a
+        #     Lossless Scaling, y esa rafaga es instantanea, no una meseta.
         #   - con stats != 1 la linea se consume pero NO se escribe al log.
         gawk -v stats="$STATS" -v wd="$WATCHDOG" -v vqmax="$VQ_MAX" \
              -v vqsecs="$VQ_SECS" -v flag="$WATCHDOG_FLAG" -v espera="$ESPERA" \
-             -v cada="$STATS_EVERY" '
-              BEGIN { RS = "[\r\n]"; last = 0; muestras = 0; seguidas = 0; ultimaStat = 0 }
+             -v cada="$STATS_EVERY" -v fdsalto="$FD_SALTO" '
+              BEGIN { RS = "[\r\n]"; last = 0; muestras = 0; seguidas = 0; ultimaStat = 0; fdAnterior = -1 }
+              function reiniciarFfplay(motivo) {
+                  printf("%s [watchdog] %s Reiniciando ffplay.\n", strftime("[%H:%M:%S]"), motivo)
+                  fflush()
+                  print "" > flag
+                  close(flag)
+                  system("pkill -x ffplay")
+                  seguidas = 0
+                  muestras = 0
+                  fdAnterior = -1
+              }
               {
                   if ($0 == "") next
                   esStats = ($0 ~ /aq=.*vq=/)
@@ -923,19 +948,22 @@ stamp() {
                       if (t == last) next
                       last = t
                       muestras++
+                      disparado = 0
                       if (wd == "1" && muestras > espera + 0 && match($0, /vq=[ ]*([0-9]+)KB/, m)) {
                           if (m[1] + 0 >= vqmax + 0) seguidas++
                           else seguidas = 0
                           if (seguidas >= vqsecs + 0) {
-                              printf("%s [watchdog] vq lleva %d s en %s KB (tope %s): el video quedo atrasado y tardaria minutos en drenarse. Reiniciando ffplay.\n",
-                                     strftime("[%H:%M:%S]"), seguidas, m[1], vqmax)
-                              fflush()
-                              print "" > flag
-                              close(flag)
-                              system("pkill -x ffplay")
-                              seguidas = 0
-                              muestras = 0
+                              reiniciarFfplay(sprintf("vq lleva %d s en %s KB (tope %s): el video quedo atrasado y tardaria minutos en drenarse.", seguidas, m[1], vqmax))
+                              disparado = 1
                           }
+                      }
+                      if (!disparado && wd == "1" && muestras > espera + 0 && match($0, /fd=[ ]*([0-9]+)/, mf)) {
+                          fdActual = mf[1] + 0
+                          if (fdAnterior >= 0 && (fdActual - fdAnterior) >= fdsalto + 0) {
+                              reiniciarFfplay(sprintf("fd salto de %d a %d (+%d en 1s): rafaga del servidor descuadro a Lossless Scaling.", fdAnterior, fdActual, fdActual - fdAnterior))
+                              disparado = 1
+                          }
+                          fdAnterior = fdActual
                       }
                       # Sin modo medicion igual se deja UNA cada "cada"
                       # segundos, para que la corrida quede con rastro de la
