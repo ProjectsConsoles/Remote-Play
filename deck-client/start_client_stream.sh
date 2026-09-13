@@ -129,17 +129,30 @@ WATCHDOG="${PS3RP_WATCHDOG:-1}"  # 0 = no reiniciar ffplay solo, nunca
 VQ_MAX="${PS3RP_VQ_MAX:-100}"    # KB de video encolado a partir de los cuales se sospecha
 VQ_SECS="${PS3RP_VQ_SECS:-10}"   # segundos seguidos por encima del tope antes de actuar
 VQ_ESPERA="${PS3RP_VQ_ESPERA:-90}"  # segundos de veda despues de un reinicio, para no realimentarse
-# Salto en fd= (cuadros descartados por ffplay) que dispara un reinicio DE
+# Salto en fd= (cuadros descartados por ffplay) que dispara una reaccion DE
 # GOLPE, sin esperar vqsecs (2026-09-13, ver la nota larga junto al lazo de
 # ffplay: rafagas de cuadros del servidor - cambio de consola/juego, pantalla
 # negra de HDMI - no llenan vq ni aq (ffplay las absorbe bien solo), pero
 # descuadran a Lossless Scaling (~/lsfg), que necesita ritmo parejo para
 # interpolar y se queda "trabado" de una forma que ningun contador de ffplay
 # mide directo. fd SI salta de golpe en esas rafagas (confirmado en vivo:
-# fd=52 con vq=0KB/aq=0KB durante el problema) - reiniciar ffplay ahi
-# tambien resetea el enganche de Vulkan de lsfg, que es lo que de verdad
-# estaba atascado.
+# fd=52 con vq=0KB/aq=0KB durante el problema).
 FD_SALTO="${PS3RP_FD_SALTO:-6}"
+
+# AJUSTE SIN PARPADEO (2026-09-13): reiniciar ffplay arregla el atasco de
+# lsfg pero cierra y vuelve a abrir la ventana - "se ve muy mal" (reportado
+# el mismo dia). lsfg-vk permite recargar "multiplier"/flow_scale/
+# performance_mode EN CALIENTE via su conf.toml, sin reiniciar el proceso
+# que envuelve - asi que si esta corriendo bajo ~/lsfg (PS3RP_LSFG=1),
+# apagamos la generacion de cuadros (multiplier=1) unos segundos en vez de
+# tocar ffplay para nada. $LSFG_PROCESS ya viene puesto por el propio
+# ~/lsfg del usuario (ver ese archivo) - es el nombre del perfil dentro del
+# conf.toml, no algo que este proyecto invente. Si no esta corriendo bajo
+# lsfg, o no se encuentra el perfil/archivo, se cae de vuelta al reinicio
+# de ffplay de siempre (ver reiniciarFfplay en el watchdog).
+LSFG_CONF="${PS3RP_LSFG_CONF:-$HOME/.config/lsfg-vk/conf.toml}"
+LSFG_PAUSA="${PS3RP_LSFG_PAUSA:-4}"
+LSFG_PAUSA_SCRIPT="$SCRIPT_DIR/lsfg_pausa_temporal.sh"
 
 VENV_PY="$SCRIPT_DIR/ps3rp-env/bin/python3"
 INPUT_SCRIPT="$SCRIPT_DIR/input_client_v3.py"
@@ -928,14 +941,33 @@ stamp() {
         #   - con stats != 1 la linea se consume pero NO se escribe al log.
         gawk -v stats="$STATS" -v wd="$WATCHDOG" -v vqmax="$VQ_MAX" \
              -v vqsecs="$VQ_SECS" -v flag="$WATCHDOG_FLAG" -v espera="$ESPERA" \
-             -v cada="$STATS_EVERY" -v fdsalto="$FD_SALTO" '
-              BEGIN { RS = "[\r\n]"; last = 0; muestras = 0; seguidas = 0; ultimaStat = 0; fdAnterior = -1 }
+             -v cada="$STATS_EVERY" -v fdsalto="$FD_SALTO" \
+             -v lsfgon="${PS3RP_LSFG:-0}" -v lsfgperfil="${LSFG_PROCESS:-}" \
+             -v lsfgconf="$LSFG_CONF" -v lsfgscript="$LSFG_PAUSA_SCRIPT" \
+             -v lsfgpausa="$LSFG_PAUSA" '
+              BEGIN {
+                  RS = "[\r\n]"; last = 0; muestras = 0; seguidas = 0; ultimaStat = 0; fdAnterior = -1
+                  # Chequeo UNA vez al arrancar, no en cada muestra: si esto
+                  # corre bajo ~/lsfg de verdad (lsfgperfil viene puesto) y el
+                  # ajustador existe, preferimos el ajuste sin parpadeo sobre
+                  # reiniciar ffplay para el disparador de fd.
+                  lsfgDisponible = (lsfgon == "1" && lsfgperfil != "" && system("test -x \"" lsfgscript "\"") == 0)
+              }
               function reiniciarFfplay(motivo) {
                   printf("%s [watchdog] %s Reiniciando ffplay.\n", strftime("[%H:%M:%S]"), motivo)
                   fflush()
                   print "" > flag
                   close(flag)
                   system("pkill -x ffplay")
+                  seguidas = 0
+                  muestras = 0
+                  fdAnterior = -1
+              }
+              function bajarLsfgTemporal(motivo) {
+                  printf("%s [watchdog] %s Bajando generacion de cuadros de lsfg %ss (perfil %s) en vez de reiniciar ffplay.\n",
+                         strftime("[%H:%M:%S]"), motivo, lsfgpausa, lsfgperfil)
+                  fflush()
+                  system("\"" lsfgscript "\" \"" lsfgperfil "\" \"" lsfgconf "\" " lsfgpausa " >/dev/null 2>&1 &")
                   seguidas = 0
                   muestras = 0
                   fdAnterior = -1
@@ -960,7 +992,9 @@ stamp() {
                       if (!disparado && wd == "1" && muestras > espera + 0 && match($0, /fd=[ ]*([0-9]+)/, mf)) {
                           fdActual = mf[1] + 0
                           if (fdAnterior >= 0 && (fdActual - fdAnterior) >= fdsalto + 0) {
-                              reiniciarFfplay(sprintf("fd salto de %d a %d (+%d en 1s): rafaga del servidor descuadro a Lossless Scaling.", fdAnterior, fdActual, fdActual - fdAnterior))
+                              motivo = sprintf("fd salto de %d a %d (+%d en 1s): rafaga del servidor.", fdAnterior, fdActual, fdActual - fdAnterior)
+                              if (lsfgDisponible) bajarLsfgTemporal(motivo)
+                              else reiniciarFfplay(motivo " Descuadro a Lossless Scaling.")
                               disparado = 1
                           }
                           fdAnterior = fdActual
