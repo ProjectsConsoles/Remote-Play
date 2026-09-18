@@ -93,6 +93,14 @@ logging.basicConfig(
 log = logging.getLogger("ps3rp")
 
 
+def find_gst():
+    """gst-launch-1.0.exe de la carpeta "gstreamer" junto al .exe (2026-09-18).
+    Es el runtime MSVC 1.26.11 recortado a los plugins que se usan (ver
+    ejecutar_modo_streaming); no se instala nada en Windows."""
+    exe = os.path.join(app_dir(), "gstreamer", "bin", "gst-launch-1.0.exe")
+    return exe if os.path.isfile(exe) else None
+
+
 def find_ffplay():
     override = os.environ.get("PS3RP_FFPLAY")
     if override and os.path.isfile(override):
@@ -141,6 +149,7 @@ CAMPOS_CLIENTE = [
      ["nada", "medio", "alta"]),
     ("PS3RP_STREAM_PORT", "Puerto UDP del video", "numero", "5000", None),
     ("PS3RP_FULLSCREEN", "Video en pantalla completa", "bool", "1", None),
+    ("PS3RP_PLAYER", "Reproductor de video", "enum", "gstreamer", ["gstreamer", "ffplay"]),
     ("PS3RP_BRILLO", "Brillo en modo control (0-100, vacio = no tocar)", "numero", "", None),
     ("PS3RP_WIFI_SIN_AHORRO", "WiFi sin ahorro de energia (menos delay)", "bool", "1", None),
     ("PS3RP_MODO", "Modo fijo al abrir (vacio = preguntar cada vez)", "enum", "",
@@ -1681,6 +1690,66 @@ def _bombear_input_hasta_que_muera(proc, sock):
                 pass
 
 
+def _streaming_gstreamer(gst):
+    """Mismo contrato que ejecutar_modo_streaming: (ok, mensaje)."""
+    fs = "true" if FULLSCREEN_VIDEO else "false"
+    args = [
+        gst, "-q",
+        "udpsrc", f"port={STREAM_PORT}", "caps=video/mpegts",
+        "!", "tsdemux", "latency=0", "name=d",
+        # Video: GPU (Direct3D 11), colas chicas que TIRAN lo atrasado, sin reloj.
+        "d.", "!", "queue", "max-size-buffers=3", "max-size-time=0", "max-size-bytes=0",
+        "leaky=downstream",
+        "!", "h264parse", "!", "d3d11h264dec",
+        "!", "queue", "max-size-buffers=1", "max-size-time=0", "max-size-bytes=0",
+        "leaky=downstream",
+        "!", "d3d11videosink", "sync=false", "force-aspect-ratio=true",
+        # fullscreen se ignora si fullscreen-toggle-mode no incluye "property"
+        # (dicho por gst-inspect de este mismo runtime).
+        "fullscreen-toggle-mode=property", f"fullscreen={fs}",
+        # Audio: Opus a WASAPI en modo de baja latencia, tambien sin reloj.
+        "d.", "!", "queue", "max-size-buffers=8", "max-size-time=0", "max-size-bytes=0",
+        "leaky=downstream",
+        "!", "opusdec", "!", "audioconvert", "!", "audioresample",
+        "!", "wasapi2sink", "sync=false", "low-latency=true",
+    ]
+    log.info("Lanzando gstreamer: %s", " ".join(args))
+
+    carpeta = os.path.dirname(gst)
+    # Mismo entorno limpio de SDL que ffplay (ver la nota larga en
+    # ejecutar_modo_streaming), mas el bin de gstreamer primero en el PATH
+    # para que cargue SUS DLL, y el registro de plugins en una carpeta con
+    # permiso de escritura (la de este .exe).
+    entorno = {k: v for k, v in os.environ.items()
+               if k not in ("SDL_VIDEODRIVER", "SDL_AUDIODRIVER")}
+    entorno["PATH"] = carpeta + os.pathsep + entorno.get("PATH", "")
+    entorno["GST_REGISTRY"] = os.path.join(app_dir(), "gst_registry.bin")
+
+    try:
+        sock_input = _iniciar_input_streaming()
+        t0 = time.time()
+        proc = subprocess.Popen(args,
+                                stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                env=entorno,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
+        _bombear_input_hasta_que_muera(proc, sock_input)
+        dur = time.time() - t0
+        # Cerrar la ventana de video hace que gst-launch termine con error (1):
+        # eso es una salida normal. Solo se trata como falla si murio enseguida.
+        if proc.returncode != 0 and dur < 10:
+            log.warning("gstreamer termino con codigo %s a los %.1fs", proc.returncode, dur)
+            return False, ("El video no arranco (gstreamer se cerro a los pocos segundos).\n\n"
+                            "Revisa que el servidor este transmitiendo, o cambia el reproductor "
+                            "a ffplay en \"Configurar cliente\".")
+        log.info("gstreamer termino (codigo %s) tras %.0fs", proc.returncode, dur)
+        return True, ""
+    except Exception as e:
+        log.error("No se pudo lanzar gstreamer: %s", e)
+        return False, f"No se pudo lanzar gstreamer: {e}"
+
+
 def ejecutar_modo_streaming():
     """Devuelve (True, "") si parece haber recibido stream de verdad, o
     (False, mensaje) si fallo (ffplay no encontrado, o se cerro solo sin
@@ -1693,6 +1762,17 @@ def ejecutar_modo_streaming():
     unica salida era matar el proceso a mano. Ahora la URL UDP lleva un
     timeout (ver mas abajo) para que ffplay se rinda solo en vez de colgarse
     para siempre."""
+    # GStreamer (2026-09-18, porteo del arreglo de la Deck: "igualito a la
+    # tele"). ffplay forma el video detras del reloj de audio y lo que se junta
+    # al arrancar no se descarta nunca, asi que cada arranque caia en un
+    # retraso distinto. GStreamer con sync=false y colas que tiran lo viejo
+    # muestra cada cuadro apenas llega. Si falta la carpeta, sigue con ffplay.
+    if os.environ.get("PS3RP_PLAYER", "gstreamer").strip().lower() != "ffplay":
+        gst = find_gst()
+        if gst:
+            return _streaming_gstreamer(gst)
+        log.warning("PS3RP_PLAYER=gstreamer pero no esta la carpeta gstreamer junto al .exe; uso ffplay.")
+
     ffplay = find_ffplay()
     if not ffplay:
         log.error("No se encontro ffplay.exe (ver PS3RP_FFPLAY, o ponerlo junto al .exe).")
