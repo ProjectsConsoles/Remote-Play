@@ -376,7 +376,7 @@ pushd "%~dp0logs"
   -g 30 -bf 0 -rc-lookahead 0 -delay 0 ^
   -af aresample=async=1000 ^
   -c:a aac -b:a 96k -ar 48000 -ac 2 ^
-  -f mpegts -muxdelay 0 -muxpreload 0 -flush_packets 1 -max_interleave_delta 0 ^
+  -f mpegts -muxdelay 0 -muxpreload 0 -flush_packets 1 -max_interleave_delta 0 -pes_payload_size 0 ^
   udp://%DECK_IP%:%DECK_PORT%?pkt_size=1316
 
 REM  Guardar el codigo de salida ANTES del popd: popd lo pisa, y sin
@@ -504,6 +504,17 @@ REM    deja de esperar.
 REM 
 REM    -muxdelay 0 / -muxpreload 0 (que ya estaban) NO cubren esto: son
 REM    otra cosa, el retardo de arranque del muxer, no el intercalado.
+REM
+REM  -pes_payload_size 0 (2026-09-18, PROBAR y medir): el muxer mpegts
+REM    junta el AUDIO en paquetes PES de minimo 2930 bytes (default)
+REM    antes de escribirlos. A 96 kbps de AAC (~12 KB/s) eso es hasta
+REM    ~200 ms de audio retenido en esta PC - y como el cliente usa el
+REM    audio de reloj maestro (-sync audio), el video espera a que ese
+REM    audio llegue. Con 0 cada paquete de audio sale apenas esta
+REM    listo (el video ya salia de a uno por cuadro, no le cambia).
+REM    Si el audio suena entrecortado o el video empeora, quitar SOLO
+REM    "-pes_payload_size 0" de la linea de -f mpegts: es la unica
+REM    diferencia contra el comportamiento anterior.
 REM 
 REM 
 REM  -use_wallclock_as_timestamps 1 : lo que hace que el aresample de
