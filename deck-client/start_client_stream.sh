@@ -1189,7 +1189,29 @@ if [ "$WATCHDOG" = "1" ] && ! command -v gawk >/dev/null 2>&1; then
     WATCHDOG=0
 fi
 
-if [ "$PLAYER" = "mpv" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1; then
+if [ "$PLAYER" = "gstreamer" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1; then
+    # GStreamer (2026-09-18, PRUEBA). El de SteamOS no trae decodificador H.264; el del
+    # runtime Freedesktop 25.08 si (vah264dec = GPU), y se usa a traves del sandbox del
+    # flatpak de mpv (mismo runtime; solo se llama a su gst-launch-1.0).
+    # POR QUE: ffplay forma el video detras del reloj de audio y lo que se junta al
+    # arrancar no se descarta nunca ("loteria de arranque", vq 0-90 KB). Aca:
+    #   - sync=false en video y audio: cada uno se muestra/suena apenas llega.
+    #   - colas leaky=downstream chicas: si algo se atrasa, se TIRA lo viejo.
+    # Precio: sin sincronia A/V estricta (van juntos porque llegan juntos por la red).
+    echo "--- reproductor: gstreamer (prueba) ---" | tee -a "$LOG"
+    env -u LD_PRELOAD \
+        DISABLE_VK_LAYER_VALVE_steam_overlay_1=1 \
+        flatpak run --command=gst-launch-1.0 io.mpv.Mpv \
+        udpsrc port="$PORT" caps=video/mpegts ! tsdemux latency=0 name=d \
+        d. ! queue max-size-buffers=3 max-size-time=0 max-size-bytes=0 leaky=downstream \
+           ! h264parse ! vah264dec ! queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream \
+           ! glimagesink sync=false force-aspect-ratio=true \
+        d. ! queue max-size-buffers=8 max-size-time=0 max-size-bytes=0 leaky=downstream \
+           ! opusdec ! audioconvert ! audioresample \
+           ! pulsesink sync=false buffer-time=40000 latency-time=10000 \
+        2>&1 | tr "\r" "\n" | tee -a "$LOG"
+    echo "gstreamer termino con codigo ${PIPESTATUS[0]}" >> "$LOG"
+elif [ "$PLAYER" = "mpv" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1; then
     echo "--- reproductor: mpv (prueba) ---" | tee -a "$LOG"
     # --untimed: sin esperar al reloj; --no-cache y nobuffer: sin colchon de red.
     # El audio suena por su lado (puede ir unos ms desfasado: es el precio).
@@ -1204,8 +1226,8 @@ if [ "$PLAYER" = "mpv" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1; then
         "udp://@:$PORT?fifo_size=$FIFO&overrun_nonfatal=1" 2>&1 | tr "\r" "\n" | tee -a "$LOG"
     echo "mpv termino con codigo ${PIPESTATUS[0]}" >> "$LOG"
 else
-if [ "$PLAYER" = "mpv" ]; then
-    echo "AVISO: PS3RP_PLAYER=mpv pero no esta instalado io.mpv.Mpv (flatpak --user) - uso ffplay." | tee -a "$LOG"
+if [ "$PLAYER" = "mpv" ] || [ "$PLAYER" = "gstreamer" ]; then
+    echo "AVISO: PS3RP_PLAYER=$PLAYER pero no esta instalado io.mpv.Mpv (flatpak --user) - uso ffplay." | tee -a "$LOG"
 fi
 
 while true; do
