@@ -136,7 +136,7 @@ if (Test-Path $ArchivoModo) {
 $cmbModo.SelectedIndex = $indice
 
 $lblNota           = New-Object System.Windows.Forms.Label
-$lblNota.Text      = "El servidor corre oculto, sin ventana negra. Puedes cerrar esta ventana y sigue transmitiendo. Al iniciar de nuevo, la instancia anterior se cierra sola. Tambien se puede configurar en remoto desde el menu de la Deck."
+$lblNota.Text      = "El servidor corre oculto, sin ventana negra. Cerrar esta ventana no lo detiene; Salir en el icono de la bandeja apaga todo. Al iniciar de nuevo, la instancia anterior se cierra sola. Tambien se puede configurar en remoto desde el menu de la Deck."
 $lblNota.Location  = New-Object System.Drawing.Point(20, 277)
 $lblNota.Size      = New-Object System.Drawing.Size(460, 50)
 $lblNota.ForeColor = [System.Drawing.Color]::DimGray
@@ -345,7 +345,28 @@ $script:SalirDeVerdad = $false
 
 $menuTray = New-Object System.Windows.Forms.ContextMenuStrip
 [void]$menuTray.Items.Add("Abrir", $null, $mostrarVentana)
-[void]$menuTray.Items.Add("Salir", $null, { $script:SalirDeVerdad = $true; $form.Close() })
+# "Salir" apaga TODO (2026-09-18, pedido explicito: "salir apague todo"). Antes
+# solo cerraba la ventana y dejaba huerfanos al ffmpeg (seguia transmitiendo) y al
+# config_listener (seguia contestando a la Deck/Ally con "corriendo"). Cerrar la
+# ventana con la X sigue ocultandola a la bandeja sin apagar nada, como siempre.
+$apagarTodo = {
+    try { [void](Detener-Servidor) } catch { }
+    try {
+        $archivoListener = Join-Path $Aqui "logs\config_listener.pid"
+        if (Test-Path $archivoListener) {
+            $pidListener = [string](Get-Content $archivoListener -ErrorAction SilentlyContinue | Select-Object -First 1)
+            if ($pidListener.Trim() -match '^\d+$' -and [int]$pidListener.Trim() -ne $PID) {
+                $procListener = Get-Process -Id ([int]$pidListener.Trim()) -ErrorAction SilentlyContinue
+                # Solo si de verdad es un powershell: un PID viejo puede haberse reciclado.
+                if ($procListener -and $procListener.ProcessName -eq "powershell") {
+                    Stop-Process -Id $procListener.Id -Force -ErrorAction SilentlyContinue
+                }
+            }
+            Remove-Item $archivoListener -Force -ErrorAction SilentlyContinue
+        }
+    } catch { }
+}
+[void]$menuTray.Items.Add("Salir", $null, { & $apagarTodo; $script:SalirDeVerdad = $true; $form.Close() })
 $trayIcon.ContextMenuStrip = $menuTray
 
 # Cerrar (la X, el boton "Cerrar", o esta pantalla) oculta a la bandeja en
