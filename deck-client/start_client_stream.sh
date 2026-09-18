@@ -50,6 +50,25 @@ if [ -f "$SCRIPT_DIR/client_config.env" ]; then
     source "$SCRIPT_DIR/client_config.env"
 fi
 
+# WiFi sin ahorro de energia (2026-09-18): con power save prendido el radio
+# duerme entre beacons del router y este retiene los paquetes hasta el
+# siguiente - jitter/delay medido antes en el ESP32 (79 ms de promedio contra
+# 5 ms sin ahorro) y notado a ojo en la Deck ("mejoro un poco"). Se aplica
+# en cada arranque, en los dos sentidos (SI = off, NO = lo regresa a on),
+# con el interruptor PS3RP_WIFI_SIN_AHORRO de "Configurar cliente" (default
+# SI). Necesita la regla acotada de sudoers de sudoers-wifi-powersave (ver el
+# encabezado de ese archivo) - sin ella NO rompe nada, solo deja un aviso en
+# el log. Va ANTES del re-exec de lsfg de abajo y solo la primera vez
+# (PS3RP_LSFG_ENVUELTO) para no correr dos veces.
+if [ -z "$PS3RP_LSFG_ENVUELTO" ]; then
+    if [ "${PS3RP_WIFI_SIN_AHORRO:-1}" = "1" ]; then _PS_WIFI=off; else _PS_WIFI=on; fi
+    if sudo -n /usr/bin/iw dev wlan0 set power_save "$_PS_WIFI" >/dev/null 2>&1; then
+        echo "WiFi power_save $_PS_WIFI (wlan0)" >> "$LOG"
+    else
+        echo "AVISO: no se pudo poner power_save $_PS_WIFI en wlan0 (falta /etc/sudoers.d/zz-ps3rp-wifi?)" >> "$LOG"
+    fi
+fi
+
 # Lossless Scaling / frame generation via lsfg-vk (2026-09-11): normalmente
 # esto se prende escribiendo "~/lsfg %command%" a mano en las Opciones de
 # Lanzamiento de Steam, envolviendo TODO el comando desde afuera - pero eso

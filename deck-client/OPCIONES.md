@@ -87,6 +87,7 @@ interfaz gráfica (`iniciar_servidor.bat`) las pone sola.
 | Variable | Default | Qué hace |
 |---|---|---|
 | `PS3RP_VSYNC` | `0` | `1` devuelve el vsync (`vblank_mode` + present mode de Mesa). |
+| `PS3RP_WIFI_SIN_AHORRO` | `1` | `1` apaga el power save del WiFi (`wlan0`) en cada arranque, `0` lo regresa a prendido. Menos jitter/delay (se noto a ojo en la Deck), algo mas de bateria. Necesita instalar una vez `sudoers-wifi-powersave` (instrucciones en su encabezado); sin eso no rompe nada, solo deja un AVISO en `~/ps3rp_client.log`. |
 | `PS3RP_PRESENT` | `mailbox` | Modo de presentación Vulkan. `fifo` = con cola (más lag). |
 | `PS3RP_SYNC` | `audio` | Reloj maestro de ffplay. `video` y `ext` existen pero **midieron peor**. |
 | `PS3RP_FIFO` | `1500` | Buffer UDP en **paquetes de 188 bytes**, no en bytes. |

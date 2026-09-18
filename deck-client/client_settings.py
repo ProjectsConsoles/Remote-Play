@@ -53,6 +53,8 @@ CAMPOS = [
     ("__SECCION__", "Video y latencia", None, None, None, None),
     ("PS3RP_LSFG", "Lossless Scaling (generacion de cuadros, ~/lsfg)", "bool", "0",
      None, "Envuelve el lanzamiento con ~/lsfg. Necesita lsfg-vk instalado y ese script en el home."),
+    ("PS3RP_WIFI_SIN_AHORRO", "WiFi sin ahorro de energia (menos delay)", "bool", "1",
+     None, "SI apaga el power save del WiFi al arrancar (menos jitter, algo mas de bateria). NO lo regresa a prendido."),
     ("PS3RP_VSYNC", "VSync (0 = apagado, mide mejor)", "bool", "0", None, ""),
     ("PS3RP_PRESENT", "Modo de presentacion Vulkan", "enum", "mailbox",
      ["mailbox", "fifo", "immediate"], "fifo = con cola, mas lag."),

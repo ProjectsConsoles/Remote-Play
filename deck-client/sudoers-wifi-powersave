@@ -1,0 +1,17 @@
+# Regla de sudoers para el interruptor "WiFi sin ahorro de energia" de
+# "Configurar cliente" (start_client_stream.sh). Deja al usuario `deck`
+# prender/apagar el power save de wlan0 SIN contrasena, y SOLO eso: sudo
+# compara el comando y sus argumentos exactos, asi que cualquier otra cosa
+# (otros argumentos, otro programa) sigue pidiendo contrasena.
+#
+# INSTALAR (una vez por Deck, en una terminal):
+#   sudo install -m 0440 -o root -g root sudoers-wifi-powersave /etc/sudoers.d/zz-ps3rp-wifi
+#   sudo visudo -c
+#
+# EL NOMBRE "zz-" IMPORTA: en sudoers gana la ULTIMA regla que coincide, y
+# /etc/sudoers.d/wheel (que pide contrasena) se lee alfabeticamente antes que
+# cualquier nombre que empiece antes de "w" - con "ps3rp-wifi" la regla no
+# surtia efecto. "zz-" queda despues de todas.
+#
+# DESINSTALAR:  sudo rm /etc/sudoers.d/zz-ps3rp-wifi
+deck ALL=(root) NOPASSWD: /usr/bin/iw dev wlan0 set power_save off, /usr/bin/iw dev wlan0 set power_save on
