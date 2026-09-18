@@ -1436,6 +1436,69 @@ def _iniciar_input_streaming():
     return socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 
+# ---------------------------------------------------------------------------
+# Diagnostico de entrada (2026-09-18): "en Modo Juego de la Ally (Armoury
+# Crate) el streaming no manda los controles, en Escritorio si". Antes el log
+# solo decia "mando=True" y no habia forma de saber SI LLEGABAN botones. Ahora
+# se registra, cada vez que cambia, que ve SDL y que ve XInput directo (sin
+# SDL de por medio), mas que ventana tiene el foco. Comparar los dos separa
+# "SDL no ve el mando" de "el mando no manda nada a nadie".
+# ---------------------------------------------------------------------------
+
+class _XInputGamepad(ctypes.Structure):
+    _fields_ = [("wButtons", ctypes.c_ushort), ("bLeftTrigger", ctypes.c_ubyte),
+                ("bRightTrigger", ctypes.c_ubyte), ("sThumbLX", ctypes.c_short),
+                ("sThumbLY", ctypes.c_short), ("sThumbRX", ctypes.c_short),
+                ("sThumbRY", ctypes.c_short)]
+
+
+class _XInputState(ctypes.Structure):
+    _fields_ = [("dwPacketNumber", ctypes.c_uint), ("Gamepad", _XInputGamepad)]
+
+
+_XINPUT_DLL = []
+
+
+def _xinput_leer(idx):
+    """(botones, gatillo_izq, gatillo_der) del slot XInput idx, o None."""
+    try:
+        if not _XINPUT_DLL:
+            _XINPUT_DLL.append(None)
+            for nombre in ("xinput1_4", "xinput1_3", "xinput9_1_0"):
+                try:
+                    _XINPUT_DLL[0] = ctypes.WinDLL(nombre)
+                    break
+                except OSError:
+                    continue
+        dll = _XINPUT_DLL[0]
+        if dll is None:
+            return None
+        st = _XInputState()
+        if dll.XInputGetState(idx, ctypes.byref(st)) != 0:
+            return None
+        g = st.Gamepad
+        return (g.wButtons, g.bLeftTrigger, g.bRightTrigger)
+    except Exception:
+        return None
+
+
+def _xinput_conectados():
+    return [i for i in range(4) if _xinput_leer(i) is not None]
+
+
+def _ventana_en_primer_plano():
+    try:
+        u = ctypes.windll.user32
+        hwnd = u.GetForegroundWindow()
+        buf = ctypes.create_unicode_buffer(120)
+        u.GetWindowTextW(hwnd, buf, 120)
+        pid = ctypes.c_ulong(0)
+        u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return "'%s' pid=%d" % (buf.value, pid.value)
+    except Exception:
+        return "?"
+
+
 def _bombear_input_hasta_que_muera(proc, sock):
     """Lee el mando y manda su estado al ESP32 EN EL HILO PRINCIPAL, hasta
     que ffplay (proc) se cierre. El mando ya viene abierto por
@@ -1453,6 +1516,8 @@ def _bombear_input_hasta_que_muera(proc, sock):
     ultimo_aviso = 0.0
     stats_last = time.time()
     stats_ticks = 0
+    xi_activos = _xinput_conectados()
+    ultima_firma = None
 
     try:
         while proc.poll() is None:
@@ -1475,6 +1540,16 @@ def _bombear_input_hasta_que_muera(proc, sock):
                     estado = gp.build_state(joystick)
                     sock.sendto(json.dumps(estado).encode("utf-8"), (ESP32_IP, ESP32_PORT))
                     stats_ticks += 1
+                    sdl_pulsados = sorted(k for k, v in estado["buttons"].items() if v)
+                    xi = [(i, _xinput_leer(i)) for i in xi_activos]
+                    firma = (tuple(sdl_pulsados),
+                             tuple((i, v and (v[0], v[1] > 30, v[2] > 30)) for i, v in xi))
+                    if firma != ultima_firma:
+                        ultima_firma = firma
+                        log.info("[botones] SDL=%s XInput=%s primer_plano=%s",
+                                 sdl_pulsados,
+                                 [(i, v and "0x%04x LT=%d RT=%d" % v) for i, v in xi],
+                                 _ventana_en_primer_plano())
                 except OSError as e:
                     log.warning("Error de red mandando input: %s", e)
                 except Exception as e:
@@ -1489,6 +1564,9 @@ def _bombear_input_hasta_que_muera(proc, sock):
                 log.info("[stats] %d envios en %.1fs = %.1f Hz (objetivo %d) mando=%s ffplay_vivo=%s",
                          stats_ticks, span, stats_ticks / span, INPUT_RATE,
                          joystick is not None, proc.poll() is None)
+                xi_activos = _xinput_conectados()
+                log.info("[diag] xinput_conectados=%s primer_plano=%s mi_pid=%d",
+                         xi_activos, _ventana_en_primer_plano(), os.getpid())
                 stats_last, stats_ticks = ahora, 0
 
             restante = interval - (time.time() - inicio)
