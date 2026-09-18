@@ -377,6 +377,9 @@ REM    con Opus. Dos pruebas (agosto y hoy) dicen lo mismo: NO bajar el buffer d
 REM    captura de audio. Valores buenos confirmados: audio_buffer_size 50 y
 REM    frame_duration 10. (No se probaron por separado: no se sabe cual de los
 REM    dos empeoro; si algun dia se retoma, probar frame_duration 5 SOLO.)
+REM  PRUEBA (2026-09-18, tras la referencia estable con 50/10): SOLO Opus
+REM    frame_duration 10->5, con -audio_buffer_size en 50. Si se siente peor o
+REM    truena el audio: volver a 10 (valor bueno confirmado).
 "%FFMPEG%" ^
   -stats_period 2 -progress progreso-%STAMP%.log ^
   -f dshow %CAPTURA% ^
@@ -387,7 +390,7 @@ REM    dos empeoro; si algun dia se retoma, probar frame_duration 5 SOLO.)
   -c:v h264_nvenc -preset p1 -tune ull -zerolatency 1 -rc cbr -b:v %VBITRATE% -maxrate %VBITRATE% -bufsize %VBUF% ^
   -g 30 -bf 0 -rc-lookahead 0 -delay 0 ^
   -af aresample=async=1000 ^
-  -c:a libopus -application lowdelay -frame_duration 10 -b:a 96k -ar 48000 -ac 2 ^
+  -c:a libopus -application lowdelay -frame_duration 5 -b:a 96k -ar 48000 -ac 2 ^
   -f mpegts -muxdelay 0 -muxpreload 0 -flush_packets 1 -max_interleave_delta 0 -pes_payload_size 0 ^
   udp://%DECK_IP%:%DECK_PORT%?pkt_size=1316
 
