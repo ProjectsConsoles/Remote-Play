@@ -157,6 +157,13 @@ VQ_ESPERA="${PS3RP_VQ_ESPERA:-90}"  # segundos de veda despues de un reinicio, p
 # mide directo. fd SI salta de golpe en esas rafagas (confirmado en vivo:
 # fd=52 con vq=0KB/aq=0KB durante el problema).
 FD_SALTO="${PS3RP_FD_SALTO:-6}"
+# Reintento de ARRANQUE (2026-09-18): cada arranque de ffplay "aterriza" en un nivel
+# de vq distinto y se queda ahi (medido: 0-23 KB en unas corridas, 60-78 en otras, casi
+# plano dentro de cada una). Si en los segundos 20-50 vq se queda >= VQ_ARRANQUE KB
+# durante 8 s, se reinicia ffplay para volver a tirar el dado, hasta VQ_ARRANQUE_INTENTOS
+# veces. 0 = desactivado.
+VQ_ARRANQUE="${PS3RP_VQ_ARRANQUE:-40}"
+VQ_ARRANQUE_INTENTOS="${PS3RP_VQ_ARRANQUE_INTENTOS:-3}"
 
 # AJUSTE SIN PARPADEO (2026-09-13): reiniciar ffplay arregla el atasco de
 # lsfg pero cierra y vuelve a abrir la ventana - "se ve muy mal" (reportado
@@ -973,9 +980,10 @@ stamp() {
              -v cada="$STATS_EVERY" -v fdsalto="$FD_SALTO" \
              -v lsfgon="${PS3RP_LSFG:-0}" -v lsfgperfil="${LSFG_PROCESS:-}" \
              -v lsfgconf="$LSFG_CONF" -v lsfgscript="$LSFG_PAUSA_SCRIPT" \
-             -v lsfgpausa="$LSFG_PAUSA" -v lsfgveda="$LSFG_VEDA" '
+             -v lsfgpausa="$LSFG_PAUSA" -v lsfgveda="$LSFG_VEDA" \
+             -v arrmax="$VQ_ARRANQUE_ACTIVO" -v arrini=20 -v arrfin=50 -v arrsecs=8 '
               BEGIN {
-                  RS = "[\r\n]"; last = 0; muestras = 0; seguidas = 0; ultimaStat = 0; fdAnterior = -1
+                  RS = "[\r\n]"; last = 0; muestras = 0; seguidas = 0; ultimaStat = 0; fdAnterior = -1; arrseguidas = 0
                   ultimoLsfg = -999999
                   # Chequeo UNA vez al arrancar, no en cada muestra: si esto
                   # corre bajo ~/lsfg de verdad (lsfgperfil viene puesto) y el
@@ -1028,6 +1036,23 @@ stamp() {
                           else seguidas = 0
                           if (seguidas >= vqsecs + 0) {
                               reiniciarFfplay(sprintf("vq lleva %d s en %s KB (tope %s): el video quedo atrasado y tardaria minutos en drenarse.", seguidas, m[1], vqmax))
+                              disparado = 1
+                          }
+                      }
+                      # Reintento de arranque: ver VQ_ARRANQUE arriba. Marca la razon
+                      # ("arranque") en el archivo para que el lazo de bash lo cuente
+                      # aparte de los reinicios del watchdog normal.
+                      if (!disparado && wd == "1" && arrmax + 0 > 0 && muestras >= arrini + 0 && muestras <= arrfin + 0 && match($0, /vq=[ ]*([0-9]+)KB/, ma)) {
+                          if (ma[1] + 0 >= arrmax + 0) arrseguidas++
+                          else arrseguidas = 0
+                          if (arrseguidas >= arrsecs + 0) {
+                              printf("%s [arranque] vq lleva %d s en %s KB (limite %s) a los %d s de iniciar: reintentando el arranque.\n",
+                                     strftime("[%H:%M:%S]"), arrseguidas, ma[1], arrmax, muestras)
+                              fflush()
+                              print "arranque" > flag
+                              close(flag)
+                              system("pkill -x ffplay")
+                              arrseguidas = 0
                               disparado = 1
                           }
                       }
@@ -1149,6 +1174,8 @@ VENTANA_T0=$(date +%s)
 # arrancar alcanza con saltear el arranque de ffplay; despues de un reinicio hay
 # que callarlo mucho mas, porque el propio reinicio deja el vq alto un rato.
 ESPERA=15
+VQ_ARRANQUE_ACTIVO="$VQ_ARRANQUE"   # pasa a 0 al gastar los intentos
+ARR_USADOS=0
 
 if [ "$WATCHDOG" = "1" ] && ! command -v gawk >/dev/null 2>&1; then
     echo "AVISO: no hay gawk, el watchdog del video queda inactivo." | tee -a "$LOG"
@@ -1184,7 +1211,23 @@ while true; do
 
     # Sin marca, ffplay se cerro porque el usuario salio: no relanzar.
     [ -f "$WATCHDOG_FLAG" ] || break
+    MOTIVO_FLAG=$(cat "$WATCHDOG_FLAG" 2>/dev/null)
     rm -f "$WATCHDOG_FLAG"
+
+    # Reintento de ARRANQUE: no cuenta como reinicio del watchdog (no debe apagarlo
+    # por el tope de 5 en 2 min) y tiene sus propios intentos.
+    if [ "$MOTIVO_FLAG" = "arranque" ]; then
+        ARR_USADOS=$((ARR_USADOS + 1))
+        echo "Reintentando el arranque del video (intento $ARR_USADOS/$VQ_ARRANQUE_INTENTOS)..." | tee -a "$LOG"
+        if [ "$ARR_USADOS" -ge "$VQ_ARRANQUE_INTENTOS" ]; then
+            VQ_ARRANQUE_ACTIVO=0
+            echo "  (ultimo intento: si sigue alto, se queda asi hasta el proximo reinicio)" | tee -a "$LOG"
+        fi
+        continue
+    fi
+    # Reinicio normal del watchdog = arranque nuevo: vuelven a valer los intentos.
+    ARR_USADOS=0
+    VQ_ARRANQUE_ACTIVO="$VQ_ARRANQUE"
 
     AHORA=$(date +%s)
     if [ $((AHORA - VENTANA_T0)) -gt 120 ]; then

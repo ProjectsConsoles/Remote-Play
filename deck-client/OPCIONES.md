@@ -111,6 +111,8 @@ Reinicia `ffplay` solo si el video se queda atrasado.
 | `PS3RP_FD_SALTO` | `6` | Salto en `fd=` (cuadros descartados por ffplay) en 1s que reacciona de golpe - detecta rafagas del servidor que descuadran Lossless Scaling sin llenar vq/aq. Con lsfg activo baja el multiplier en vez de reiniciar ffplay (ver abajo); sin lsfg, reinicia ffplay. |
 | `PS3RP_LSFG_CONF` | `~/.config/lsfg-vk/conf.toml` | Donde esta el conf.toml de lsfg-vk, para bajarle el multiplier un momento en vez de reiniciar ffplay. |
 | `PS3RP_LSFG_PAUSA` | `4` | Segundos que se deja el multiplier de lsfg en 1 antes de restaurarlo solo. |
+| `PS3RP_VQ_ARRANQUE` | `40` | Reintento de **arranque**: cada arranque de ffplay aterriza en un nivel de retraso distinto (`vq` 0-23 KB en unas corridas, 60-78 en otras) y se queda ahi. Si en los segundos 20-50 `vq` se queda >= este valor 8 s seguidos, reinicia ffplay para volver a tirar el dado. `0` lo apaga. |
+| `PS3RP_VQ_ARRANQUE_INTENTOS` | `3` | Cuantos reintentos de arranque como maximo (no cuentan para el tope de 5 reinicios del watchdog). Un reinicio normal del watchdog los repone. |
 
 > **El reinicio se autoalimenta**: reiniciar sube la cola, lo que dispara otro
 > reinicio. La veda de 90 s es lo que rompe el bucle. Si algún día se retocan
