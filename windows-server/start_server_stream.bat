@@ -377,19 +377,16 @@ REM    con Opus. Dos pruebas (agosto y hoy) dicen lo mismo: NO bajar el buffer d
 REM    captura de audio. Valores buenos confirmados: audio_buffer_size 50 y
 REM    frame_duration 10. (No se probaron por separado: no se sabe cual de los
 REM    dos empeoro; si algun dia se retoma, probar frame_duration 5 SOLO.)
-REM  REPUESTO A PEDIDO DEL USUARIO (2026-09-18): -audio_buffer_size 20 con Opus
-REM    frame_duration 5. Esa fue la combinacion de la prueba que se sintio peor,
-REM    pero el usuario asegura que esa corrida estuvo contaminada (un ffmpeg
-REM    huerfano quedo vivo) y que con esos valores 'ya se sentia excelente'.
-REM    Los datos no eran concluyentes (vq alto, pero cada arranque de ffplay
-REM    cae en un nivel distinto: 'loteria de arranque'). Valores anteriores
-REM    confirmados buenos: -audio_buffer_size 50 con frame_duration 5 (o 10).
-REM    Si vuelve a sentirse peor de forma clara: volver a 50.
+REM  VALOR BUENO (2026-09-18): -audio_buffer_size 50 con Opus frame_duration 5
+REM    ('casi identico a la tele'). El 20 se probo 3 veces (agosto y dos hoy) y
+REM    las tres se sintio con mas retraso: NO volver a bajarlo. Ojo: cada
+REM    arranque del cliente cae en un nivel de cola distinto (vq 0-90 KB en la
+REM    Deck), asi que una sola corrida no alcanza para juzgar un cambio.
 "%FFMPEG%" ^
   -stats_period 2 -progress progreso-%STAMP%.log ^
   -f dshow %CAPTURA% ^
   -use_wallclock_as_timestamps 1 ^
-  -audio_buffer_size 20 -rtbufsize %RTBUF% ^
+  -audio_buffer_size 50 -rtbufsize %RTBUF% ^
   -i video="%VIDEO_DEV%":audio="%AUDIO_DEV%" ^
   -vf format=nv12 %ASPECTO% ^
   -c:v h264_nvenc -preset p1 -tune ull -zerolatency 1 -rc cbr -b:v %VBITRATE% -maxrate %VBITRATE% -bufsize %VBUF% ^
