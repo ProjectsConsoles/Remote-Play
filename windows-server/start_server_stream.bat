@@ -370,17 +370,23 @@ REM  audio de reloj maestro, asi que todo retraso del audio se lo hereda el
 REM  video (la Deck mostraba vq=30-70 KB de video esperando al audio). AAC
 REM  retiene ~40 ms (frame de 1024 + relleno del codificador); Opus con
 REM  frame_duration 10 y lowdelay, ~15 ms. Para volver: -c:a aac -b:a 96k.
+REM  PRUEBA (2026-09-18): -audio_buffer_size 50->20 y Opus frame_duration 10->5.
+REM    Con Opus el delay bajo mucho, o sea que la cadena de audio (de la que
+REM    depende el video por -sync audio) sigue mandando. El 20 ya se probo el
+REM    2026-08-29 y se sintio peor, pero fue ANTES de quitar las retenciones del
+REM    muxer y de pasar a Opus. Si truena el audio o empeora: volver a 50 y 10
+REM    (valores buenos confirmados).
 "%FFMPEG%" ^
   -stats_period 2 -progress progreso-%STAMP%.log ^
   -f dshow %CAPTURA% ^
   -use_wallclock_as_timestamps 1 ^
-  -audio_buffer_size 50 -rtbufsize %RTBUF% ^
+  -audio_buffer_size 20 -rtbufsize %RTBUF% ^
   -i video="%VIDEO_DEV%":audio="%AUDIO_DEV%" ^
   -vf format=nv12 %ASPECTO% ^
   -c:v h264_nvenc -preset p1 -tune ull -zerolatency 1 -rc cbr -b:v %VBITRATE% -maxrate %VBITRATE% -bufsize %VBUF% ^
   -g 30 -bf 0 -rc-lookahead 0 -delay 0 ^
   -af aresample=async=1000 ^
-  -c:a libopus -application lowdelay -frame_duration 10 -b:a 96k -ar 48000 -ac 2 ^
+  -c:a libopus -application lowdelay -frame_duration 5 -b:a 96k -ar 48000 -ac 2 ^
   -f mpegts -muxdelay 0 -muxpreload 0 -flush_packets 1 -max_interleave_delta 0 -pes_payload_size 0 ^
   udp://%DECK_IP%:%DECK_PORT%?pkt_size=1316
 
