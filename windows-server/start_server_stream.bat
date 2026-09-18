@@ -377,9 +377,10 @@ REM    con Opus. Dos pruebas (agosto y hoy) dicen lo mismo: NO bajar el buffer d
 REM    captura de audio. Valores buenos confirmados: audio_buffer_size 50 y
 REM    frame_duration 10. (No se probaron por separado: no se sabe cual de los
 REM    dos empeoro; si algun dia se retoma, probar frame_duration 5 SOLO.)
-REM  PRUEBA (2026-09-18, tras la referencia estable con 50/10): SOLO Opus
-REM    frame_duration 10->5, con -audio_buffer_size en 50. Si se siente peor o
-REM    truena el audio: volver a 10 (valor bueno confirmado).
+REM  CONFIRMADO (2026-09-18): Opus frame_duration 5 con -audio_buffer_size 50.
+REM    El usuario: 'casi identico a la tele'. Es el valor bueno actual. (El
+REM    frame_duration 10 tambien era bueno, ~5 ms mas lento; audio_buffer_size 20
+REM    es lo que empeoraba, no el frame_duration 5.)
 "%FFMPEG%" ^
   -stats_period 2 -progress progreso-%STAMP%.log ^
   -f dshow %CAPTURA% ^
