@@ -151,6 +151,12 @@ STATS_EVERY="${PS3RP_STATS_EVERY:-30}"
 # Con mpv NO corren el watchdog ni el ajuste de lsfg (leen la linea de estado de
 # ffplay, que mpv no escribe). Instalar: flatpak install --user flathub io.mpv.Mpv
 PLAYER="${PS3RP_PLAYER:-gstreamer}"
+# Ajuste de imagen con gstreamer (2026-09-18). La pantalla de la Deck es 16:10 y el
+# video 16:9, asi que sin nada quedan barras negras arriba y abajo (40 px c/u).
+#   barras  = imagen exacta con barras (default)
+#   estirar = llena la pantalla, ~11% mas alta
+#   zoom    = llena la pantalla sin deformar, recorta ~5% de cada lado
+AJUSTE="${PS3RP_AJUSTE:-barras}"
 FIFO="${PS3RP_FIFO:-1500}"        # buffer UDP en PAQUETES de 188 bytes (no en bytes; ver nota larga)
 # Watchdog del atasco de video. Ver la nota larga junto al lazo de ffplay.
 WATCHDOG="${PS3RP_WATCHDOG:-1}"  # 0 = no reiniciar ffplay solo, nunca
@@ -1202,13 +1208,20 @@ if [ "$PLAYER" = "gstreamer" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1
     #   - colas leaky=downstream chicas: si algo se atrasa, se TIRA lo viejo.
     # Precio: sin sincronia A/V estricta (van juntos porque llegan juntos por la red).
     echo "--- reproductor: gstreamer ---" | tee -a "$LOG"
+    case "$AJUSTE" in
+        estirar) GST_IMAGEN=(! glimagesink sync=false force-aspect-ratio=false) ;;
+        # video/x-raw: el recorte trabaja en memoria del sistema, no en la de la GPU.
+        zoom)    GST_IMAGEN=(! video/x-raw ! aspectratiocrop aspect-ratio=16/10 ! glimagesink sync=false force-aspect-ratio=true) ;;
+        *)       GST_IMAGEN=(! glimagesink sync=false force-aspect-ratio=true) ;;
+    esac
+    echo "Ajuste de imagen: $AJUSTE" | tee -a "$LOG"
     env -u LD_PRELOAD \
         DISABLE_VK_LAYER_VALVE_steam_overlay_1=1 \
         flatpak run --command=gst-launch-1.0 io.mpv.Mpv \
         udpsrc port="$PORT" caps=video/mpegts ! tsdemux latency=0 name=d \
         d. ! queue max-size-buffers=3 max-size-time=0 max-size-bytes=0 leaky=downstream \
            ! h264parse ! vah264dec ! queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream \
-           ! glimagesink sync=false force-aspect-ratio=true \
+           "${GST_IMAGEN[@]}" \
         d. ! queue max-size-buffers=8 max-size-time=0 max-size-bytes=0 leaky=downstream \
            ! opusdec ! audioconvert ! audioresample \
            ! pulsesink sync=false buffer-time=40000 latency-time=10000 \
