@@ -30,7 +30,7 @@ por USB. No es un emulador: la consola sigue siendo la real.
 
 ## Estructura del repo
 
-- **`deck-client/`** — cliente Steam Deck (pygame + `ffplay`), firmware del
+- **`deck-client/`** — cliente Steam Deck (pygame + GStreamer, o `ffplay`), firmware del
   ESP32-S3 (`esp32_firmware/`), ajustes de latencia en `OPCIONES.md`.
 - **`windows-server/`** — servidor de captura/streaming (PowerShell +
   ffmpeg) con interfaz gráfica y lanzador nativo.
@@ -56,6 +56,31 @@ con el mando (cruceta + A/B, izquierda/derecha cambia cada valor):
   IP de la Deck, por UDP (puerto 9200) a `config_listener.ps1`. Reinicia el
   servidor solo si ya estaba transmitiendo.
 - **Configurar cliente** — variables de latencia de `deck-client/OPCIONES.md`.
+
+## Reproductor de video: GStreamer (menos delay)
+
+Los dos clientes usan **GStreamer** por defecto: cada cuadro y el audio se
+muestran apenas llegan, y si algo se atrasa **se descarta** en vez de
+acumularse. Con `ffplay` cada arranque se quedaba con un retraso distinto
+(a veces bueno, a veces no). `ffplay` sigue disponible en *Configurar
+cliente → Reproductor de video*, y se usa solo si falta GStreamer.
+
+- **Steam Deck** — el GStreamer de SteamOS no trae decodificador H.264, así
+  que se usa el del runtime de Flatpak (decodifica por GPU). Instalar una vez,
+  sin contraseña:
+  ```
+  flatpak install --user flathub io.mpv.Mpv
+  ```
+  *Ajuste de imagen* (la pantalla es 16:10 y el video 16:9): `barras`
+  (exacta, franjas negras), `estirar` (llena, ~11 % más alta) o `zoom`
+  (llena, recorta ~5 % de cada lado).
+- **ROG Ally X** — una carpeta `gstreamer\` junto a `RemotePlay_Ally.exe`
+  (~178 MB, no se instala nada en Windows). Se arma con
+  `rog-ally-client/preparar_gstreamer.sh` (necesita `brew install msitools`).
+
+Ajustes que bajaron el delay (servidor): audio **Opus** de baja latencia en
+vez de AAC, `-pes_payload_size 0` en el muxer, y WiFi sin ahorro de energía
+en los clientes. Detalles en `deck-client/OPCIONES.md`.
 
 ## PS2 (via Open PS2 Loader / PADEMU)
 
@@ -115,6 +140,7 @@ conectarla/resetear), mantén **BOOT** ~1.5s — el LED cicla de color cada
 - **ffmpeg** (ver abajo cómo instalarlo).
 - Una **capturadora HDMI** compatible con DirectShow, con audio digital.
 - Un **ESP32-S3** flasheado con `deck-client/esp32_firmware/` (ver abajo).
+- **GStreamer** en cada cliente (ver *Reproductor de video* arriba).
 
 ## Instalar ffmpeg (para que arranque el servidor)
 
