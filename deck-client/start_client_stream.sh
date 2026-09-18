@@ -161,8 +161,9 @@ FD_SALTO="${PS3RP_FD_SALTO:-6}"
 # de vq distinto y se queda ahi (medido: 0-23 KB en unas corridas, 60-78 en otras, casi
 # plano dentro de cada una). Si en los segundos 20-50 vq se queda >= VQ_ARRANQUE KB
 # durante 8 s, se reinicia ffplay para volver a tirar el dado, hasta VQ_ARRANQUE_INTENTOS
-# veces. 0 = desactivado.
-VQ_ARRANQUE="${PS3RP_VQ_ARRANQUE:-40}"
+# veces. 0 = desactivado. APAGADO POR DEFECTO (2026-09-18): al usuario no le gusto que el
+# video se reiniciara tan seguido al arrancar. Para probarlo: PS3RP_VQ_ARRANQUE=40.
+VQ_ARRANQUE="${PS3RP_VQ_ARRANQUE:-0}"
 VQ_ARRANQUE_INTENTOS="${PS3RP_VQ_ARRANQUE_INTENTOS:-3}"
 
 # AJUSTE SIN PARPADEO (2026-09-13): reiniciar ffplay arregla el atasco de
