@@ -142,6 +142,12 @@ STATS="${PS3RP_STATS:-0}"        # 1 = medir las colas internas de ffplay (ver n
 # asi que las corridas quedaban sin rastro de A-V ni de vq. 30 s son 120 lineas
 # por hora, nada. PS3RP_STATS_EVERY=0 lo apaga.
 STATS_EVERY="${PS3RP_STATS_EVERY:-30}"
+# Reproductor (2026-09-18, PRUEBA): "ffplay" (default, todo igual que siempre) o
+# "mpv" (flatpak io.mpv.Mpv, modo --untimed: pinta cada cuadro apenas llega en vez
+# de formarlo detras del reloj de audio, asi que no hay cola que se quede atorada).
+# Con mpv NO corren el watchdog ni el ajuste de lsfg (leen la linea de estado de
+# ffplay, que mpv no escribe). Instalar: flatpak install --user flathub io.mpv.Mpv
+PLAYER="${PS3RP_PLAYER:-ffplay}"
 FIFO="${PS3RP_FIFO:-1500}"        # buffer UDP en PAQUETES de 188 bytes (no en bytes; ver nota larga)
 # Watchdog del atasco de video. Ver la nota larga junto al lazo de ffplay.
 WATCHDOG="${PS3RP_WATCHDOG:-1}"  # 0 = no reiniciar ffplay solo, nunca
@@ -1183,6 +1189,25 @@ if [ "$WATCHDOG" = "1" ] && ! command -v gawk >/dev/null 2>&1; then
     WATCHDOG=0
 fi
 
+if [ "$PLAYER" = "mpv" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1; then
+    echo "--- reproductor: mpv (prueba) ---" | tee -a "$LOG"
+    # --untimed: sin esperar al reloj; --no-cache y nobuffer: sin colchon de red.
+    # El audio suena por su lado (puede ir unos ms desfasado: es el precio).
+    env -u LD_PRELOAD \
+        DISABLE_VK_LAYER_VALVE_steam_overlay_1=1 \
+        flatpak run io.mpv.Mpv --no-config --fs --osc=no --no-input-default-bindings \
+        --profile=low-latency --untimed --no-cache \
+        --demuxer-lavf-o-add=fflags=+nobuffer \
+        --demuxer-lavf-probesize=32 --demuxer-lavf-analyzeduration=0 \
+        --demuxer-lavf-format=mpegts \
+        --hwdec=auto-safe --msg-level=all=warn \
+        "udp://@:$PORT?fifo_size=$FIFO&overrun_nonfatal=1" 2>&1 | tr "\r" "\n" | tee -a "$LOG"
+    echo "mpv termino con codigo ${PIPESTATUS[0]}" >> "$LOG"
+else
+if [ "$PLAYER" = "mpv" ]; then
+    echo "AVISO: PS3RP_PLAYER=mpv pero no esta instalado io.mpv.Mpv (flatpak --user) - uso ffplay." | tee -a "$LOG"
+fi
+
 while true; do
     RC_FILE=$(mktemp)
     rm -f "$WATCHDOG_FLAG"
@@ -1245,6 +1270,7 @@ while true; do
     ESPERA="$VQ_ESPERA"
     echo "Reiniciando el video (reinicio #$REINICIOS; watchdog en veda ${ESPERA}s)..." | tee -a "$LOG"
 done
+fi  # PS3RP_PLAYER
 
 # Aviso si gamescope rechazo el modo de presentacion pedido. Sin esto la linea
 # "Unsupported MESA_VK_WSI_PRESENT_MODE value!" queda enterrada entre los
