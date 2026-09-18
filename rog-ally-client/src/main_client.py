@@ -72,6 +72,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gamepad_common as gp        # noqa: E402
 from brightness_win import Brillo, PCT_MIN   # noqa: E402
 import server_udp                  # noqa: E402
+import wifi_power                  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Rutas y logging
@@ -141,6 +142,7 @@ CAMPOS_CLIENTE = [
     ("PS3RP_STREAM_PORT", "Puerto UDP del video", "numero", "5000", None),
     ("PS3RP_FULLSCREEN", "Video en pantalla completa", "bool", "1", None),
     ("PS3RP_BRILLO", "Brillo en modo control (0-100, vacio = no tocar)", "numero", "", None),
+    ("PS3RP_WIFI_SIN_AHORRO", "WiFi sin ahorro de energia (menos delay)", "bool", "1", None),
     ("PS3RP_MODO", "Modo fijo al abrir (vacio = preguntar cada vez)", "enum", "",
      ["", "streaming", "control"]),
 ]
@@ -969,7 +971,9 @@ def mostrar_config_cliente():
 
     est = {"foco": 0, "editando": False, "buffer": "", "txt": "", "color": TENUE}
 
-    fila_alto = 52
+    # Adaptable: con 11 campos, en una pantalla de 720 px las filas de 52 px
+    # dejaban la linea de estado encima del pie. Reserva 110 arriba y 70 abajo.
+    fila_alto = max(40, min(52, (h - 110 - 70) // n))
     y0 = 110
     ancho_fila = min(760, w - 80)
     x0 = (w - ancho_fila) // 2
@@ -1631,6 +1635,14 @@ def main():
 
     log.info("=== PS3 Remote Play (Ally) iniciando ===")
     _timer_fino(True)
+
+    # WiFi sin ahorro de energia (o devolverlo, segun el interruptor). En hilo
+    # aparte: son 3-4 llamadas a powercfg y el menu no debe esperarlas.
+    def _wifi():
+        sin_ahorro = os.environ.get("PS3RP_WIFI_SIN_AHORRO", "1") == "1"
+        log.info("WiFi power save: %s", wifi_power.aplicar(
+            sin_ahorro, os.path.join(app_dir(), "wifi_power_original.json")))
+    threading.Thread(target=_wifi, daemon=True).start()
 
     while True:
         modo = MODO_FIJO

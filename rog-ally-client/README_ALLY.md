@@ -46,6 +46,7 @@ lanzar el .exe (ej. un acceso directo de Windows con
 | `PS3RP_STREAM_PORT` | `5000` | Puerto UDP donde ffplay espera el stream |
 | `PS3RP_FULLSCREEN` | `1` | `0` = ventana de ffplay sin pantalla completa (util para probar) |
 | `PS3RP_BRILLO` | *(vacio: 1%)* | Brillo fijo al entrar en modo control, 1-100 |
+| `PS3RP_WIFI_SIN_AHORRO` | `1` | `1` pone el adaptador WiFi en *Rendimiento maximo* (plan de energia, AC y bateria) al abrir la app; `0` devuelve los valores originales que se guardaron en `wifi_power_original.json`, junto al .exe. Menos jitter/delay, algo mas de bateria. Se ajusta en *Configurar cliente*. **Sin probar en la Ally real** (si falla solo deja un AVISO en el log). |
 | `PS3RP_FFPLAY` | *(vacio: busca junto al .exe)* | Ruta a otro `ffplay.exe` |
 | `PS3RP_DEBUG` | `0` | `1` = log detallado (botones por cambio, stats de Hz) |
 
