@@ -660,7 +660,18 @@ def mostrar_config_servidor():
     columnas = 2
     total_ancho = ancho_t * columnas + esp_x
     x0 = (w - total_ancho) // 2
-    y0 = h // 2 - 110
+    # y0 calculado por CANTIDAD DE FILAS (2026-09-17, tras agregar crudo720):
+    # antes era un offset fijo (h // 2 - 110) pensado para exactamente 2
+    # filas (4 modos) - con 5 modos (3 filas) la tercera se salia del
+    # espacio pensado y se encimaba con el pie de pagina de abajo
+    # ("se ve encimado y abajo", reportado con foto real). Ahora centra la
+    # grilla completa en el espacio libre entre el campo de IP (termina
+    # ~y=238) y el pie de pagina (h - 30).
+    filas = (len(MODOS_SERVIDOR) + 1) // 2
+    total_alto = alto_t * filas + esp_y * (filas - 1)
+    disponible_arriba = 260
+    disponible_abajo = h - 60
+    y0 = disponible_arriba + max(0, (disponible_abajo - disponible_arriba - total_alto) // 2)
     rects = []
     for i in range(len(MODOS_SERVIDOR)):
         fila, col = divmod(i, columnas)
