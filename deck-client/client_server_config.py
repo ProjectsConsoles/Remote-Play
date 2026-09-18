@@ -310,6 +310,25 @@ def main():
         else:
             lblEstado.configure(text=str(resp2), fg=ROJO)
 
+    def apagar_servidor():
+        # A diferencia de reiniciar_servidor, esto usa el comando nuevo
+        # stop_server (2026-09-17) - set_config SIEMPRE vuelve a arrancar,
+        # no sirve para apagar de verdad.
+        ip = entryIp.get().strip()
+        if not ip:
+            lblEstado.configure(text="Pon una IP primero.", fg=ROJO)
+            return
+        lblEstado.configure(text="Apagando servidor...", fg=TENUE)
+        root.update_idletasks()
+        ok, resp = server_udp.detener_servidor(ip)
+        if not ok:
+            lblEstado.configure(text=str(resp), fg=ROJO)
+            return
+        if resp.get("aplicado") == "detenido":
+            lblEstado.configure(text="Listo: servidor apagado.", fg=VERDE)
+        else:
+            lblEstado.configure(text="El servidor ya estaba apagado.", fg=TENUE)
+
     btnConsultar = tk.Button(filaBotones, text="Consultar estado", font=f_boton,
                               bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55",
                               activeforeground="#ffffff", relief="flat", bd=0,
@@ -338,6 +357,13 @@ def main():
                               width=18, height=2, command=reiniciar_servidor)
     btnReiniciar.pack(side="left", padx=10)
 
+    btnApagar = tk.Button(filaBotones, text="Apagar servidor (L1)", font=f_boton,
+                           bg="#7a2020", fg="#ffffff", activebackground="#8f2626",
+                           activeforeground="#ffffff", relief="flat", bd=0,
+                           highlightthickness=3, highlightbackground=FONDO,
+                           width=18, height=2, command=apagar_servidor)
+    btnApagar.pack(side="left", padx=10)
+
     btnVolver = tk.Button(filaBotones, text="Volver", font=f_boton,
                            bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55",
                            activeforeground="#ffffff", relief="flat", bd=0,
@@ -350,11 +376,12 @@ def main():
         (btnEnviarIp, enviar_ip),
         (btnAplicar, aplicar),
         (btnReiniciar, reiniciar_servidor),
+        (btnApagar, apagar_servidor),
         (btnVolver, root.destroy),
     ])
 
     tk.Label(root, text="Cruceta: elige modo o (bajando) botones. A ejecuta. "
-                         "Y manda la IP, X reinicia el servidor, Escape vuelve.",
+                         "Y manda la IP, X reinicia el servidor, L1 lo apaga, Escape vuelve.",
              font=f_pie, bg=FONDO, fg=TENUE).pack(side="bottom", pady=16)
 
     root.bind("<Left>", lambda e: mover(-1, 0))
@@ -386,6 +413,8 @@ def main():
                 enviar_ip()
             elif nombre == "X":
                 reiniciar_servidor()
+            elif nombre == "L1":
+                apagar_servidor()
             elif nombre == "B":
                 root.destroy()
                 return

@@ -98,6 +98,14 @@ def aplicar_config(ip_servidor, cliente_ip, modo):
                   timeout=TIMEOUT_APLICAR_S)
 
 
+def detener_servidor(ip_servidor):
+    """-> (True, {"aplicado": "detenido"|"ya_estaba_detenido"}) o
+    (False, mensaje_de_error). A diferencia de aplicar_config, esto SOLO
+    apaga - no vuelve a arrancar con ninguna config (2026-09-17, pedido
+    aparte de "Reiniciar servidor")."""
+    return _pedir(ip_servidor, {"cmd": "stop_server"}, timeout=TIMEOUT_APLICAR_S)
+
+
 def obtener_ip_local():
     """IP de esta Ally en la red local. El truco del socket UDP "conectado" a
     8.8.8.8 no manda ningun paquete: solo hace que el sistema operativo elija

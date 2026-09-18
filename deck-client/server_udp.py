@@ -79,6 +79,14 @@ def aplicar_config(ip_servidor, deck_ip, modo):
                   timeout=TIMEOUT_APLICAR_S)
 
 
+def detener_servidor(ip_servidor):
+    """-> (True, {"aplicado": "detenido"|"ya_estaba_detenido"}) o
+    (False, mensaje_de_error). A diferencia de aplicar_config, esto SOLO
+    apaga - no vuelve a arrancar con ninguna config (2026-09-17, pedido
+    aparte de "Reiniciar servidor")."""
+    return _pedir(ip_servidor, {"cmd": "stop_server"}, timeout=TIMEOUT_APLICAR_S)
+
+
 # ---------------------------------------------------------------------------
 # Utilidades de red generales (movidas de client_menu.py, 2026-09-11: las
 # necesita tambien la pantalla de "Configurar servidor" para mostrar/mandar

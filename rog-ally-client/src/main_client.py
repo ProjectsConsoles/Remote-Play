@@ -723,8 +723,8 @@ def mostrar_config_servidor():
             for j, ln in enumerate(lineas):
                 _texto(pygame, screen, f_modo_d, ln, TENUE, center=(r.centerx, y_detalle + j * 18))
 
-        pie = ("Flechas elige modo, A aplica, X consulta, Y manda IP, L1 reinicia el servidor, "
-               "toca el cuadro edita la IP, B vuelve.")
+        pie = ("Flechas elige modo, A aplica, X consulta, Y manda IP, L1 reinicia, R1 apaga el "
+               "servidor, toca el cuadro edita la IP, B vuelve.")
         _texto(pygame, screen, f_pie, pie, TENUE, center=(w // 2, h - 30))
         pygame.display.flip()
 
@@ -836,6 +836,25 @@ def mostrar_config_servidor():
         else:
             estado["txt"], estado["color"] = str(resp2), (200, 80, 60)
 
+    def apagar_servidor():
+        # stop_server (2026-09-17) - a diferencia de reiniciar_servidor,
+        # esto SOLO apaga, no vuelve a arrancar con ninguna config.
+        # A/B/X/Y/L1 ya ocupados, va en R1.
+        ip = estado["ip_servidor"]
+        if not ip:
+            estado["txt"], estado["color"] = "Pon una IP primero.", (200, 80, 60)
+            return
+        estado["txt"], estado["color"] = "Apagando servidor...", TENUE
+        dibujar()
+        ok, resp = server_udp.detener_servidor(ip)
+        if not ok:
+            estado["txt"], estado["color"] = str(resp), (200, 80, 60)
+            return
+        if resp.get("aplicado") == "detenido":
+            estado["txt"], estado["color"] = "Listo: servidor apagado.", VERDE
+        else:
+            estado["txt"], estado["color"] = "El servidor ya estaba apagado.", TENUE
+
     joystick = _joystick_activo(pygame, None)
     prev_botones = _botones_pulsados(gp, joystick)
     reloj = pygame.time.Clock()
@@ -899,6 +918,8 @@ def mostrar_config_servidor():
                 enviar_ip()
             if "L1" in nuevos:
                 reiniciar_servidor()
+            if "R1" in nuevos:
+                apagar_servidor()
             if "B" in nuevos:
                 corriendo = False
 

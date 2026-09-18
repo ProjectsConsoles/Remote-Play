@@ -173,6 +173,22 @@ while ($true) {
                     Enviar-Respuesta ([pscustomobject]@{ ok = $true; aplicado = "guardado_para_proxima_vez"; ip = $ip; modo = $modo }) $origen
                 }
             }
+            "stop_server" {
+                # Apagar sin reiniciar (2026-09-17, pedido en los dos
+                # clientes): a diferencia de set_config (que siempre vuelve
+                # a arrancar), esto solo detiene el motor si estaba
+                # corriendo - Detener-Servidor ya existe en
+                # server_engine_lib.ps1 (lo usa Iniciar-Servidor antes de
+                # cada reinicio), no hace falta logica nueva del lado de
+                # Windows.
+                if (Servidor-Corriendo) {
+                    Log "deteniendo servidor por pedido remoto"
+                    [void](Detener-Servidor)
+                    Enviar-Respuesta ([pscustomobject]@{ ok = $true; aplicado = "detenido" }) $origen
+                } else {
+                    Enviar-Respuesta ([pscustomobject]@{ ok = $true; aplicado = "ya_estaba_detenido" }) $origen
+                }
+            }
             default {
                 Enviar-Respuesta ([pscustomobject]@{ ok = $false; error = "comando desconocido: $($cmd.cmd)" }) $origen
             }
