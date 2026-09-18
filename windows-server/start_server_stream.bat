@@ -365,6 +365,11 @@ echo  Modo de captura: %MODO_TXT%
 echo.
 pushd "%~dp0logs"
 
+REM  AUDIO: Opus de baja latencia en vez de AAC (2026-09-18). ffplay usa el
+REM  audio de reloj maestro, asi que todo retraso del audio se lo hereda el
+REM  video (la Deck mostraba vq=30-70 KB de video esperando al audio). AAC
+REM  retiene ~40 ms (frame de 1024 + relleno del codificador); Opus con
+REM  frame_duration 10 y lowdelay, ~15 ms. Para volver: -c:a aac -b:a 96k.
 "%FFMPEG%" ^
   -stats_period 2 -progress progreso-%STAMP%.log ^
   -f dshow %CAPTURA% ^
@@ -375,7 +380,7 @@ pushd "%~dp0logs"
   -c:v h264_nvenc -preset p1 -tune ull -zerolatency 1 -rc cbr -b:v %VBITRATE% -maxrate %VBITRATE% -bufsize %VBUF% ^
   -g 30 -bf 0 -rc-lookahead 0 -delay 0 ^
   -af aresample=async=1000 ^
-  -c:a aac -b:a 96k -ar 48000 -ac 2 ^
+  -c:a libopus -application lowdelay -frame_duration 10 -b:a 96k -ar 48000 -ac 2 ^
   -f mpegts -muxdelay 0 -muxpreload 0 -flush_packets 1 -max_interleave_delta 0 -pes_payload_size 0 ^
   udp://%DECK_IP%:%DECK_PORT%?pkt_size=1316
 
