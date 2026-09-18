@@ -657,8 +657,8 @@ def mostrar_config_servidor():
     # salen de los cuadros" (reportado con foto real, los titulos chocaban
     # con la tarjeta de al lado). Ahora el titulo tambien se envuelve (ver
     # _envolver() en dibujar) y ademas hay mas espacio de entrada.
-    ancho_t, alto_t = 340, 150
-    esp_x, esp_y = 30, 24
+    ancho_t = 340
+    esp_x, esp_y = 30, 14
     columnas = 2
     total_ancho = ancho_t * columnas + esp_x
     x0 = (w - total_ancho) // 2
@@ -670,9 +670,19 @@ def mostrar_config_servidor():
     # grilla completa en el espacio libre entre el campo de IP (termina
     # ~y=238) y el pie de pagina (h - 30).
     filas = (len(MODOS_SERVIDOR) + 1) // 2
-    total_alto = alto_t * filas + esp_y * (filas - 1)
     disponible_arriba = 260
-    disponible_abajo = h - 60
+    # Fila de botones tactiles abajo (2026-09-18, como en la Deck): 34 px de
+    # alto a h-90, mas una linea de ayuda en h-30. La grilla termina antes.
+    alto_btn = 34
+    y_btn = h - 90
+    disponible_abajo = y_btn - 10
+    # Alto de tarjeta ADAPTABLE (2026-09-18, foto real: la 3a fila seguia
+    # saliendose de la pantalla de ~720 px de alto y se encimaba con el pie -
+    # 3 filas de 150 px suman ~500 y solo caben ~400). Se reparte el espacio
+    # libre entre las filas, con tope de 150 y minimo de 100 (el texto de las
+    # tarjetas mas cargadas necesita ~115).
+    alto_t = max(100, min(150, (disponible_abajo - disponible_arriba - esp_y * (filas - 1)) // filas))
+    total_alto = alto_t * filas + esp_y * (filas - 1)
     y0 = disponible_arriba + max(0, (disponible_abajo - disponible_arriba - total_alto) // 2)
     rects = []
     for i in range(len(MODOS_SERVIDOR)):
@@ -681,6 +691,21 @@ def mostrar_config_servidor():
                                   ancho_t, alto_t))
 
     campo_ip_rect = pygame.Rect(w // 2 - 140, 150, 280, 40)
+
+    # (clave, etiqueta con el atajo del mando, color). Mismo orden que la Deck.
+    _defs_botones = [
+        ("consultar", "Consultar (X)", (55, 62, 84)),
+        ("enviar_ip", "Enviar IP (Y)", (55, 62, 84)),
+        ("aplicar", "Aplicar (A)", (40, 90, 60)),
+        ("reiniciar", "Reiniciar (L1)", (55, 62, 84)),
+        ("apagar", "Apagar (R1)", (110, 48, 48)),
+        ("volver", "Volver (B)", (70, 70, 78)),
+    ]
+    _gap_b = 8
+    _ancho_b = (total_ancho - _gap_b * (len(_defs_botones) - 1)) // len(_defs_botones)
+    botones = [(clave, etiq, col,
+                pygame.Rect(x0 + i * (_ancho_b + _gap_b), y_btn, _ancho_b, alto_btn))
+               for i, (clave, etiq, col) in enumerate(_defs_botones)]
 
     def dibujar():
         screen.fill(FONDO)
@@ -720,18 +745,19 @@ def mostrar_config_servidor():
             lineas_titulo = _envolver(f_modo_t, nombre, r.width - 20)
             for j, ln in enumerate(lineas_titulo):
                 _texto(pygame, screen, f_modo_t, ln, TEXTO, center=(r.centerx, r.top + 24 + j * 22))
-            y_detalle = r.top + 24 + len(lineas_titulo) * 22 + 16
+            y_detalle = r.top + 24 + len(lineas_titulo) * 22 + 12
             lineas = _envolver(f_modo_d, detalle, r.width - 20)
             for j, ln in enumerate(lineas):
                 _texto(pygame, screen, f_modo_d, ln, TENUE, center=(r.centerx, y_detalle + j * 18))
 
-        # Dos lineas (2026-09-17, "el boton se ve mal"): con R1/apagar
-        # agregado, una sola linea se salia del ancho de pantalla - _texto()
-        # no envuelve solo (font.render de pygame no entiende "\n").
-        pie1 = "Flechas elige modo, A aplica, X consulta, Y manda IP, toca el cuadro edita la IP."
-        pie2 = "L1 reinicia el servidor, R1 lo apaga, B vuelve."
-        _texto(pygame, screen, f_pie, pie1, TENUE, center=(w // 2, h - 46))
-        _texto(pygame, screen, f_pie, pie2, TENUE, center=(w // 2, h - 22))
+        for _clave, etiq, col, r in botones:
+            pygame.draw.rect(screen, col, r, border_radius=8)
+            pygame.draw.rect(screen, (120, 124, 140), r, width=1, border_radius=8)
+            _texto(pygame, screen, f_pie, etiq, TEXTO, center=r.center)
+        # Una sola linea (los atajos ya van en las etiquetas de los botones).
+        _texto(pygame, screen, f_pie,
+               "Flechas o toque eligen el modo; toca el cuadro de IP para editarla.",
+               TENUE, center=(w // 2, h - 28))
         pygame.display.flip()
 
     def consultar():
@@ -901,6 +927,21 @@ def mostrar_config_servidor():
                     for i, r in enumerate(rects):
                         if r.collidepoint(evento.pos):
                             estado["seleccionado"] = i
+                    for clave, _etiq, _col, r in botones:
+                        if not r.collidepoint(evento.pos):
+                            continue
+                        if clave == "consultar":
+                            consultar()
+                        elif clave == "enviar_ip":
+                            enviar_ip()
+                        elif clave == "aplicar":
+                            aplicar()
+                        elif clave == "reiniciar":
+                            reiniciar_servidor()
+                        elif clave == "apagar":
+                            apagar_servidor()
+                        elif clave == "volver":
+                            corriendo = False
             elif evento.type == pygame.JOYDEVICEADDED:
                 joystick = pygame.joystick.Joystick(evento.device_index)
                 joystick.init()
