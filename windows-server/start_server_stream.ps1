@@ -147,8 +147,10 @@ function Elegir($Nombres, $Patrones) {
   return $null
 }
 
-$VideoDev = Elegir $Videos @("*USB Video*")
-$AudioDev = Elegir $Audios @("*USB Digital Audio*", "*Digital Audio*")
+# "Hagibis" (2026-09-17): capturadora nueva, ver la nota gemela en
+# detectar_dispositivos.ps1 - misma causa exacta de "no se pudo iniciar".
+$VideoDev = Elegir $Videos @("*USB Video*", "*Hagibis*")
+$AudioDev = Elegir $Audios @("*USB Digital Audio*", "*Hagibis*", "*Digital Audio*")
 
 #  Si falta alguno se CORTA, no se agarra otro dispositivo cualquiera:
 #  caer al microfono de la PC seria peor que fallar, porque el stream

@@ -111,8 +111,12 @@ function Elegir($Nombres, $Patrones) {
   return $null
 }
 
-$VideoDev = Elegir $Videos @("*USB Video*")
-$AudioDev = Elegir $Audios @("*USB Digital Audio*", "*Digital Audio*")
+# "Hagibis" (2026-09-17): capturadora nueva, Windows la anuncia asi tal
+# cual (video) y como "Interfaz de sonido digital (Hagibis)" (audio) - ni
+# "USB Video" ni "USB Digital Audio" aparecen para nada en esos nombres,
+# asi que sin este patron ffmpeg no arrancaba ("no se pudo iniciar").
+$VideoDev = Elegir $Videos @("*USB Video*", "*Hagibis*")
+$AudioDev = Elegir $Audios @("*USB Digital Audio*", "*Hagibis*", "*Digital Audio*")
 
 # Si no hay match NO se escribe el archivo. El .bat lo toma como
 # "no esta la capturadora" y corta. Es a proposito: caer al microfono

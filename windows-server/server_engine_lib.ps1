@@ -47,6 +47,11 @@ $Modos = @(
         Nombre = "640x480  -  SIN COMPRIMIR  (prueba)"
         Ayuda  = "Igual que el anterior pero pide menos por el USB (37 MB/s contra 41). Si el de 720x480 no sostiene 60 fps, prueba con este."
     }
+    [pscustomobject]@{
+        Clave  = "crudo720"
+        Nombre = "1280x720  -  SIN COMPRIMIR  (Hagibis)"
+        Ayuda  = "Salta el MJPEG del todo a 720p - la capturadora 'Hagibis' (2026-09-17) SI lo sostiene a 60fps por USB, a diferencia de la anterior. Si cambias de capturadora y ves tirones, vuelve a mjpeg720."
+    }
 )
 
 function Modo-Valido($clave) {

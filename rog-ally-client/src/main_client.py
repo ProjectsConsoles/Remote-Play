@@ -398,12 +398,21 @@ def mostrar_menu():
     joystick = _joystick_activo(pygame, None)
     prev_botones = _botones_pulsados(gp, joystick)
 
+    # Texto visible para abrir la info del ESP32 (2026-09-13, "no lo veo en
+    # la Ally" - antes era un atajo con Y sin nada en pantalla que lo
+    # anunciara, mismo error que se corrigio primero en la Deck). Clickeable
+    # tambien, para el touch.
+    info_rect = pygame.Rect(0, 0, 320, 30)
+    info_rect.center = (w // 2, y0 + total_alto + 34)
+
     corriendo = True
     while corriendo:
         for evento in pygame.event.get():
             if evento.type == pygame.QUIT:
                 resultado = None
                 corriendo = False
+            elif evento.type == pygame.MOUSEBUTTONDOWN and info_rect.collidepoint(evento.pos):
+                mostrar_info_esp32()
             elif evento.type == pygame.KEYDOWN:
                 fila, col = divmod(foco, columnas)
                 if evento.key == pygame.K_LEFT:
@@ -593,7 +602,28 @@ MODOS_SERVIDOR = [
     ("mjpeg1080", "1920x1080 - MJPEG (mas nitido)", "Mas definido, pero sube a 8 Mbps."),
     ("crudo480", "720x480 - SIN COMPRIMIR (prueba)", "Salta el MJPEG, 5x mas datos por USB."),
     ("crudo640", "640x480 - SIN COMPRIMIR (prueba)", "Igual pero pide menos por el USB."),
+    ("crudo720", "1280x720 - SIN COMPRIMIR (Hagibis)",
+     "Salta el MJPEG a 720p - solo si tu capturadora lo sostiene a 60fps (la 'Hagibis' si)."),
 ]
+
+
+def _mover_modo_grilla(seleccionado, dx, dy):
+    """Mueve el foco en la grilla de 2 columnas de MODOS_SERVIDOR por
+    fila/columna, no por indice plano (2026-09-17, tras agregar crudo720):
+    con un numero IMPAR de modos la ultima fila queda incompleta y la
+    aritmetica vieja (indice +-2 % n) se salia de rango o envolvia mal
+    ahi - mismo arreglo que en client_server_config.py de la Deck."""
+    n = len(MODOS_SERVIDOR)
+    filas_totales = (n + 1) // 2
+    fila, col = divmod(seleccionado, 2)
+    if dy != 0:
+        fila = (fila + dy) % filas_totales
+    if dx != 0:
+        col = (col + dx) % 2
+    nuevo = fila * 2 + col
+    if nuevo >= n:
+        nuevo = n - 1  # la ultima fila puede venir incompleta
+    return nuevo
 
 IP_SERVIDOR_DEFAULT = "192.168.0.90"
 
@@ -816,13 +846,13 @@ def mostrar_config_servidor():
                         estado["editando_ip"] = False
                     continue
                 if evento.key == pygame.K_LEFT:
-                    estado["seleccionado"] = (estado["seleccionado"] - 1) % len(MODOS_SERVIDOR)
+                    estado["seleccionado"] = _mover_modo_grilla(estado["seleccionado"], -1, 0)
                 elif evento.key == pygame.K_RIGHT:
-                    estado["seleccionado"] = (estado["seleccionado"] + 1) % len(MODOS_SERVIDOR)
+                    estado["seleccionado"] = _mover_modo_grilla(estado["seleccionado"], 1, 0)
                 elif evento.key == pygame.K_UP:
-                    estado["seleccionado"] = (estado["seleccionado"] - 2) % len(MODOS_SERVIDOR)
+                    estado["seleccionado"] = _mover_modo_grilla(estado["seleccionado"], 0, -1)
                 elif evento.key == pygame.K_DOWN:
-                    estado["seleccionado"] = (estado["seleccionado"] + 2) % len(MODOS_SERVIDOR)
+                    estado["seleccionado"] = _mover_modo_grilla(estado["seleccionado"], 0, 1)
                 elif evento.key == pygame.K_RETURN:
                     aplicar()
                 elif evento.key == pygame.K_ESCAPE:
@@ -842,15 +872,14 @@ def mostrar_config_servidor():
         if not estado["editando_ip"]:
             joystick = _joystick_activo(pygame, joystick)
             nuevos, prev_botones = _botones_nuevos(gp, joystick, prev_botones)
-            n = len(MODOS_SERVIDOR)
             if "DPAD_LEFT" in nuevos:
-                estado["seleccionado"] = (estado["seleccionado"] - 1) % n
+                estado["seleccionado"] = _mover_modo_grilla(estado["seleccionado"], -1, 0)
             if "DPAD_RIGHT" in nuevos:
-                estado["seleccionado"] = (estado["seleccionado"] + 1) % n
+                estado["seleccionado"] = _mover_modo_grilla(estado["seleccionado"], 1, 0)
             if "DPAD_UP" in nuevos:
-                estado["seleccionado"] = (estado["seleccionado"] - 2) % n
+                estado["seleccionado"] = _mover_modo_grilla(estado["seleccionado"], 0, -1)
             if "DPAD_DOWN" in nuevos:
-                estado["seleccionado"] = (estado["seleccionado"] + 2) % n
+                estado["seleccionado"] = _mover_modo_grilla(estado["seleccionado"], 0, 1)
             if "A" in nuevos:
                 aplicar()
             if "X" in nuevos:

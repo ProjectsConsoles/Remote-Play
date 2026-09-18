@@ -88,6 +88,11 @@ REM  cuadros de VBV en los dos casos (bitrate / 60 fps x 3). Dejarlo
 REM  clavado en 250k con 8 Mbps daria un colchon mas chico en tiempo
 REM  y rafagas mas nerviosas.
 set "CAPTURA="
+REM  RTBUF por defecto para los modos MJPEG/crudo480/640 de siempre (ver
+REM  la nota grande de rtbufsize mas abajo, ajustada para esos). crudo720
+REM  la pisa con un valor propio (frames sin comprimir a 720p pesan
+REM  ~1.8MB cada uno - 512k no alcanza ni para uno solo).
+set "RTBUF=512k"
 
 if /i "%PS3RP_MODO%"=="mjpeg720" (
   set "CAPTURA=-video_size 1280x720 -framerate 60 -vcodec mjpeg"
@@ -121,10 +126,24 @@ if /i "%PS3RP_MODO%"=="crudo640" (
   set "MODO_TXT=640x480 SIN COMPRIMIR - prueba de latencia"
 )
 
+REM  crudo720 (2026-09-17): la capturadora "Hagibis" nueva SI sostiene
+REM  1280x720 sin comprimir a 60fps por USB (confirmado con una prueba
+REM  de 12s: 59fps, 1 solo aviso de buffer lleno) - la vieja topaba en
+REM  480p sin comprimir. Frame crudo de 720p pesa ~1.8MB, por eso el
+REM  RTBUF propio de 8M (con 512k ni entraba un cuadro completo).
+if /i "%PS3RP_MODO%"=="crudo720" (
+  set "CAPTURA=-video_size 1280x720 -framerate 60 -pixel_format yuyv422"
+  set "ASPECTO="
+  set "VBITRATE=5M"
+  set "VBUF=250k"
+  set "RTBUF=8M"
+  set "MODO_TXT=1280x720 SIN COMPRIMIR - requiere capturadora que lo soporte"
+)
+
 if not defined CAPTURA (
   echo.
   echo   ERROR: modo de captura desconocido: "%PS3RP_MODO%"
-  echo   Los validos son: mjpeg720, mjpeg1080, crudo480, crudo640
+  echo   Los validos son: mjpeg720, mjpeg1080, crudo480, crudo640, crudo720
   echo.
   if not defined PS3RP_GUI pause
   exit /b 1
@@ -350,7 +369,7 @@ pushd "%~dp0logs"
   -stats_period 2 -progress progreso-%STAMP%.log ^
   -f dshow %CAPTURA% ^
   -use_wallclock_as_timestamps 1 ^
-  -audio_buffer_size 50 -rtbufsize 512k ^
+  -audio_buffer_size 50 -rtbufsize %RTBUF% ^
   -i video="%VIDEO_DEV%":audio="%AUDIO_DEV%" ^
   -vf format=nv12 %ASPECTO% ^
   -c:v h264_nvenc -preset p1 -tune ull -zerolatency 1 -rc cbr -b:v %VBITRATE% -maxrate %VBITRATE% -bufsize %VBUF% ^
@@ -382,15 +401,21 @@ REM    ~la mitad del tiempo de transferencia por USB y el reescalado entero,
 REM    y el resultado final es identico (el stream ya salia en 720p).
 REM    Por eso el -vf quedo solo en "format=nv12": el scale ya no hace falta.
 REM    OJO: el mismo listado mostro que sin comprimir (yuyv422) esta
-REM    capturadora tope a 10 fps en 1080p y 25 fps en 720p - por eso MJPEG
-REM    no es opcional aca, aunque su compresion/descompresion sea justo lo
-REM    que le pone piso a la latencia.
+REM    capturadora ("USB Video", la vieja) tope a 10 fps en 1080p y 25 fps
+REM    en 720p - por eso MJPEG no era opcional ahi, aunque su compresion/
+REM    descompresion sea justo lo que le pone piso a la latencia.
 REM
-REM    MATIZ (2026-09-06, listar_modos.bat): "no es opcional" vale para
-REM    720p, pero el listado completo mostro que SI hay crudo a 60 fps en
-REM    720x480 y 640x480. Por eso existe ahora la perilla MODO_CRUDO del
-REM    principio de este archivo - es una prueba para saber si el MJPEG
-REM    pone latencia propia, no un cambio recomendado.
+REM    MATIZ (2026-09-06, listar_modos.bat): "no es opcional" valia para
+REM    720p CON ESA capturadora, pero el listado completo mostro que SI
+REM    habia crudo a 60 fps en 720x480 y 640x480 - de ahi crudo480/crudo640.
+REM
+REM    CAMBIA POR CAPTURADORA (2026-09-17): la "Hagibis" nueva SI sostiene
+REM    1280x720 sin comprimir a 60fps (confirmado, ver modo crudo720 en la
+REM    tabla de arriba) - la limitacion de 25fps@720p era de la capturadora
+REM    vieja, no una limitacion de USB en general. Si cambias de
+REM    capturadora otra vez, volve a correr listar_modos_capturadora.bat
+REM    (al lado de este .bat) contra el nombre nuevo antes de asumir que
+REM    crudo720 sigue sirviendo.
 
 REM 
 REM  -rtbufsize 512k : tope del buffer de captura en tiempo real de

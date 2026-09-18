@@ -40,6 +40,8 @@ MODOS = [
      "Prueba de latencia: salta el MJPEG. Manda 5x mas datos por USB."),
     ("crudo640", "640x480 - SIN COMPRIMIR (prueba)",
      "Igual que el anterior pero pide menos por el USB."),
+    ("crudo720", "1280x720 - SIN COMPRIMIR (Hagibis)",
+     "Salta el MJPEG a 720p - solo si tu capturadora lo sostiene a 60fps (la 'Hagibis' si)."),
 ]
 
 IP_SERVIDOR_DEFAULT = "192.168.0.90"
@@ -139,16 +141,26 @@ def main():
 
     def mover(dx, dy):
         if estado["zona"] == "tarjetas":
-            fila_actual = estado["seleccionado"] // 2
-            if dy > 0 and fila_actual == 1:
+            # Calculo por fila/columna, no por indice plano (2026-09-17,
+            # tras agregar crudo720 - con un numero IMPAR de tarjetas la
+            # ultima fila queda incompleta, y la aritmetica plana vieja
+            # (indice +-2) se salia de rango o envolvia mal ahi).
+            n = len(MODOS)
+            filas_totales = (n + 1) // 2  # 2 columnas
+            fila, col = divmod(estado["seleccionado"], 2)
+            if dy > 0 and fila == filas_totales - 1:
                 estado["zona"] = "botones"
                 estado["boton"] = 0
                 marcar()
                 return
             if dy != 0:
-                estado["seleccionado"] = (estado["seleccionado"] + dy * 2) % len(MODOS)
+                fila = (fila + dy) % filas_totales
             if dx != 0:
-                estado["seleccionado"] = (estado["seleccionado"] + dx) % len(MODOS)
+                col = (col + dx) % 2
+            nuevo = fila * 2 + col
+            if nuevo >= n:
+                nuevo = n - 1  # la ultima fila puede venir incompleta
+            estado["seleccionado"] = nuevo
             marcar()
         else:
             if dy < 0:
