@@ -142,12 +142,15 @@ STATS="${PS3RP_STATS:-0}"        # 1 = medir las colas internas de ffplay (ver n
 # asi que las corridas quedaban sin rastro de A-V ni de vq. 30 s son 120 lineas
 # por hora, nada. PS3RP_STATS_EVERY=0 lo apaga.
 STATS_EVERY="${PS3RP_STATS_EVERY:-30}"
-# Reproductor (2026-09-18, PRUEBA): "ffplay" (default, todo igual que siempre) o
+# Reproductor. DEFAULT gstreamer desde 2026-09-18 (el usuario: "se ve igualito a la
+# tele", en 3 de 3 arranques; con ffplay cada arranque caia en un retraso distinto).
+# Si el flatpak io.mpv.Mpv no esta, cae a ffplay solo. Valores: "ffplay" (el de
+# siempre, con watchdog y Lossless Scaling), "gstreamer" o
 # "mpv" (flatpak io.mpv.Mpv, modo --untimed: pinta cada cuadro apenas llega en vez
 # de formarlo detras del reloj de audio, asi que no hay cola que se quede atorada).
 # Con mpv NO corren el watchdog ni el ajuste de lsfg (leen la linea de estado de
 # ffplay, que mpv no escribe). Instalar: flatpak install --user flathub io.mpv.Mpv
-PLAYER="${PS3RP_PLAYER:-ffplay}"
+PLAYER="${PS3RP_PLAYER:-gstreamer}"
 FIFO="${PS3RP_FIFO:-1500}"        # buffer UDP en PAQUETES de 188 bytes (no en bytes; ver nota larga)
 # Watchdog del atasco de video. Ver la nota larga junto al lazo de ffplay.
 WATCHDOG="${PS3RP_WATCHDOG:-1}"  # 0 = no reiniciar ffplay solo, nunca
@@ -1198,7 +1201,7 @@ if [ "$PLAYER" = "gstreamer" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1
     #   - sync=false en video y audio: cada uno se muestra/suena apenas llega.
     #   - colas leaky=downstream chicas: si algo se atrasa, se TIRA lo viejo.
     # Precio: sin sincronia A/V estricta (van juntos porque llegan juntos por la red).
-    echo "--- reproductor: gstreamer (prueba) ---" | tee -a "$LOG"
+    echo "--- reproductor: gstreamer ---" | tee -a "$LOG"
     env -u LD_PRELOAD \
         DISABLE_VK_LAYER_VALVE_steam_overlay_1=1 \
         flatpak run --command=gst-launch-1.0 io.mpv.Mpv \
