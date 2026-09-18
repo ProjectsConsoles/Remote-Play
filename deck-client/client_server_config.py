@@ -361,7 +361,7 @@ def main():
                            bg="#7a2020", fg="#ffffff", activebackground="#8f2626",
                            activeforeground="#ffffff", relief="flat", bd=0,
                            highlightthickness=3, highlightbackground=FONDO,
-                           width=18, height=2, command=apagar_servidor)
+                           width=22, height=2, command=apagar_servidor)
     btnApagar.pack(side="left", padx=10)
 
     btnVolver = tk.Button(filaBotones, text="Volver", font=f_boton,

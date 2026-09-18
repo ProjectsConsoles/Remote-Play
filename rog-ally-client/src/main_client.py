@@ -723,9 +723,13 @@ def mostrar_config_servidor():
             for j, ln in enumerate(lineas):
                 _texto(pygame, screen, f_modo_d, ln, TENUE, center=(r.centerx, y_detalle + j * 18))
 
-        pie = ("Flechas elige modo, A aplica, X consulta, Y manda IP, L1 reinicia, R1 apaga el "
-               "servidor, toca el cuadro edita la IP, B vuelve.")
-        _texto(pygame, screen, f_pie, pie, TENUE, center=(w // 2, h - 30))
+        # Dos lineas (2026-09-17, "el boton se ve mal"): con R1/apagar
+        # agregado, una sola linea se salia del ancho de pantalla - _texto()
+        # no envuelve solo (font.render de pygame no entiende "\n").
+        pie1 = "Flechas elige modo, A aplica, X consulta, Y manda IP, toca el cuadro edita la IP."
+        pie2 = "L1 reinicia el servidor, R1 lo apaga, B vuelve."
+        _texto(pygame, screen, f_pie, pie1, TENUE, center=(w // 2, h - 46))
+        _texto(pygame, screen, f_pie, pie2, TENUE, center=(w // 2, h - 22))
         pygame.display.flip()
 
     def consultar():
