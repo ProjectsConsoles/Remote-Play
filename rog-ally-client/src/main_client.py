@@ -1402,6 +1402,89 @@ def ejecutar_modo_control():
 # Modo streaming: lanza ffplay y espera a que se cierre.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Ventana "de foco" durante el streaming (2026-09-18).
+# ---------------------------------------------------------------------------
+# En Modo Juego de la Ally (Armoury Crate) el mando SOLO le llega al proceso
+# que tiene la ventana en primer plano: con ffplay (proceso aparte) al frente
+# y este proceso con SDL en driver "dummy" (sin ventana), SDL y XInput leian
+# todo en cero - medido en el log ([botones] sin cambios aunque se apretaran).
+# En Modo Escritorio no pasa, y el menu (ventana propia al frente) tampoco.
+# Solucion: mientras dura el streaming este proceso tiene su propia ventana,
+# del tamano de la pantalla, casi invisible (alpha 1/255), transparente al
+# raton/toque (WS_EX_TRANSPARENT), sin boton en la barra (TOOLWINDOW) - y la
+# mantiene en primer plano. ffplay se ve igual. SOLO se la quita a ffplay: si
+# el usuario abre el overlay de Armoury Crate o el boton Xbox, no se pelea.
+# PS3RP_FOCO_INPUT=0 desactiva todo esto (comportamiento anterior).
+
+FOCO_INPUT = os.environ.get("PS3RP_FOCO_INPUT", "1") == "1"
+_FOCO = {"hwnd": None}
+
+
+def _crear_ventana_foco(pygame):
+    if not FOCO_INPUT:
+        return
+    try:
+        pygame.display.init()
+        info = pygame.display.Info()
+        pygame.display.set_mode((info.current_w, info.current_h), pygame.NOFRAME)
+        pygame.display.set_caption("PS3RP input")
+        hwnd = pygame.display.get_wm_info()["window"]
+        u = ctypes.windll.user32
+        GWL_EXSTYLE, LWA_ALPHA = -20, 2
+        WS_EX_LAYERED, WS_EX_TRANSPARENT, WS_EX_TOOLWINDOW = 0x80000, 0x20, 0x80
+        estilo = u.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        u.SetWindowLongW(hwnd, GWL_EXSTYLE,
+                         estilo | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW)
+        u.SetLayeredWindowAttributes(hwnd, 0, 1, LWA_ALPHA)
+        _FOCO["hwnd"] = hwnd
+        _tomar_foco(hwnd)
+        log.info("Ventana de foco creada (hwnd=%s) para recibir el mando en Modo Juego", hwnd)
+    except Exception as e:
+        _FOCO["hwnd"] = None
+        log.warning("No se pudo crear la ventana de foco (%s); sigue sin ella", e)
+
+
+def _tomar_foco(hwnd):
+    try:
+        u = ctypes.windll.user32
+        k = ctypes.windll.kernel32
+        fg = u.GetForegroundWindow()
+        if fg == hwnd:
+            return
+        tid_fg = u.GetWindowThreadProcessId(fg, None) if fg else 0
+        tid_yo = k.GetCurrentThreadId()
+        # AttachThreadInput: Windows solo deja robar el primer plano a quien
+        # ya comparte la cola de entrada con la ventana actual.
+        enlazado = bool(tid_fg and tid_fg != tid_yo
+                        and u.AttachThreadInput(tid_yo, tid_fg, True))
+        u.SetForegroundWindow(hwnd)
+        u.BringWindowToTop(hwnd)
+        if enlazado:
+            u.AttachThreadInput(tid_yo, tid_fg, False)
+    except Exception as e:
+        log.debug("No se pudo tomar el foco: %s", e)
+
+
+def _mantener_foco(pid_ffplay):
+    """Si ffplay tiene el primer plano, se lo quita; con cualquier otra
+    ventana (overlays de Armoury Crate/Xbox) no hace nada."""
+    hwnd = _FOCO["hwnd"]
+    if hwnd is None:
+        return
+    try:
+        u = ctypes.windll.user32
+        fg = u.GetForegroundWindow()
+        if fg == hwnd:
+            return
+        pid = ctypes.c_ulong(0)
+        u.GetWindowThreadProcessId(fg, ctypes.byref(pid))
+        if pid.value == pid_ffplay:
+            _tomar_foco(hwnd)
+    except Exception:
+        pass
+
+
 def _iniciar_input_streaming():
     """Abre SDL/el mando ANTES de lanzar ffplay - devuelve (sock, socket UDP)
     o None si ENABLE_INPUT esta apagado.
@@ -1424,11 +1507,21 @@ def _iniciar_input_streaming():
         return None
 
     import pygame
-    os.environ["SDL_VIDEODRIVER"] = "dummy"
+    if FOCO_INPUT:
+        # Driver de video REAL para poder tener la ventana de foco (ver
+        # _crear_ventana_foco); si no se puede crear, cae al dummy de antes.
+        os.environ.pop("SDL_VIDEODRIVER", None)
+    else:
+        os.environ["SDL_VIDEODRIVER"] = "dummy"
     os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     pygame.init()
     pygame.display.init()
     pygame.joystick.init()
+    _crear_ventana_foco(pygame)
+    if FOCO_INPUT and _FOCO["hwnd"] is None:
+        pygame.display.quit()
+        os.environ["SDL_VIDEODRIVER"] = "dummy"
+        pygame.display.init()
     # SDL se acaba de rehacer (se cerro la ventana del menu y se reinicio con
     # el driver dummy): el mando abierto en el contexto anterior quedo
     # invalido y devolvia valores pegados - ver reiniciar_mapeo().
@@ -1518,6 +1611,7 @@ def _bombear_input_hasta_que_muera(proc, sock):
     stats_ticks = 0
     xi_activos = _xinput_conectados()
     ultima_firma = None
+    ultimo_foco = 0.0
 
     try:
         while proc.poll() is None:
@@ -1559,6 +1653,9 @@ def _bombear_input_hasta_que_muera(proc, sock):
                     pygame.joystick.init()
 
             ahora = time.time()
+            if ahora - ultimo_foco >= 0.5:
+                ultimo_foco = ahora
+                _mantener_foco(proc.pid)
             if ahora - stats_last >= 5.0:
                 span = ahora - stats_last
                 log.info("[stats] %d envios en %.1fs = %.1f Hz (objetivo %d) mando=%s ffplay_vivo=%s",
@@ -1574,6 +1671,14 @@ def _bombear_input_hasta_que_muera(proc, sock):
                 time.sleep(restante)
     finally:
         sock.close()
+        if _FOCO["hwnd"] is not None:
+            # La ventana de foco no debe sobrevivir al streaming: el menu abre
+            # la suya con _abrir_ventana().
+            _FOCO["hwnd"] = None
+            try:
+                pygame.display.quit()
+            except Exception:
+                pass
 
 
 def ejecutar_modo_streaming():
