@@ -1231,10 +1231,15 @@ if [ "$PLAYER" = "gstreamer" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1
         d. ! queue max-size-buffers=8 max-size-time=0 max-size-bytes=0 leaky=downstream \
            ! opusdec ! audioconvert ! audioresample \
            ! pulsesink sync=false buffer-time=40000 latency-time=10000 \
-        2>&1 | tr "\r" "\n" | gawk -v seg="$SIN_VIDEO_S" '
+        2>&1 | gawk -v seg="$SIN_VIDEO_S" '
             # -m imprime TODOS los mensajes del bus: al log solo pasan avisos y
             # errores. El de udpsrc (GstUDPSrcTimeout) = no llega video.
+            # SIN "tr" delante (medido en la Deck): tr acumula su salida en un
+            # bufer al escribir a una tuberia y el aviso llegaba ~70 s tarde. gawk
+            # separa \r y \n el mismo y lee al instante.
+            BEGIN { RS = "[\r\n]" }
             /GstUDPSrcTimeout/ {
+                if (cerrado++) next
                 printf("%s No llega video hace %s s (el servidor se detuvo?): cerrando el reproductor.\n", strftime("[%H:%M:%S]"), seg)
                 fflush(); system("pkill -x gst-launch-1.0"); next
             }
