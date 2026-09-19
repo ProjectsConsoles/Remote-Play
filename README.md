@@ -78,6 +78,12 @@ cliente → Reproductor de video*, y se usa solo si falta GStreamer.
   (~178 MB, no se instala nada en Windows). Se arma con
   `rog-ally-client/preparar_gstreamer.sh` (necesita `brew install msitools`).
 
+**Si la capturadora se desconecta un momento** (ffmpeg: `I/O error`), el
+servidor se relanza solo con la misma IP y modo (hasta 3 veces en 5 min) y
+los clientes retoman la imagen sin hacer nada. Si en 25 s no vuelve el video,
+el cliente se cierra con un aviso en vez de quedarse congelado. Solo *Detener*,
+*Apagar* (desde la Deck/Ally) o *Salir* de la bandeja lo apagan de verdad.
+
 Ajustes que bajaron el delay (servidor): audio **Opus** de baja latencia en
 vez de AAC, `-pes_payload_size 0` en el muxer, y WiFi sin ahorro de energía
 en los clientes. Detalles en `deck-client/OPCIONES.md`.

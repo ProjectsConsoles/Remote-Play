@@ -98,6 +98,49 @@ try {
 }
 $origen = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
 
+# AUTO-REINICIO DEL MOTOR (2026-09-18). Medido: la capturadora Hagibis corta a
+# veces ("dshow: Error during demuxing: I/O error", 3 veces en 2 dias, una a
+# los 19 min de juego) y ffmpeg se cierra solo; el servidor quedaba "detenido"
+# hasta que alguien le daba Iniciar a mano, y el cliente congelado. Ahora el
+# Receive tiene timeout de 2 s y, entre paquete y paquete, Revisar-Motor mira:
+# si el usuario lo quiere prendido ($ArchivoDeseado) y ffmpeg ya no existe desde
+# hace 2 revisiones seguidas, lo relanza con la ultima IP/modo. Maximo 3 veces en
+# 5 minutos: si la capturadora de plano no responde, se rinde y lo deja apagado
+# (el log lo dice) en vez de reintentar para siempre.
+$udp.Client.ReceiveTimeout = 2000
+$script:caidas = 0
+$script:reintentos = New-Object System.Collections.Generic.List[datetime]
+
+function Revisar-Motor {
+    if (-not (Test-Path $ArchivoDeseado)) { $script:caidas = 0; return }
+    if (Test-Path $ArchivoArrancando) {
+        $edad = ((Get-Date) - (Get-Item $ArchivoArrancando).LastWriteTime).TotalSeconds
+        if ($edad -lt 40) { $script:caidas = 0; return }
+    }
+    if (Servidor-Corriendo) { $script:caidas = 0; return }
+    $script:caidas++
+    if ($script:caidas -lt 2) { return }
+    $script:caidas = 0
+
+    $hace5 = (Get-Date).AddMinutes(-5)
+    $recientes = @($script:reintentos | Where-Object { $_ -gt $hace5 })
+    $script:reintentos = New-Object System.Collections.Generic.List[datetime]
+    foreach ($r in $recientes) { $script:reintentos.Add($r) }
+    if ($script:reintentos.Count -ge 3) {
+        Log "AUTO-REINICIO: ffmpeg se cayo otra vez y ya van 3 reintentos en 5 min - me rindo, queda apagado (revisar la capturadora / cable USB)."
+        Remove-Item $ArchivoDeseado -Force -ErrorAction SilentlyContinue
+        return
+    }
+    $script:reintentos.Add((Get-Date))
+
+    $ip = ""; $modo = ""
+    if (Test-Path $ArchivoIp) { $ip = ([string](Get-Content $ArchivoIp -First 1)).Trim() }
+    if (Test-Path $ArchivoModo) { $modo = ([string](Get-Content $ArchivoModo -First 1)).Trim() }
+    Log "AUTO-REINICIO: ffmpeg murio solo (sin pedido de apagar). Relanzando ip=$ip modo=$modo (intento $($script:reintentos.Count)/3)"
+    $ok = Iniciar-Servidor $ip $modo
+    Log "AUTO-REINICIO: resultado = $ok"
+}
+
 function Enviar-Respuesta($obj, [System.Net.IPEndPoint]$destino) {
     $json = $obj | ConvertTo-Json -Compress
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
@@ -131,7 +174,18 @@ function Estado-Actual {
 
 while ($true) {
     try {
-        $bytes = $udp.Receive([ref]$origen)
+        try {
+            $bytes = $udp.Receive([ref]$origen)
+        } catch [System.Net.Sockets.SocketException] {
+            # Una llamada a metodo .NET llega envuelta en MethodInvocationException.
+            $ex = $_.Exception
+            if ($ex.InnerException) { $ex = $ex.InnerException }
+            if ($ex.SocketErrorCode -eq [System.Net.Sockets.SocketError]::TimedOut) {
+                Revisar-Motor
+                continue
+            }
+            throw
+        }
         $texto = [System.Text.Encoding]::UTF8.GetString($bytes)
         Log "recibido de $($origen.Address):$($origen.Port) -> $texto"
 
@@ -183,9 +237,10 @@ while ($true) {
                 # Windows.
                 if (Servidor-Corriendo) {
                     Log "deteniendo servidor por pedido remoto"
-                    [void](Detener-Servidor)
+                    [void](Detener-Servidor-APedido)
                     Enviar-Respuesta ([pscustomobject]@{ ok = $true; aplicado = "detenido" }) $origen
                 } else {
+                    Remove-Item $ArchivoDeseado -Force -ErrorAction SilentlyContinue
                     Enviar-Respuesta ([pscustomobject]@{ ok = $true; aplicado = "ya_estaba_detenido" }) $origen
                 }
             }

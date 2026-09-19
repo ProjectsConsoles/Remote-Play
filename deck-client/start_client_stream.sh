@@ -1207,6 +1207,11 @@ if [ "$PLAYER" = "gstreamer" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1
     #   - sync=false en video y audio: cada uno se muestra/suena apenas llega.
     #   - colas leaky=downstream chicas: si algo se atrasa, se TIRA lo viejo.
     # Precio: sin sincronia A/V estricta (van juntos porque llegan juntos por la red).
+    # Sin video SIN_VIDEO_S segundos -> se cierra (2026-09-18). Antes, si la
+    # capturadora del servidor fallaba, gst-launch esperaba para siempre con la
+    # imagen congelada. Si el servidor se relanza solo (~10 s, config_listener.ps1)
+    # GStreamer retoma el video sin hacer nada (medido tras un corte de 6 s).
+    SIN_VIDEO_S="${PS3RP_SIN_VIDEO_S:-25}"
     echo "--- reproductor: gstreamer ---" | tee -a "$LOG"
     case "$AJUSTE" in
         estirar) GST_IMAGEN=(! glimagesink sync=false force-aspect-ratio=false) ;;
@@ -1217,15 +1222,24 @@ if [ "$PLAYER" = "gstreamer" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1
     echo "Ajuste de imagen: $AJUSTE" | tee -a "$LOG"
     env -u LD_PRELOAD \
         DISABLE_VK_LAYER_VALVE_steam_overlay_1=1 \
-        flatpak run --command=gst-launch-1.0 io.mpv.Mpv \
-        udpsrc port="$PORT" caps=video/mpegts ! tsdemux latency=0 name=d \
+        flatpak run --command=gst-launch-1.0 io.mpv.Mpv -m \
+        udpsrc port="$PORT" caps=video/mpegts timeout="$((SIN_VIDEO_S * 1000000000))" \
+           ! tsdemux latency=0 name=d \
         d. ! queue max-size-buffers=3 max-size-time=0 max-size-bytes=0 leaky=downstream \
            ! h264parse ! vah264dec ! queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream \
            "${GST_IMAGEN[@]}" \
         d. ! queue max-size-buffers=8 max-size-time=0 max-size-bytes=0 leaky=downstream \
            ! opusdec ! audioconvert ! audioresample \
            ! pulsesink sync=false buffer-time=40000 latency-time=10000 \
-        2>&1 | tr "\r" "\n" | tee -a "$LOG"
+        2>&1 | tr "\r" "\n" | gawk -v seg="$SIN_VIDEO_S" '
+            # -m imprime TODOS los mensajes del bus: al log solo pasan avisos y
+            # errores. El de udpsrc (GstUDPSrcTimeout) = no llega video.
+            /GstUDPSrcTimeout/ {
+                printf("%s No llega video hace %s s (el servidor se detuvo?): cerrando el reproductor.\n", strftime("[%H:%M:%S]"), seg)
+                fflush(); system("pkill -x gst-launch-1.0"); next
+            }
+            /Got message/ && !/(warning|error)/ { next }
+            { print; fflush() }' | tee -a "$LOG"
     echo "gstreamer termino con codigo ${PIPESTATUS[0]}" >> "$LOG"
 elif [ "$PLAYER" = "mpv" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1; then
     echo "--- reproductor: mpv (prueba) ---" | tee -a "$LOG"

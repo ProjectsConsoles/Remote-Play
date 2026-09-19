@@ -198,7 +198,7 @@ $btnDetener.Add_Click({
     # actualizaba el estado y se quedaba abierta con el boton ya deshabilitado
     # - "Detener servidor" ahora es un stop-y-cierra, igual de directo que el
     # boton "Cerrar" pero deteniendo el motor primero.
-    if (Detener-Servidor) {
+    if (Detener-Servidor-APedido) {
         $form.Close()
     } else {
         Refrescar-Estado
@@ -350,7 +350,7 @@ $menuTray = New-Object System.Windows.Forms.ContextMenuStrip
 # config_listener (seguia contestando a la Deck/Ally con "corriendo"). Cerrar la
 # ventana con la X sigue ocultandola a la bandeja sin apagar nada, como siempre.
 $apagarTodo = {
-    try { [void](Detener-Servidor) } catch { }
+    try { [void](Detener-Servidor-APedido) } catch { }
     try {
         $archivoListener = Join-Path $Aqui "logs\config_listener.pid"
         if (Test-Path $archivoListener) {

@@ -19,6 +19,14 @@ $ArchivoIps  = Join-Path $Aqui "deck_ips.txt"    # historial (varias)
 $ArchivoIp   = Join-Path $Aqui "deck_ip.txt"     # ultima, la que ya usaba el .bat
 $ArchivoModo = Join-Path $Aqui "deck_modo.txt"   # ultimo modo elegido
 $ArchivoPid  = Join-Path $Aqui "servidor.pid"    # PID del cmd oculto en curso
+# Auto-reinicio (2026-09-18): existe mientras el usuario QUIERE el servidor
+# prendido. Lo pone Iniciar-Servidor al arrancar bien; lo quita SOLO un apagado a
+# proposito (Detener-Servidor-APedido). Si ffmpeg muere y este archivo sigue ahi
+# (la capturadora corto con "I/O error"), config_listener.ps1 lo relanza solo.
+$ArchivoDeseado    = Join-Path $Aqui "servidor_deseado.txt"
+# Marca de "Iniciar-Servidor en curso", para que el auto-reinicio no se meta a
+# medio arranque (entre matar el ffmpeg viejo y lanzar el nuevo pasan hasta 7 s).
+$ArchivoArrancando = Join-Path $Aqui "servidor_arrancando.txt"
 
 $RegexIp = '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$'
 
@@ -140,6 +148,14 @@ function Detener-Servidor {
     return $mato
 }
 
+# Apagado A PROPOSITO (boton Detener, Apagar desde la Deck/Ally, Salir de la
+# bandeja): ademas de detener, quita la marca para que el auto-reinicio no lo
+# vuelva a prender.
+function Detener-Servidor-APedido {
+    Remove-Item $ArchivoDeseado -Force -ErrorAction SilentlyContinue
+    return (Detener-Servidor)
+}
+
 # ------------------------------------------------------------
 #  Historial de IPs
 # ------------------------------------------------------------
@@ -180,6 +196,8 @@ function Iniciar-Servidor($ip, $modo, [scriptblock]$avisar = {}) {
         return $false
     }
 
+    Set-Content -Path $ArchivoArrancando -Value (Get-Date -Format o) -Encoding Ascii
+    try {
     & $avisar "Cerrando la instancia anterior..."
     [void](Detener-Servidor)
 
@@ -236,7 +254,11 @@ function Iniciar-Servidor($ip, $modo, [scriptblock]$avisar = {}) {
         & $avisar "No arranco (sin video en 15 segundos)."
     }
 
+    if ($arranco) { Set-Content -Path $ArchivoDeseado -Value "1" -Encoding Ascii }
     return $arranco
+    } finally {
+        Remove-Item $ArchivoArrancando -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # ------------------------------------------------------------

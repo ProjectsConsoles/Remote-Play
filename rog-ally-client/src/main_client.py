@@ -1690,12 +1690,42 @@ def _bombear_input_hasta_que_muera(proc, sock):
                 pass
 
 
+# Si no llega NADA de video en este tiempo, se corta y se vuelve al menu
+# (2026-09-18). Antes, cuando la capturadora del servidor fallaba ("I/O
+# error"), gst-launch se quedaba esperando para siempre: pantalla congelada y
+# la app "ya abierta" al querer reabrirla. Si el servidor se relanza solo (ver
+# config_listener.ps1, ~10 s), GStreamer retoma el video sin hacer nada
+# (medido: sigue decodificando tras un corte de 6 s), por eso el margen es 25 s.
+SIN_VIDEO_S = 25
+
+
+def _vigilar_salida_gst(proc, estado):
+    """Lee la salida de gst-launch (hay que drenarla igual, o se llena el
+    pipe y gst se traba) y lo mata si udpsrc avisa que no llega video."""
+    try:
+        for linea in iter(proc.stdout.readline, b""):
+            if b"GstUDPSrcTimeout" in linea:
+                estado["sin_video"] = True
+                log.warning("No llega video hace %d s: cerrando gstreamer.", SIN_VIDEO_S)
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                return
+    except Exception as e:
+        log.debug("vigilar_salida_gst: %s", e)
+
+
 def _streaming_gstreamer(gst):
     """Mismo contrato que ejecutar_modo_streaming: (ok, mensaje)."""
     fs = "true" if FULLSCREEN_VIDEO else "false"
     args = [
-        gst, "-q",
+        # -m: imprime los mensajes del bus, de ahi se lee el aviso de udpsrc
+        # cuando pasan SIN_VIDEO_S segundos sin recibir nada (ver abajo). SIN
+        # -q: medido, -q calla tambien esos mensajes.
+        gst, "-m",
         "udpsrc", f"port={STREAM_PORT}", "caps=video/mpegts",
+        f"timeout={SIN_VIDEO_S * 1_000_000_000}",
         "!", "tsdemux", "latency=0", "name=d",
         # Video: GPU (Direct3D 11), colas chicas que TIRAN lo atrasado, sin reloj.
         "d.", "!", "queue", "max-size-buffers=3", "max-size-time=0", "max-size-bytes=0",
@@ -1730,12 +1760,19 @@ def _streaming_gstreamer(gst):
         t0 = time.time()
         proc = subprocess.Popen(args,
                                 stdin=subprocess.DEVNULL,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
                                 env=entorno,
                                 creationflags=subprocess.CREATE_NO_WINDOW)
+        estado = {"sin_video": False}
+        threading.Thread(target=_vigilar_salida_gst, args=(proc, estado), daemon=True).start()
         _bombear_input_hasta_que_muera(proc, sock_input)
         dur = time.time() - t0
+        if estado["sin_video"]:
+            return False, (f"Dejo de llegar video del servidor ({SIN_VIDEO_S} s sin imagen).\n\n"
+                            "Lo mas comun: la capturadora de la PC se desconecto un momento. "
+                            "El servidor intenta relanzarse solo; espera unos segundos y "
+                            "vuelve a entrar a Streaming.")
         # Cerrar la ventana de video hace que gst-launch termine con error (1):
         # eso es una salida normal. Solo se trata como falla si murio enseguida.
         if proc.returncode != 0 and dur < 10:
