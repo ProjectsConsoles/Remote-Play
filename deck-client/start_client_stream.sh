@@ -1120,6 +1120,14 @@ if [ "$WATCHDOG" = "1" ] && ! command -v gawk >/dev/null 2>&1; then
     WATCHDOG=0
 fi
 
+# gstreamer_lsfg necesita la capa de Lossless Scaling y su configuracion; si faltan,
+# se usa el gstreamer normal (con un aviso) en vez de arrancar sin nada.
+if [ "$PLAYER" = "gstreamer_lsfg" ] \
+   && { [ ! -f "$HOME/.local/share/vulkan/implicit_layer.d/VkLayer_LS_frame_generation.json" ] \
+        || [ ! -f "$HOME/.config/lsfg-vk/conf.toml" ]; }; then
+    echo "AVISO: gstreamer_lsfg necesita lsfg-vk y su conf.toml (no estan); uso gstreamer normal." | tee -a "$LOG"
+    PLAYER=gstreamer
+fi
 if [ "$PLAYER" = "gstreamer" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1; then
     # GStreamer (2026-09-18, PRUEBA). El de SteamOS no trae decodificador H.264; el del
     # runtime Freedesktop 25.08 si (vah264dec = GPU), y se usa a traves del sandbox del
@@ -1168,6 +1176,67 @@ if [ "$PLAYER" = "gstreamer" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1
             /Got message/ && !/(warning|error)/ { next }
             { print; fflush() }' | tee -a "$LOG"
     echo "gstreamer termino con codigo ${PIPESTATUS[0]}" >> "$LOG"
+elif [ "$PLAYER" = "gstreamer_lsfg" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1; then
+    # GStreamer + Lossless Scaling (2026-09-19, EXPERIMENTAL, opcion aparte: el modo
+    # "gstreamer" de arriba no se toca). Lossless Scaling (lsfg-vk) es una capa de
+    # Vulkan del host: solo actua sobre un programa que dibuje con Vulkan. Aca el video
+    # sale por vulkansink (en vez de glimagesink) y la capa del host se expone dentro
+    # del sandbox del flatpak: se le da acceso de lectura a la capa, su libreria, su
+    # configuracion y la DLL de Lossless Scaling, y se le dice cual es el perfil.
+    # Medido: con estos accesos la capa carga dentro del flatpak, lee el perfil, extrae
+    # los shaders y se inicializa (prueba sin ventana). NO medido aun: que dibuje bien
+    # dentro de gamescope y que de verdad genere cuadros.
+    # Igual que el modo gstreamer: sync=false y colas que tiran lo viejo.
+    SIN_VIDEO_S="${PS3RP_SIN_VIDEO_S:-25}"
+    echo "--- reproductor: gstreamer + Lossless Scaling (experimental) ---" | tee -a "$LOG"
+    # Perfil de lsfg-vk (el mismo nombre que pone tu ~/lsfg en LSFG_PROCESS).
+    LSFG_PERFIL="${LSFG_PROCESS:-PS3}"
+    LSFG_FLATPAK_ARGS=(
+        --filesystem="$HOME/.local/lib:ro"
+        --filesystem="$HOME/.local/share/vulkan:ro"
+        --filesystem="$HOME/.config/lsfg-vk:ro"
+        --filesystem="$HOME/.local/share/Steam/steamapps/common/Lossless Scaling:ro"
+        --env=VK_ADD_IMPLICIT_LAYER_PATH="$HOME/.local/share/vulkan/implicit_layer.d"
+        --env=LSFG_CONFIG="$HOME/.config/lsfg-vk/conf.toml"
+        --env=LSFGVK_CONFIG="$HOME/.config/lsfg-vk/conf.toml"
+        --env=LSFG_PROCESS="$LSFG_PERFIL"
+        --env=LSFGVK_PROFILE="$LSFG_PERFIL"
+    )
+    # vulkansink solo entiende "barras" y "estirar"; el zoom no existe en este modo.
+    case "$AJUSTE" in
+        estirar) GST_FAR=false ;;
+        zoom)    GST_FAR=true; echo "AVISO: el ajuste zoom no existe con gstreamer_lsfg; uso barras." | tee -a "$LOG" ;;
+        *)       GST_FAR=true ;;
+    esac
+    echo "Ajuste de imagen: $AJUSTE" | tee -a "$LOG"
+    env -u LD_PRELOAD \
+        DISABLE_VK_LAYER_VALVE_steam_overlay_1=1 \
+        flatpak run --command=gst-launch-1.0 "${LSFG_FLATPAK_ARGS[@]}" io.mpv.Mpv -m \
+        udpsrc port="$PORT" caps=video/mpegts timeout="$((SIN_VIDEO_S * 1000000000))" \
+           ! tsdemux latency=0 name=d \
+        d. ! queue max-size-buffers=3 max-size-time=0 max-size-bytes=0 leaky=downstream \
+           ! h264parse ! vah264dec ! vapostproc ! video/x-raw,format=NV12 \
+           ! vulkanupload ! vulkancolorconvert \
+           ! queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream \
+           ! vulkansink sync=false force-aspect-ratio="$GST_FAR" \
+        d. ! queue max-size-buffers=8 max-size-time=0 max-size-bytes=0 leaky=downstream \
+           ! opusdec ! audioconvert ! audioresample \
+           ! pulsesink sync=false buffer-time=40000 latency-time=10000 \
+        2>&1 | gawk -v seg="$SIN_VIDEO_S" '
+            # -m imprime TODOS los mensajes del bus: al log solo pasan avisos y
+            # errores. El de udpsrc (GstUDPSrcTimeout) = no llega video.
+            # SIN "tr" delante (medido en la Deck): tr acumula su salida en un
+            # bufer al escribir a una tuberia y el aviso llegaba ~70 s tarde. gawk
+            # separa \r y \n el mismo y lee al instante.
+            BEGIN { RS = "[\r\n]" }
+            /GstUDPSrcTimeout/ {
+                if (cerrado++) next
+                printf("%s No llega video hace %s s (el servidor se detuvo?): cerrando el reproductor.\n", strftime("[%H:%M:%S]"), seg)
+                fflush(); system("pkill -x gst-launch-1.0"); next
+            }
+            /Got message/ && !/(warning|error)/ { next }
+            { print; fflush() }' | tee -a "$LOG"
+    echo "gstreamer_lsfg termino con codigo ${PIPESTATUS[0]}" >> "$LOG"
 elif [ "$PLAYER" = "mpv" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1; then
     echo "--- reproductor: mpv (prueba) ---" | tee -a "$LOG"
     # --untimed: sin esperar al reloj; --no-cache y nobuffer: sin colchon de red.
@@ -1183,7 +1252,7 @@ elif [ "$PLAYER" = "mpv" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1; th
         "udp://@:$PORT?fifo_size=$FIFO&overrun_nonfatal=1" 2>&1 | tr "\r" "\n" | tee -a "$LOG"
     echo "mpv termino con codigo ${PIPESTATUS[0]}" >> "$LOG"
 else
-if [ "$PLAYER" = "mpv" ] || [ "$PLAYER" = "gstreamer" ]; then
+if [ "$PLAYER" = "mpv" ] || [ "$PLAYER" = "gstreamer" ] || [ "$PLAYER" = "gstreamer_lsfg" ]; then
     echo "AVISO: PS3RP_PLAYER=$PLAYER pero no esta instalado io.mpv.Mpv (flatpak --user) - uso ffplay." | tee -a "$LOG"
 fi
 

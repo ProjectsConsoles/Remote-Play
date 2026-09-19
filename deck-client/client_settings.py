@@ -56,7 +56,7 @@ CAMPOS = [
     ("PS3RP_WIFI_SIN_AHORRO", "WiFi sin ahorro de energia (menos delay)", "bool", "1",
      None, "SI apaga el power save del WiFi al arrancar (menos jitter, algo mas de bateria). NO lo regresa a prendido."),
     ("PS3RP_PLAYER", "Reproductor de video", "enum", "gstreamer",
-     ["gstreamer", "ffplay", "mpv"], "gstreamer = sin cola de retraso (recomendado). ffplay = el de antes, con watchdog y Lossless Scaling. mpv = descartado."),
+     ["gstreamer", "ffplay", "gstreamer_lsfg", "mpv"], "gstreamer = sin cola de retraso (recomendado, sin Lossless Scaling). ffplay = el de antes, con Lossless Scaling. gstreamer_lsfg = EXPERIMENTAL: gstreamer con Vulkan + Lossless Scaling. mpv = descartado."),
     ("PS3RP_AJUSTE", "Ajuste de imagen (gstreamer)", "enum", "barras",
      ["barras", "estirar", "zoom"], "barras = exacta con franjas negras; estirar = llena, ~11% mas alta; zoom = llena, recorta ~5% de cada lado."),
     ("PS3RP_VSYNC", "VSync (0 = apagado, mide mejor)", "bool", "0", None, ""),
