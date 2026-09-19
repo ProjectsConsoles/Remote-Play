@@ -158,6 +158,7 @@ def mostrar_menu():
             ("#d4b106", "Amarillo", "PS3"),
             ("#2d6cdf", "Azul", "PS2 / OPL"),
             ("#8e5fd6", "Morado", "Xbox 360"),
+            ("#2fa84f", "Verde", "Xbox clásico"),
         ]
         filaColores = tk.Frame(ventana, bg=FONDO)
         filaColores.pack(pady=10)

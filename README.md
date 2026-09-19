@@ -46,6 +46,7 @@ por USB. No es un emulador: la consola sigue siendo la real.
 | Cliente ROG Ally X (Windows) | ✅ Funcional |
 | PS2 (Open PS2 Loader / PADEMU) | ✅ Funcional. Pendiente: el menú de OPL a veces pierde el control por USB unos segundos (se recupera solo). |
 | Xbox 360 (RGH/JTAG + Aurora) | ✅ Funcional vía hiddriver360 |
+| Xbox clásico (el original de 2001) | ✅ Funcional (probado en consola real); necesita cable propio |
 
 ## Configurar servidor y cliente desde el menú de la Deck
 
@@ -128,9 +129,50 @@ Mismo ESP32-S3, mismo cable. Requiere Xbox 360 con RGH/JTAG,
 4. Pon el selector de modo del ESP32-S3 en **Xbox 360** (ver tabla abajo) y
    conecta el control por USB.
 
+## Xbox clásico (el original de 2001)
+
+Mismo ESP32-S3, con un cable propio. El Xbox original **no usa HID** sino una
+clase USB propia (XID), así que este modo arma otros descriptores y un driver
+USB aparte; PS3, PS2 y Xbox 360 no se tocan. Probado en una consola real: el
+dashboard responde y los juegos ven el control.
+
+**Cable.** El Xbox tiene un puerto de control propio (no es USB-A). Hace falta
+la mitad "de consola" de un cable de control original (el enchufe grande con
+la marca XBOX y 5 hilos de colores + malla) soldada a un cable USB con
+conector USB-C para el puerto USB de la placa:
+
+| Hilo del Xbox | Al cable USB |
+|---|---|
+| Rojo (+5 V) | Rojo (+5 V) |
+| Negro (tierra) | Negro / tierra |
+| Blanco (D−) | Blanco (D−) |
+| Verde (D+) | Verde (D+) |
+| Amarillo y malla | Sin conectar (aislar) |
+
+> **Los datos van por color, sin cruzar.** Una wiki lo daba invertido
+> ("sin verificar") y así **no enumera**: la consola nunca ve el dispositivo.
+> Mide antes de soldar: con la consola encendida, el rojo da ~5 V contra el
+> negro. Un cable USB-C a USB-C no sirve para medir (no entrega 5 V sin algo
+> del otro lado): usa uno USB-A a USB-C de 4 hilos.
+
+Los 5 V salen de la consola y alcanzan para la placa con WiFi prendido.
+
+1. Sube el firmware y pon el selector de modo en **Xbox clásico** (verde, ver
+   la tabla de abajo).
+2. Conecta la placa al puerto de control del Xbox con el cable de arriba.
+3. Abre en la Deck o la Ally el cliente en *Solo control* (o *Streaming*).
+
+Mapeo: A/B/X/Y directos; **L1 = White, R1 = Black**; L2/R2 = gatillos
+analógicos; SELECT = Back; sticks con la misma zona muerta que el modo PS3
+(el eje vertical se invierte para el formato Xbox). El rumble que manda el
+juego llega a la placa pero **no se reenvía** a ningún motor. Se presenta como
+*Xbox Controller S* (`045E:0289`). Para diagnosticar, el log por WiFi
+(`deck-client/esp32_firmware/escuchar_log_placa.sh`) muestra líneas `[xid]` y
+`[hb-xid]`: `montado=1` y `vendor=3` indican que la consola la enumeró.
+
 ## Selector de modo del ESP32-S3
 
-PS2, PS3 y Xbox 360 necesitan configuraciones USB distintas, así que la
+PS2, PS3, Xbox 360 y Xbox clásico necesitan configuraciones USB distintas, así que la
 placa guarda el modo elegido en flash. Con la placa ya encendida (nunca al
 conectarla/resetear), mantén **BOOT** ~1.5s — el LED cicla de color cada
 ~0.7s; suelta en el color que corresponda.
@@ -140,6 +182,7 @@ conectarla/resetear), mantén **BOOT** ~1.5s — el LED cicla de color cada
 | 🟡 Amarillo | PS3 |
 | 🔵 Azul | PS2 / OPL |
 | 🟣 Morado | Xbox 360 |
+| 🟢 Verde | Xbox clásico |
 
 ## Qué hace falta para correrlo (no incluido en este repo)
 

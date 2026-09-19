@@ -549,6 +549,7 @@ def mostrar_info_esp32():
         ((212, 177, 6), "Amarillo", "PS3"),
         (AZUL, "Azul", "PS2 / OPL"),
         ((142, 95, 214), "Morado", "Xbox 360"),
+        ((47, 168, 79), "Verde", "Xbox clasico"),
     ]
 
     joystick = _joystick_activo(pygame, None)
@@ -582,7 +583,7 @@ def mostrar_info_esp32():
 
         cx = w // 2
         espacio = 200
-        base_x = cx - espacio
+        base_x = cx - (len(colores) - 1) * espacio // 2  # centrado con 3 o 4 colores
         for i, (color, nombre, consola) in enumerate(colores):
             x = base_x + i * espacio
             rect = pygame.Rect(x - 30, 240, 60, 60)
