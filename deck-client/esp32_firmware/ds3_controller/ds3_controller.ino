@@ -38,6 +38,9 @@
 #include <ArduinoJson.h>
 #include <stdarg.h>
 #include <Preferences.h>
+// Header privado de TinyUSB: hace falta para registrar un driver de clase
+// propio (XID del Xbox clasico, ver el bloque "MODO XBOX CLASICO" mas abajo).
+#include "device/usbd_pvt.h"
 
 // ---------------------------------------------------------------------------
 // Configuracion de red - EDITAR antes de subir
@@ -65,7 +68,21 @@ const uint16_t UDP_PORT = 9000;  // debe coincidir con --port de input_client_v3
 // color deseado para confirmar, y la placa se reinicia sola para aplicar
 // el modo nuevo limpio (USB.begin() no se puede reconfigurar sin reiniciar).
 // ---------------------------------------------------------------------------
-enum ModoConsola : uint8_t { MODO_PS3 = 0, MODO_PS2 = 1, MODO_XBOX360 = 2 };
+// MODO_XBOX_CLASICO (2026-09-19): el Xbox ORIGINAL (2001) no habla HID sino XID
+// (clase USB 0x58), asi que su modo arma otros descriptores y otro driver USB.
+enum ModoConsola : uint8_t { MODO_PS3 = 0, MODO_PS2 = 1, MODO_XBOX360 = 2, MODO_XBOX_CLASICO = 3 };
+const uint8_t NUM_MODOS = 4;
+
+// Reporte de entrada XID (Xbox clasico), definido aca arriba a proposito: ver el
+// bloque "MODO XBOX CLASICO" mas abajo.
+struct __attribute__((packed)) XidInReport {
+  uint8_t reportId;      // 0
+  uint8_t length;        // 0x14
+  uint16_t buttons;      // bits: up1 down2 left4 right8 start10 back20 L3 40 R3 80
+  uint8_t analog[8];     // A B X Y Black White LT RT (0-255)
+  int16_t lx, ly, rx, ry;
+};
+static_assert(sizeof(XidInReport) == 20, "el reporte XID debe medir 20 bytes");
 Preferences prefsModo;
 ModoConsola modoActual = MODO_PS3;
 
@@ -73,6 +90,7 @@ const char *nombreModo(ModoConsola m) {
   switch (m) {
     case MODO_PS2:     return "PS2/OPL";
     case MODO_XBOX360: return "Xbox360";
+    case MODO_XBOX_CLASICO: return "XboxClasico";
     default:           return "PS3";
   }
 }
@@ -82,13 +100,16 @@ void colorParaModo(ModoConsola m, uint8_t &r, uint8_t &g, uint8_t &b) {
   switch (m) {
     case MODO_PS2:     r = 0;  g = 0;  b = 32; break;  // azul
     case MODO_XBOX360: r = 20; g = 0;  b = 32; break;  // morado
+    case MODO_XBOX_CLASICO: r = 0; g = 32; b = 0; break;  // verde
     default:           r = 32; g = 22; b = 0;  break;  // amarillo (PS3)
   }
 }
 
 void cargarModoGuardado() {
   prefsModo.begin("ds3cfg", true);
-  modoActual = (ModoConsola)prefsModo.getUChar("modo", MODO_PS3);
+  uint8_t guardado = prefsModo.getUChar("modo", MODO_PS3);
+  // Un valor fuera de rango (flash vieja o corrupta) cae al modo de siempre.
+  modoActual = (guardado < NUM_MODOS) ? (ModoConsola)guardado : MODO_PS3;
   prefsModo.end();
 }
 
@@ -129,7 +150,7 @@ void revisarSelectorModo() {
 
   if (presionado) {
     if (millis() - ultimoCambio > 700) {
-      candidato = (ModoConsola)((candidato + 1) % 3);
+      candidato = (ModoConsola)((candidato + 1) % NUM_MODOS);
       ultimoCambio = millis();
       uint8_t r, g, b;
       colorParaModo(candidato, r, g, b);
@@ -675,6 +696,287 @@ void buildInputReport(uint8_t *out48) {
   out48[DS3_PRESSURE_OFFSET[DS3_SQUARE]] = state.square ? 255 : 0;
 }
 
+// ===========================================================================
+// MODO XBOX CLASICO (2026-09-19) - control del Xbox ORIGINAL (2001) por XID
+// ===========================================================================
+// NO ES HID. El Xbox original solo reconoce la clase USB 0x58/0x42 ("XID"):
+//  - Device: bcdUSB 0x0110, clase 0/0/0. Un unico interface 0x58/0x42/0x00 con
+//    2 endpoints interrupt de 32 bytes, bInterval 4 (IN 0x82 / OUT 0x02 en el
+//    control real; aca se usa un endpoint "duplex" con el mismo numero).
+//  - La consola pregunta por peticiones VENDOR dirigidas al interface (bmRequestType
+//    0xC1): 0x06/0x4200 = descriptor XID (16 B) y 0x01/0x0100 y 0x01/0x0200 =
+//    capacidades de entrada (20 B) y de salida (6 B).
+//  - Reporte de entrada de 20 bytes por el endpoint IN; rumble de 6 bytes por
+//    el OUT (o por SET_REPORT 0x21/0x09, wValue 0x0200, en el control).
+// Fuentes: xboxdevwiki.net/Xbox_Input_Devices y xqemu/hw/xbox/xid.c (los bytes de
+// los descriptores/capacidades salen de ahi; NO probado contra una consola real
+// al momento de escribir esto).
+//
+// COMO ENGANCHA EN ARDUINO-ESP32 2.0.13 (TinyUSB 0.15):
+//  - tinyusb_enable_interface(USB_INTERFACE_CUSTOM, ...) mete nuestro descriptor.
+//  - Sin un driver que "reclame" el interface 0x58, TinyUSB aborta la enumeracion
+//    (TU_ASSERT): por eso se sobreescribe usbd_app_driver_get_cb() (weak en la
+//    lib) y se abren los endpoints con usbd_open_edpt_pair().
+//  - Las peticiones VENDOR van SIEMPRE a tud_vendor_control_xfer_cb (sin importar
+//    el destinatario); el core las delega al gancho weak
+//    tinyusb_vendor_control_request_cb(), que se sobreescribe aca.
+// Todo esto solo actua con modoActual == MODO_XBOX_CLASICO: en los otros modos
+// usbd_app_driver_get_cb devuelve 0 drivers y el gancho vendor devuelve false, o
+// sea el mismo comportamiento de antes.
+
+static const uint8_t XID_DESC[16] = {
+  0x10, 0x42,        // bLength, bDescriptorType (XID)
+  0x00, 0x01,        // bcdXid 0x0100
+  0x01,              // bType: gamepad
+  0x02,              // bSubType: 0x02 = Controller S (0x01 = Duke)
+  0x14, 0x06,        // max input report 20 B, max output report 6 B
+  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF  // 4 PID alternativos (ninguno)
+};
+// Capacidades: el mismo formato del reporte con todos los campos validos en 0xFF.
+// [0]=report id, [1]=largo, [3] es el byte reservado del reporte.
+static const uint8_t XID_CAPS_IN[20] = {
+  0x00, 0x14, 0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+};
+static const uint8_t XID_CAPS_OUT[6] = { 0x00, 0x06, 0xFF, 0xFF, 0xFF, 0xFF };
+
+static uint8_t xid_ep_in = 0, xid_ep_out = 0;
+static uint8_t xid_out_buf[32];
+static uint8_t xid_in_buf[32];
+static uint8_t xid_ctrl_buf[32];
+static XidInReport xid_ultimo;                 // ultimo reporte armado (GET_REPORT)
+static uint16_t xid_motor_izq = 0, xid_motor_der = 0;
+unsigned long xidEnviados = 0, xidFallidos = 0, xidOcupado = 0, xidSalidas = 0, xidVendor = 0;
+
+// Descriptor del interface: 9 (interface) + 7 (EP IN) + 7 (EP OUT) = 23 bytes.
+extern "C" uint16_t xid_load_descriptor(uint8_t *dst, uint8_t *itf) {
+  uint8_t ep = tinyusb_get_free_duplex_endpoint();
+  if (ep == 0) {
+    return 0;
+  }
+  const uint8_t d[23] = {
+    9, 4, *itf, 0, 2, 0x58, 0x42, 0x00, 0,
+    7, 5, (uint8_t)(0x80 | ep), 0x03, 0x20, 0x00, 4,
+    7, 5, ep, 0x03, 0x20, 0x00, 4
+  };
+  *itf += 1;
+  memcpy(dst, d, sizeof(d));
+  return sizeof(d);
+}
+
+// Rumble: [0]=0, [1]=6, [2..3] motor izquierdo, [4..5] motor derecho (16 bits LE).
+static void xidProcesarSalida(const uint8_t *d, uint32_t n) {
+  if (n < 6 || d[1] != 6) {
+    return;
+  }
+  xid_motor_izq = (uint16_t)(d[2] | (d[3] << 8));
+  xid_motor_der = (uint16_t)(d[4] | (d[5] << 8));
+  xidSalidas++;
+  if (xidSalidas <= 5) {
+    debugLog("[xid] rumble izq=%u der=%u (paquete %lu)\n", xid_motor_izq, xid_motor_der, xidSalidas);
+  }
+}
+
+static void xid_drv_init(void) {}
+static void xid_drv_reset(uint8_t rhport) {
+  (void)rhport;
+  xid_ep_in = 0;
+  xid_ep_out = 0;
+}
+
+static uint16_t xid_drv_open(uint8_t rhport, tusb_desc_interface_t const *desc_itf, uint16_t max_len) {
+  if (desc_itf->bInterfaceClass != 0x58 || desc_itf->bInterfaceSubClass != 0x42) {
+    return 0;  // no es nuestro
+  }
+  const uint16_t drv_len = sizeof(tusb_desc_interface_t) + desc_itf->bNumEndpoints * sizeof(tusb_desc_endpoint_t);
+  if (max_len < drv_len) {
+    return 0;
+  }
+  uint8_t const *p_desc = tu_desc_next(desc_itf);
+  if (!usbd_open_edpt_pair(rhport, p_desc, desc_itf->bNumEndpoints, TUSB_XFER_INTERRUPT, &xid_ep_out, &xid_ep_in)) {
+    return 0;
+  }
+  debugLog("[xid] interface abierta: EP IN=0x%02X OUT=0x%02X\n", xid_ep_in, xid_ep_out);
+  // Dejar el endpoint OUT listo para recibir el rumble.
+  usbd_edpt_xfer(rhport, xid_ep_out, xid_out_buf, sizeof(xid_out_buf));
+  return drv_len;
+}
+
+// Peticiones de CLASE al interface (las VENDOR van al gancho de mas abajo):
+// GET_REPORT (0xA1/0x01) devuelve el ultimo estado; SET_REPORT (0x21/0x09) trae el rumble.
+static bool xid_drv_control_xfer(uint8_t rhport, uint8_t stage, tusb_control_request_t const *req) {
+  if (req->bmRequestType_bit.type != TUSB_REQ_TYPE_CLASS) {
+    return false;
+  }
+  const bool entrada = (req->bmRequestType_bit.direction == TUSB_DIR_IN);
+  if (stage == CONTROL_STAGE_SETUP) {
+    if (entrada && req->bRequest == 0x01) {
+      uint16_t n = req->wLength < sizeof(xid_ultimo) ? req->wLength : sizeof(xid_ultimo);
+      return tud_control_xfer(rhport, req, (void *)&xid_ultimo, n);
+    }
+    if (!entrada && req->bRequest == 0x09) {
+      uint16_t n = req->wLength < sizeof(xid_ctrl_buf) ? req->wLength : sizeof(xid_ctrl_buf);
+      return tud_control_xfer(rhport, req, xid_ctrl_buf, n);
+    }
+    return false;
+  }
+  if (stage == CONTROL_STAGE_ACK && !entrada && req->bRequest == 0x09) {
+    xidProcesarSalida(xid_ctrl_buf, req->wLength);
+  }
+  return true;
+}
+
+static bool xid_drv_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes) {
+  if (ep_addr == xid_ep_out) {
+    if (result == XFER_RESULT_SUCCESS) {
+      xidProcesarSalida(xid_out_buf, xferred_bytes);
+    }
+    usbd_edpt_xfer(rhport, xid_ep_out, xid_out_buf, sizeof(xid_out_buf));  // rearmar
+  }
+  return true;
+}
+
+static const usbd_class_driver_t xid_driver = {
+#if CFG_TUSB_DEBUG >= 2
+  "XID",
+#endif
+  xid_drv_init, xid_drv_reset, xid_drv_open, xid_drv_control_xfer, xid_drv_xfer_cb, NULL
+};
+
+extern "C" const usbd_class_driver_t *usbd_app_driver_get_cb(uint8_t *driver_count) {
+  if (modoActual == MODO_XBOX_CLASICO) {
+    *driver_count = 1;
+    return &xid_driver;
+  }
+  *driver_count = 0;
+  return NULL;
+}
+
+// Peticiones VENDOR de la consola (descriptor XID y capacidades).
+extern "C" bool tinyusb_vendor_control_request_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const *req) {
+  if (modoActual != MODO_XBOX_CLASICO) {
+    return false;
+  }
+  if (stage != CONTROL_STAGE_SETUP) {
+    return true;  // las etapas DATA/ACK de un IN no piden nada mas
+  }
+  if (req->bmRequestType_bit.direction != TUSB_DIR_IN) {
+    return false;
+  }
+  xidVendor++;
+  if (xidVendor <= 12) {
+    debugLog("[xid] peticion vendor bReq=0x%02X wValue=0x%04X wIndex=%u wLen=%u\n",
+             req->bRequest, req->wValue, req->wIndex, req->wLength);
+  }
+  const uint8_t *datos = NULL;
+  uint16_t largo = 0;
+  if (req->bRequest == 0x06 && req->wValue == 0x4200) {
+    datos = XID_DESC;
+    largo = sizeof(XID_DESC);
+  } else if (req->bRequest == 0x01 && req->wValue == 0x0100) {
+    datos = XID_CAPS_IN;
+    largo = sizeof(XID_CAPS_IN);
+  } else if (req->bRequest == 0x01 && req->wValue == 0x0200) {
+    datos = XID_CAPS_OUT;
+    largo = sizeof(XID_CAPS_OUT);
+  } else {
+    return false;
+  }
+  if (req->wLength < largo) {
+    largo = req->wLength;
+  }
+  return tud_control_xfer(rhport, req, (void *)datos, largo);
+}
+
+// Gatillo analogico (-1..1, reposo en -1) a 0-255; si solo llega el "click" digital, 255.
+static uint8_t xidGatillo(float analogico, bool click) {
+  int v = (int)((analogico + 1.0f) * 127.5f + 0.5f);
+  if (v < 0) v = 0;
+  if (v > 255) v = 255;
+  if (click && v == 0) v = 255;
+  return (uint8_t)v;
+}
+
+// Stick (-1..1) a int16 con la misma zona muerta que el modo DS3.
+static int16_t xidStick(float v) {
+  int32_t x = (int32_t)(applyDeadzone(v) * 32767.0f);
+  if (x > 32767) x = 32767;
+  if (x < -32767) x = -32767;
+  return (int16_t)x;
+}
+
+// Traduce el estado que ya manda la Deck/Ally (nombres de DS3) al reporte XID.
+// Mapeo: A/B/X/Y directos; L1 = White y R1 = Black (nombres de los botones del
+// Xbox original); L2/R2 = gatillos; SELECT = Back. Sin el acorde de PS (no existe
+// en el Xbox). El eje Y se invierte: en SDL arriba es negativo y en XID positivo.
+static void buildXboxReport(XidInReport *r) {
+  memset(r, 0, sizeof(*r));
+  r->length = 0x14;
+  uint8_t b = 0;
+  if (state.dpad_y > 0) b |= 0x01;
+  if (state.dpad_y < 0) b |= 0x02;
+  if (state.dpad_x < 0) b |= 0x04;
+  if (state.dpad_x > 0) b |= 0x08;
+  if (state.start_) b |= 0x10;
+  if (state.select_) b |= 0x20;
+  if (state.l3) b |= 0x40;
+  if (state.r3) b |= 0x80;
+  r->buttons = b;
+  r->analog[0] = state.cross ? 255 : 0;      // A
+  r->analog[1] = state.circle ? 255 : 0;     // B
+  r->analog[2] = state.square ? 255 : 0;     // X
+  r->analog[3] = state.triangle ? 255 : 0;   // Y
+  r->analog[4] = state.r1 ? 255 : 0;         // Black
+  r->analog[5] = state.l1 ? 255 : 0;         // White
+  r->analog[6] = xidGatillo(state.l2_analog, state.l2_click);
+  r->analog[7] = xidGatillo(state.r2_analog, state.r2_click);
+  r->lx = xidStick(state.lstick_x);
+  r->ly = xidStick(-state.lstick_y);
+  r->rx = xidStick(state.rstick_x);
+  r->ry = xidStick(-state.rstick_y);
+}
+
+static void xidEnviarEstado() {
+  buildXboxReport(&xid_ultimo);
+  if (xid_ep_in == 0 || !tud_ready()) {
+    xidFallidos++;
+    return;
+  }
+  if (usbd_edpt_busy(0, xid_ep_in)) {
+    xidOcupado++;  // el reporte anterior sigue esperando que la consola lo lea
+    return;
+  }
+  if (!usbd_edpt_claim(0, xid_ep_in)) {
+    xidOcupado++;
+    return;
+  }
+  memcpy(xid_in_buf, &xid_ultimo, sizeof(xid_ultimo));
+  if (usbd_edpt_xfer(0, xid_ep_in, xid_in_buf, sizeof(xid_ultimo))) {
+    xidEnviados++;
+  } else {
+    usbd_edpt_release(0, xid_ep_in);
+    xidFallidos++;
+  }
+}
+
+// Ajustes USB de este modo (se llama desde setup() en lugar de la parte DS3).
+static void configurarUsbXboxClasico() {
+  USB.VID(0x045E);   // Microsoft
+  USB.PID(0x0289);   // Xbox Controller S (bSubType 0x02 en XID_DESC)
+  USB.usbVersion(0x0110);
+  USB.firmwareVersion(0x0100);
+  USB.usbClass(0x00);
+  USB.usbSubClass(0x00);
+  USB.usbProtocol(0x00);
+  USB.usbAttributes(0x80);
+  USB.usbPower(100);
+  USB.manufacturerName("Microsoft");
+  USB.productName("Xbox Controller S");
+  USB.serialNumber("0");
+  tinyusb_enable_interface(USB_INTERFACE_CUSTOM, 23, xid_load_descriptor);
+  debugLog("[setup] modo XBOX CLASICO: interface XID 0x58/0x42, USB 1.10\n");
+}
+
 void setup() {
   Serial.begin(115200);
   neopixelWrite(RGB_LED_PIN, 32, 0, 0);
@@ -735,6 +1037,9 @@ void setup() {
   // lineas dicen exactamente hasta donde llega el arranque.
   debugLog("[setup] wifi ok, ip=%s sleep=%d\n", WiFi.localIP().toString().c_str(), (int)WiFi.getSleep());
 
+  if (modoActual == MODO_XBOX_CLASICO) {
+    configurarUsbXboxClasico();
+  } else {
   USB.VID(0x054C);
   USB.PID(0x0268);
   USB.manufacturerName("Sony");
@@ -774,6 +1079,7 @@ void setup() {
   debugLog("[setup] feature store listo\n");
 
   tinyusb_enable_interface(USB_INTERFACE_HID, TUD_HID_INOUT_DESC_LEN, ds3_hid_load_descriptor);
+  }  // fin de la rama DS3 (PS3 / PS2 / Xbox 360)
   debugLog("[setup] llamando USB.begin()\n");
   USB.begin();
   debugLog("[setup] USB.begin() retorno - setup completo\n");
@@ -913,7 +1219,12 @@ void loop() {
   unsigned long now = millis();
   bool porCambio = estadoNuevo && (now - lastSend >= MIN_SEND_INTERVAL_MS);
   bool porLatido = (now - lastSend >= SEND_INTERVAL_MS);
-  if (porCambio || porLatido) {
+  if (modoActual == MODO_XBOX_CLASICO) {
+    if (porCambio || porLatido) {
+      lastSend = now;
+      xidEnviarEstado();
+    }
+  } else if (porCambio || porLatido) {
     lastSend = now;
     applyPsCombo();
     if (tud_hid_ready()) {
@@ -948,5 +1259,9 @@ void loop() {
              packetsReceived, packetsStale, parseOk, parseErr, reportsSent, reportsFailed,
              outputReports,
              (int)tud_hid_ready(), probe[1], probe[2], probe[3], (int)state.cross);
+    if (modoActual == MODO_XBOX_CLASICO) {
+      debugLog("[hb-xid] montado=%d ep_in=0x%02X enviados=%lu fallidos=%lu ocupado=%lu rumble=%lu vendor=%lu\n",
+               (int)tud_mounted(), xid_ep_in, xidEnviados, xidFallidos, xidOcupado, xidSalidas, xidVendor);
+    }
   }
 }
