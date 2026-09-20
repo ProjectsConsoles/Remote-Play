@@ -19,7 +19,8 @@ por USB. No es un emulador: la consola sigue siendo la real.
    llega por UDP.
 3. **Cliente handheld** — lee el control físico, lo manda por UDP al ESP32
    (120 Hz) y reproduce el stream de video/audio. Steam Deck
-   (`deck-client/`) y ROG Ally X (`rog-ally-client/`).
+   (`deck-client/`), ROG Ally X (`rog-ally-client/`) y tableta Android
+   (`android-client/`).
 
 ```
  Consola  --HDMI-->  Capturadora USB  --ffmpeg-->  PC Windows  --UDP/red-->  Handheld
@@ -36,6 +37,8 @@ por USB. No es un emulador: la consola sigue siendo la real.
   ffmpeg) con interfaz gráfica y lanzador nativo.
 - **`rog-ally-client/`** — cliente para ROG Ally X (Python + pygame,
   compilado como `.exe` con PyInstaller).
+- **`android-client/`** — cliente Android (Kotlin, sin dependencias externas,
+  decodificación por hardware con MediaCodec). Ver su `README.md`.
 
 ## Estado actual
 
@@ -44,6 +47,7 @@ por USB. No es un emulador: la consola sigue siendo la real.
 | Cliente Steam Deck | ✅ Funcional |
 | Servidor Windows | ✅ Funcional |
 | Cliente ROG Ally X (Windows) | ✅ Funcional |
+| Cliente Android | 🧪 Compila y el demultiplexor/mando pasan pruebas con datos reales; **sin probar todavía en una tableta** |
 | PS2 (Open PS2 Loader / PADEMU) | ✅ Funcional. Pendiente: el menú de OPL a veces pierde el control por USB unos segundos (se recupera solo). |
 | Xbox 360 (RGH/JTAG + Aurora) | ✅ Funcional vía hiddriver360 |
 | Xbox clásico (el original de 2001) | ✅ Funcional (probado en consola real); necesita cable propio |
