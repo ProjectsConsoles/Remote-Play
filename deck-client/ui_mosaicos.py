@@ -414,7 +414,7 @@ class App:
     derecha a izquierda; volver la desliza de izquierda a derecha, como en Android. Tambien lee el
     mando y el teclado en un solo lugar y se lo pasa a la pantalla activa (o al cuadro de texto)."""
 
-    DURACION = 0.22    # segundos
+    DURACION = 0.32    # segundos (0.22 le parecio muy rapida al usuario, 2026-09-20)
     PARALAJE = 0.28    # cuanto se corre la pantalla de abajo (fraccion del ancho)
 
     def __init__(self, titulo, mando):
