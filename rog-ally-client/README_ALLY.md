@@ -211,6 +211,12 @@ C:\ps3rp-build\python\python.exe -m PyInstaller --noconfirm --onefile --windowed
     main_client.py
 ```
 
+Ese mismo comando esta listo en `build_ally_iconos.ps1` (copiarlo a
+`C:\ps3rp-build\` y correr `powershell -ExecutionPolicy Bypass -File
+C:\ps3rp-build\build_ally_iconos.ps1`): deja el registro en `build_ally_last.log`
+y avisa `BUILD OK` o `BUILD FALLO` con las ultimas lineas. El `build_ally.ps1`
+anterior NO empaqueta los iconos.
+
 `--add-data` empaqueta los iconos dentro del .exe (2026-09-20). Ademas, la app
 los busca en una carpeta `iconos\` junto al .exe: copiarla ahi tambien es un
 respaldo por si el empaquetado fallara (sin iconos la interfaz sigue funcionando,
