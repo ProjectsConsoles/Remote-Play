@@ -81,6 +81,102 @@ object Ui {
         return b
     }
 
+    /** Icono vectorial (res/drawable) teñido, ya dimensionado. */
+    fun icono(ctx: Context, recurso: Int, ladoDp: Int, color: Int = Color.WHITE): android.widget.ImageView {
+        val v = android.widget.ImageView(ctx)
+        val d = ctx.getDrawable(recurso)?.mutate()
+        d?.setTint(color)
+        v.setImageDrawable(d)
+        v.layoutParams = LinearLayout.LayoutParams(dp(ctx, ladoDp), dp(ctx, ladoDp))
+        return v
+    }
+
+    /** Boton compacto con icono a la izquierda; para colocarlo en una fila (peso 1). */
+    fun botonIcono(ctx: Context, recurso: Int, texto: String, color: Int, alClic: () -> Unit): Button {
+        val b = boton(ctx, texto, color, alClic)
+        val d = ctx.getDrawable(recurso)?.mutate()
+        d?.setTint(Color.WHITE)
+        b.setCompoundDrawablesRelativeWithIntrinsicBounds(d, null, null, null)
+        b.compoundDrawablePadding = dp(ctx, 12)
+        b.gravity = Gravity.CENTER
+        b.textSize = 16f
+        b.minHeight = dp(ctx, 48)
+        b.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).also {
+            it.marginStart = dp(ctx, 6)
+            it.marginEnd = dp(ctx, 6)
+        }
+        return b
+    }
+
+    private fun aclarar(color: Int, f: Float): Int {
+        val r = (Color.red(color) + (255 - Color.red(color)) * f).toInt()
+        val g = (Color.green(color) + (255 - Color.green(color)) * f).toInt()
+        val b = (Color.blue(color) + (255 - Color.blue(color)) * f).toInt()
+        return Color.rgb(r, g, b)
+    }
+
+    private fun fondoMosaico(ctx: Context, color: Int, borde: Int): GradientDrawable {
+        val d = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(aclarar(color, 0.18f), color))
+        d.cornerRadius = dp(ctx, 18).toFloat()
+        d.setStroke(dp(ctx, 4), borde)
+        return d
+    }
+
+    /**
+     * Mosaico grande del menu principal: icono, titulo y descripcion sobre un color. Se agranda un poco
+     * y muestra un borde blanco cuando tiene el foco (asi se ve a que boton apunta el mando).
+     * [compacto] = pantallas bajitas (celular en horizontal): icono y letras mas chicos.
+     */
+    fun mosaico(
+        ctx: Context,
+        recurso: Int,
+        titulo: String,
+        detalle: String,
+        color: Int,
+        compacto: Boolean,
+        alClic: () -> Unit,
+    ): LinearLayout {
+        val t = LinearLayout(ctx)
+        t.orientation = LinearLayout.VERTICAL
+        t.gravity = Gravity.CENTER_VERTICAL or Gravity.START
+        val p = dp(ctx, if (compacto) 10 else 20)
+        t.setPadding(p, p, p, p)
+        t.minimumHeight = dp(ctx, if (compacto) 68 else 120)
+
+        val normal = fondoMosaico(ctx, color, color)
+        val foco = fondoMosaico(ctx, color, Color.WHITE)
+        val sl = StateListDrawable()
+        sl.addState(intArrayOf(android.R.attr.state_focused), foco)
+        sl.addState(intArrayOf(android.R.attr.state_pressed), foco)
+        sl.addState(intArrayOf(), normal)
+        t.background = sl
+
+        t.addView(icono(ctx, recurso, if (compacto) 26 else 52))
+        val tit = TextView(ctx)
+        tit.text = titulo
+        tit.setTextColor(Color.WHITE)
+        tit.textSize = if (compacto) 18f else 26f
+        tit.setTypeface(tit.typeface, Typeface.BOLD)
+        tit.setPadding(0, dp(ctx, if (compacto) 4 else 10), 0, 0)
+        t.addView(tit)
+        val det = TextView(ctx)
+        det.text = detalle
+        det.setTextColor(0xE6FFFFFF.toInt())
+        det.textSize = if (compacto) 12f else 15f
+        det.setPadding(0, dp(ctx, 2), 0, 0)
+        t.addView(det)
+
+        t.isFocusable = true
+        t.isFocusableInTouchMode = false
+        t.isClickable = true
+        t.setOnClickListener { alClic() }
+        t.setOnFocusChangeListener { v, tiene ->
+            v.animate().scaleX(if (tiene) 1.03f else 1f).scaleY(if (tiene) 1.03f else 1f).setDuration(120).start()
+            v.elevation = if (tiene) dp(ctx, 8).toFloat() else 0f
+        }
+        return t
+    }
+
     /**
      * Boton que da la vuelta por una lista de opciones cada vez que se aprieta (mucho mas comodo con
      * el mando que un desplegable). [opciones] = clave guardada -> texto que se ve.
