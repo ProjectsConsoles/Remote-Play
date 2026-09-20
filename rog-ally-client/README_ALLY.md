@@ -76,8 +76,11 @@ ahi para que funcione tambien desde la Ally.
 y sus pantallas usan el mismo estilo que el cliente Android y la Deck
 (`src/ui_pygame.py`): mosaicos redondeados con icono, una tira de estado del
 servidor arriba del menu, y una sola ventana donde abrir una pantalla la desliza
-de derecha a izquierda y volver la desliza de izquierda a derecha (0.32 s). Los
-iconos estan en `iconos/` (PNG; ver "Recompilar").
+de derecha a izquierda y volver la desliza de izquierda a derecha (0.32 s). El
+foco de cada mosaico tambien es suave (0.14 s, como en Android): la tarjeta crece
+un poco, el borde blanco se desvanece hacia adentro/afuera y aparece una sombra
+leve; el bucle sube a 60 fps solo mientras algo se anima. Los iconos estan en
+`iconos/` (PNG; ver "Recompilar").
 
 Navegable por completo con el mando: la cruceta mueve el foco entre mosaicos, A
 activa (en un texto o numero abre un cuadro para escribirlo; Enter en teclado),

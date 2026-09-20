@@ -47,6 +47,7 @@ ROJO_OSCURO = "#7a2e2e"
 BLANCO = "#ffffff"
 
 FAMILIA = "DejaVu Sans"
+DURACION_FOCO = 0.14   # segundos: lo que tarda una tarjeta en ganar/perder el foco (Android: 120 ms)
 CARPETA_ICONOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "iconos")
 
 
@@ -145,15 +146,69 @@ class Mosaico(tk.Canvas):
         self.marcado = False
         self.al_tocar = None      # lo pone el Navegador
         self.arriba = None        # widget que debe quedar visible al enfocar (listas con scroll)
+        # Foco suave (2026-09-20, como Android): _t va de 0 (sin foco) a 1 (con foco) con frenado.
+        self._t = self._desde = self._objetivo = 0.0
+        self._t0 = 0.0
+        self._dur = DURACION_FOCO
+        self._job = None
         self.bind("<Configure>", lambda e: self._pintar())
         if interactivo:
             self.bind("<Button-1>", self._tocado)
 
     # --- estado -------------------------------------------------------------------------------
-    def poner_foco(self, si):
-        if si != self.foco:
-            self.foco = si
+    def poner_foco(self, si, animar=True):
+        if si == self.foco:
+            return
+        self.foco = si
+        self._objetivo = 1.0 if si else 0.0
+        if self._job is not None:
+            self.after_cancel(self._job)
+            self._job = None
+        if not animar:
+            self._t = self._desde = self._objetivo
+            self._actualizar_forma()
+            return
+        self._desde = self._t
+        self._dur = max(0.05, DURACION_FOCO * abs(self._objetivo - self._desde))
+        self._t0 = time.monotonic()
+        self._paso_foco()
+
+    def _paso_foco(self):
+        self._job = None
+        p = min(1.0, (time.monotonic() - self._t0) / self._dur)
+        e = 1 - (1 - p) ** 3   # frena al llegar
+        self._t = self._desde + (self._objetivo - self._desde) * e
+        self._actualizar_forma()
+        if p < 1.0:
+            self._job = self.after(10, self._paso_foco)
+        else:
+            self._t = self._objetivo
+
+    def destroy(self):
+        if self._job is not None:
+            try:
+                self.after_cancel(self._job)
+            except Exception:
+                pass
+            self._job = None
+        super().destroy()
+
+    def _puntos_forma(self, w, h):
+        esc = self.esc
+        inset = round(esc.px(7) + (esc.px(1) - esc.px(7)) * self._t)   # crece al enfocar
+        return _rect_redondeado(inset, inset, w - inset, h - inset, esc.px(20))
+
+    def _actualizar_forma(self):
+        """Durante la animacion solo se mueve el fondo y se aclara el borde: el texto no se redibuja."""
+        w, h = self.winfo_width(), self.winfo_height()
+        if w < 30 or h < 30:
+            return
+        if not self.find_withtag("forma"):
             self._pintar()
+            return
+        color = self.color if self.habilitado else mezclar(self.color, FONDO, 0.55)
+        self.coords("forma", *self._puntos_forma(w, h))
+        self.itemconfigure("forma", outline=mezclar(color, BLANCO, self._t))
 
     def poner_titulo(self, texto):
         self.titulo = texto
@@ -197,13 +252,12 @@ class Mosaico(tk.Canvas):
             return
         esc = self.esc
         color = self.color if self.habilitado else mezclar(self.color, FONDO, 0.55)
-        inset = esc.px(1) if self.foco else esc.px(7)
         grosor = esc.px(4)
         self.create_polygon(
-            _rect_redondeado(inset, inset, w - inset, h - inset, esc.px(20)), smooth=True,
-            fill=color, outline=BLANCO if self.foco else color, width=grosor)
+            self._puntos_forma(w, h), smooth=True, fill=color,
+            outline=mezclar(color, BLANCO, self._t), width=grosor, tags="forma")
 
-        pad = esc.px(20) + inset
+        pad = esc.px(24)   # fijo: el texto ya no se corre al enfocar (solo crece la forma)
         ancho_txt = max(40, w - 2 * pad)
         lado_icono = esc.px(self.tam_icono)
         img = self.iconos.get(self.icono, lado_icono) if self.icono else None
@@ -347,7 +401,9 @@ class Navegador:
         for fila_ in self.filas:
             for t in fila_:
                 t.al_tocar = self.ir_a
+        self._inicial = True    # el foco inicial se pone sin animar (la pantalla ya viene deslizandose)
         self.marcar()
+        self._inicial = False
 
     def actual(self):
         return self.filas[self.f][self.c]
@@ -374,7 +430,7 @@ class Navegador:
         act = self.actual()
         for fila_ in self.filas:
             for t in fila_:
-                t.poner_foco(t is act)
+                t.poner_foco(t is act, animar=not self._inicial)
         if self.al_cambiar:
             self.al_cambiar(act)
 

@@ -60,7 +60,8 @@ icono** que el cliente Android (las piezas visuales están en
 tira de estado del servidor arriba y dos pantallas de configuración,
 navegables con el mando (cruceta mueve el foco, A activa, B vuelve). Todo
 vive en una sola ventana: abrir una pantalla la desliza de derecha a
-izquierda y volver la desliza de izquierda a derecha, como en Android:
+izquierda y volver la desliza de izquierda a derecha, como en Android. El foco
+de cada tarjeta también es suave (0.14 s: crece y el borde se ilumina):
 
 - **Configurar servidor** — modo de captura (720p/1080p MJPEG, o crudos) e
   IP de la Deck, por UDP (puerto 9200) a `config_listener.ps1`. Reinicia el

@@ -47,6 +47,8 @@ ROJO_OSCURO = (122, 46, 46)
 NARANJA_OSCURO = (160, 74, 45)
 BLANCO = (255, 255, 255)
 
+DURACION_FOCO = 0.14   # segundos: lo que tarda una tarjeta en ganar/perder el foco (Android: 120 ms)
+
 
 def mezclar(c1, c2, f):
     """Mezcla dos colores RGB: f=0 -> c1, f=1 -> c2."""
@@ -137,6 +139,26 @@ def _relleno(w, h, r, color, foco, grosor):
     return _formas[clave]
 
 
+def _anillo(w, h, r, grosor):
+    """Anillo blanco con alfa, COPIA propia (se le cambia el alfa para desvanecerlo sin tocar la forma compartida)."""
+    clave = ("anillo", w, h, r, grosor)
+    if clave not in _formas:
+        _formas[clave] = _forma(w, h, r, grosor).copy()
+    return _formas[clave]
+
+
+def _sombra(w, h, r, m):
+    """Sombra suave (negra) de un mosaico w x h, con `m` px de margen alrededor: se dibuja chica y se agranda."""
+    clave = ("sombra", w, h, r, m)
+    if clave not in _formas:
+        k = 4
+        chica = pygame.Surface(((w + 2 * m) // k + 2, (h + 2 * m) // k + 2), pygame.SRCALPHA)
+        pygame.draw.rect(chica, (0, 0, 0, 150), pygame.Rect(m // k, m // k, w // k, h // k),
+                         border_radius=max(1, r // k))
+        _formas[clave] = pygame.transform.smoothscale(chica, (w + 2 * m, h + 2 * m))
+    return _formas[clave]
+
+
 def envolver(fuente, texto, ancho):
     """Parte `texto` en lineas que quepan en `ancho` pixeles."""
     lineas = []
@@ -179,6 +201,32 @@ class Mosaico:
         self.marcado = False
         self.ayuda = ""
         self.rect = None   # donde se dibujo la ultima vez (para tocarlo)
+        # Foco suave (2026-09-20, como Android): _t va de 0 (sin foco) a 1 (con foco) con frenado.
+        # None = todavia no se dibujo: la primera vez se pone directo, sin animar.
+        self._t = None
+        self._desde = self._objetivo = 0.0
+        self._t0 = 0.0
+        self._dur = DURACION_FOCO
+
+    def _avanzar(self, foco):
+        """Actualiza y devuelve el grado de foco (0..1) segun el tiempo transcurrido."""
+        obj = 1.0 if foco else 0.0
+        if self._t is None:
+            self._t = self._desde = self._objetivo = obj
+            return self._t
+        ahora = time.monotonic()
+        if obj != self._objetivo:
+            self._objetivo = obj
+            self._desde = self._t
+            self._t0 = ahora
+            self._dur = max(0.05, DURACION_FOCO * abs(obj - self._desde))
+        if self._t != self._objetivo:
+            p = min(1.0, (ahora - self._t0) / self._dur)
+            self._t = self._objetivo if p >= 1.0 else self._desde + (self._objetivo - self._desde) * (1 - (1 - p) ** 3)
+        return self._t
+
+    def animando(self):
+        return self._t is not None and self._t != self._objetivo
 
     def activar(self):
         if self.habilitado and self.on_a:
@@ -195,10 +243,21 @@ class Mosaico:
     def dibujar(self, surf, rect, foco=False):
         esc = self.esc
         self.rect = rect
-        inflar = esc.px(5) if foco else 0
+        t = self._avanzar(foco)
+        inflar = round(esc.px(5) * t)          # crece al enfocar
         r = rect.inflate(2 * inflar, 2 * inflar)
         color = self.color if self.habilitado else mezclar(self.color, FONDO, 0.55)
-        surf.blit(_relleno(r.w, r.h, esc.px(18), color, foco, esc.px(4)), r.topleft)
+        if t > 0.02:
+            # sombra suave que aparece con el foco (la elevacion de Android)
+            m = esc.px(7)
+            sombra = _sombra(r.w, r.h, esc.px(18), m)
+            sombra.set_alpha(int(190 * t))
+            surf.blit(sombra, (r.x - m, r.y - m + esc.px(3)))
+        surf.blit(_relleno(r.w, r.h, esc.px(18), color, False, 0), r.topleft)
+        if t > 0.02:
+            anillo = _anillo(r.w, r.h, esc.px(18), esc.px(4))
+            anillo.set_alpha(int(255 * t))     # el borde blanco se desvanece hacia adentro/afuera
+            surf.blit(anillo, r.topleft)
 
         pad = esc.px(18)
         color_txt = self.color_texto if self.habilitado else mezclar(self.color_texto, color, 0.4)
@@ -375,6 +434,10 @@ class Pantalla:
 
     def dibujar(self, surf):
         surf.fill(FONDO)
+
+    def animando(self):
+        """True si algun mosaico esta ganando/perdiendo el foco (el bucle sube a 60 fps mientras tanto)."""
+        return self.nav is not None and any(t.animando() for fila in self.nav.filas for t in fila)
 
     def boton(self, nombre):
         pass
@@ -619,5 +682,7 @@ class App:
             if self.cerrado:
                 break
             self.redibujar()
-            self.reloj.tick(30)
+            # 60 fps solo mientras algo se anima (foco suave); quieto, 30 para no gastar bateria
+            animando = bool(self.pila) and self.pila[-1].animando()
+            self.reloj.tick(60 if animando else 30)
         return self.resultado
