@@ -2,9 +2,10 @@
 """Piezas visuales compartidas de los menus (Deck, y despues la Ally): el mismo estilo de
 "mosaicos" que el cliente Android.
 
-Nada de aqui lee el mando ni habla con la red: solo dibuja y lleva el foco. Cada pantalla
-(client_menu.py, client_server_config.py, client_settings.py) arma sus mosaicos, se los da a un
-`Navegador` y sigue leyendo el mando con deck_gamepad.Mando como siempre.
+Nada de aqui habla con la red: solo dibuja, lleva el foco y reparte el mando/teclado. Cada
+pantalla (client_menu.py, client_server_config.py, client_settings.py) es una `Pantalla` que arma
+sus mosaicos, se los da a un `Navegador` y recibe los botones ya traducidos en `tecla(nombre)`.
+`App` es dueña de UN solo deck_gamepad.Mando para toda la sesion (ver la nota en client_menu.py).
 
 Piezas:
     Escala        tamanos relativos a la pantalla (la Deck, 1280x800, es escala 1.0)
@@ -13,14 +14,18 @@ Piezas:
                   borde blanco (tkinter no tiene escalado, asi que se logra achicando el margen)
     TiraEstado    tira redondeada con un punto de color y un mensaje
     Navegador     foco por fila/columna entre mosaicos (cruceta), activar con A, tocar con el dedo
-    DialogoTexto  cuadro para escribir un texto (IP, numero), tambien en pantalla completa
-    VentanaInfo   los colores del LED del ESP32-S3
+    App           ventana unica con una PILA de pantallas que se deslizan (abrir: de derecha a
+                  izquierda; volver: de izquierda a derecha), y que lee mando y teclado en un solo lugar
+    Pantalla      base de cada pantalla (un Frame dentro de App)
+    DialogoTexto  cuadro para escribir un texto (IP, numero), como panel dentro de la ventana
+    PantallaInfo  los colores del LED del ESP32-S3
 
 PS3RP_VENTANA=1280x800 (solo para probar en una PC): abre una ventana de ese tamano en vez de
 pantalla completa.
 """
 
 import os
+import time
 import tkinter as tk
 from tkinter import font as tkfont
 
@@ -377,23 +382,222 @@ class Navegador:
         self.actual().activar()
 
 
-class DialogoTexto:
-    """Cuadro (ventana completa oscura con un panel al centro) para escribir un texto. Se maneja con
-    teclado/tactil como el Entry de antes; con el mando, A acepta y B cancela (ver `tecla`)."""
+class Pantalla:
+    """Base de una pantalla del menu: un Frame dentro de la ventana unica de `App`.
 
-    def __init__(self, root, esc, titulo, actual, al_aceptar):
+    Las subclases arman sus widgets en `self.frame` y definen `tecla(nombre)`, que recibe los nombres
+    de botones de deck_gamepad ("DPAD_LEFT", "A", "B", "X", "Y", "L1", "R1"...), tanto del mando como
+    del teclado (ver TECLAS). `al_mostrar()` se llama cuando la pantalla queda a la vista (al abrirse,
+    ya terminada la animacion, y al volver a ella)."""
+
+    def __init__(self, app):
+        self.app = app
+        self.frame = tk.Frame(app.contenedor, bg=FONDO)
+
+    def tecla(self, nombre):
+        pass
+
+    def al_mostrar(self):
+        pass
+
+
+# Teclado -> nombres de boton del mando (asi cada pantalla solo entiende un vocabulario).
+TECLAS = {
+    "Left": "DPAD_LEFT", "Right": "DPAD_RIGHT", "Up": "DPAD_UP", "Down": "DPAD_DOWN",
+    "Tab": "DPAD_RIGHT", "Return": "A", "KP_Enter": "A", "space": "A", "Escape": "B",
+    "y": "Y", "Y": "Y", "x": "X", "X": "X",
+}
+
+
+class App:
+    """Ventana unica (pantalla completa) con una pila de pantallas. Abrir una desliza la nueva de
+    derecha a izquierda; volver la desliza de izquierda a derecha, como en Android. Tambien lee el
+    mando y el teclado en un solo lugar y se lo pasa a la pantalla activa (o al cuadro de texto)."""
+
+    DURACION = 0.22    # segundos
+    PARALAJE = 0.28    # cuanto se corre la pantalla de abajo (fraccion del ancho)
+
+    def __init__(self, titulo, mando):
+        self.root = tk.Tk()
+        self.root.title(titulo)
+        self.root.configure(bg=FONDO)
+        self.esc = Escala(configurar_ventana(self.root))
+        self.iconos = Iconos()
+        # UN solo mando para toda la sesion. Un Mando() nuevo arranca sin memoria de lo que ya estaba
+        # apretado y lo cuenta como "recien pulsado": si cada pantalla creaba el suyo, soltar B/A al
+        # cerrar una pantalla se colaba en la siguiente (B cancelaba el menu, A activaba Streaming).
+        self.mando = mando
+        try:
+            self.mando.nuevos()   # lo que ya este apretado al abrir no cuenta
+        except Exception:
+            pass
+        self.contenedor = tk.Frame(self.root, bg=FONDO)
+        self.contenedor.pack(fill="both", expand=True)
+        self.pila = []
+        self.modal = None        # DialogoTexto abierto (tiene prioridad sobre la pantalla)
+        self.animando = False
+        self.resultado = None
+        self.cerrado = False
+        self.root.bind("<Key>", self._tecla_teclado)
+        self.root.protocol("WM_DELETE_WINDOW", lambda: self.terminar(None))
+        self.root.after(40, self._bucle_mando)
+
+    # --- entrada -----------------------------------------------------------------------------
+    def _despachar(self, nombre):
+        if self.animando or self.cerrado:
+            return
+        try:
+            if self.modal is not None and self.modal.abierto:
+                self.modal.tecla(nombre)
+            elif self.pila:
+                self.pila[-1].tecla(nombre)
+        except Exception:
+            # un error en una pantalla no debe dejar el mando muerto: se registra y se sigue
+            import traceback
+            traceback.print_exc()
+
+    def _tecla_teclado(self, e):
+        if self.modal is not None and self.modal.abierto:
+            return  # el cuadro de texto maneja su propio teclado (Enter / Escape)
+        nombre = TECLAS.get(e.keysym)
+        if nombre:
+            self._despachar(nombre)
+
+    def _bucle_mando(self):
+        if self.cerrado:
+            return
+        try:
+            for nombre in self.mando.nuevos():
+                self._despachar(nombre)
+                if self.cerrado:
+                    return
+        except Exception:
+            import traceback
+            traceback.print_exc()
+        self.root.after(40, self._bucle_mando)
+
+    # --- pila de pantallas ---------------------------------------------------------------------
+    def abrir_inicial(self, pantalla):
+        self.pila.append(pantalla)
+        pantalla.frame.place(x=0, y=0, relwidth=1, relheight=1)
+        self.root.after(30, pantalla.al_mostrar)
+
+    def abrir(self, pantalla):
+        if self.animando or not self.pila:
+            pantalla.frame.destroy()
+            return
+        actual = self.pila[-1]
+        self.pila.append(pantalla)
+
+        def fin():
+            actual.frame.place_forget()   # la de abajo deja de dibujarse mientras no se ve
+            pantalla.al_mostrar()
+
+        self._animar(pantalla, actual, +1, fin)
+
+    def volver(self):
+        if self.animando:
+            return
+        if len(self.pila) <= 1:
+            self.terminar(None)
+            return
+        actual = self.pila.pop()
+        anterior = self.pila[-1]
+
+        def fin():
+            actual.frame.destroy()
+            anterior.al_mostrar()
+
+        self._animar(anterior, actual, -1, fin)
+
+    def reemplazar(self, nueva):
+        """Cambia la pantalla de arriba por otra, sin animacion (p. ej. tras restaurar defaults)."""
+        if self.animando or not self.pila:
+            nueva.frame.destroy()
+            return
+        vieja = self.pila[-1]
+        self.pila[-1] = nueva
+        nueva.frame.place(x=0, y=0, relwidth=1, relheight=1)
+        nueva.frame.lift()
+        self.root.update_idletasks()
+        vieja.frame.destroy()
+        self.root.after(30, nueva.al_mostrar)
+
+    def _animar(self, entrante, saliente, direccion, fin):
+        self.root.update_idletasks()
+        ancho = max(1, self.contenedor.winfo_width())
+        corrimiento = int(ancho * self.PARALAJE)
+        self.animando = True
+        if direccion > 0:
+            # abrir: la nueva llega desde la derecha encima; la de abajo se corre un poco a la izquierda
+            entrante.frame.place(x=ancho, y=0, relwidth=1, relheight=1)
+            entrante.frame.lift()
+
+            def x_ent(e):
+                return int(ancho * (1 - e))
+
+            def x_sal(e):
+                return -int(corrimiento * e)
+        else:
+            # volver: la actual sale hacia la derecha; la de abajo regresa desde la izquierda
+            entrante.frame.place(x=-corrimiento, y=0, relwidth=1, relheight=1)
+            entrante.frame.lower()
+            saliente.frame.lift()
+
+            def x_ent(e):
+                return -int(corrimiento * (1 - e))
+
+            def x_sal(e):
+                return int(ancho * e)
+
+        self.root.update_idletasks()
+        t0 = time.monotonic()
+
+        def paso():
+            if self.cerrado:
+                return
+            t = min(1.0, (time.monotonic() - t0) / self.DURACION)
+            e = 1 - (1 - t) ** 3   # frena al llegar
+            entrante.frame.place_configure(x=x_ent(e))
+            saliente.frame.place_configure(x=x_sal(e))
+            if t < 1.0:
+                self.root.after(8, paso)
+            else:
+                entrante.frame.place_configure(x=0)
+                self.animando = False
+                fin()
+
+        paso()
+
+    def terminar(self, resultado=None):
+        if self.cerrado:
+            return
+        self.resultado = resultado
+        self.cerrado = True
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+
+    def ejecutar(self):
+        self.root.mainloop()
+        return self.resultado
+
+
+class DialogoTexto:
+    """Cuadro para escribir un texto (IP, numero): un panel encima de toda la ventana (no una ventana
+    aparte, que en Modo Juego puede quedar oculta). Teclado/tactil como el Entry de antes; con el
+    mando, A acepta y B cancela (lo enruta App mientras esta abierto)."""
+
+    def __init__(self, app, titulo, actual, al_aceptar):
+        self.app = app
         self.abierto = True
         self.al_aceptar = al_aceptar
-        self.top = tk.Toplevel(root)
-        self.top.configure(bg=FONDO)
-        try:
-            self.top.attributes("-fullscreen", True)
-        except Exception:
-            self.top.geometry("900x500")
-        if os.environ.get("PS3RP_VENTANA"):
-            self.top.attributes("-fullscreen", False)
-            self.top.geometry(root.geometry())
-        panel = tk.Frame(self.top, bg=PANEL, padx=esc.px(40), pady=esc.px(30))
+        esc = app.esc
+        self.frame = tk.Frame(app.root, bg=FONDO)
+        self.frame.place(x=0, y=0, relwidth=1, relheight=1)
+        self.frame.lift()
+        panel = tk.Frame(self.frame, bg=PANEL, padx=esc.px(40), pady=esc.px(30))
         panel.place(relx=0.5, rely=0.32, anchor="center")
         tk.Label(panel, text=titulo, font=esc.fuente(18), bg=PANEL, fg=TENUE).pack(anchor="w")
         self.entry = tk.Entry(panel, font=esc.fuente(28), width=20, justify="center",
@@ -407,10 +611,9 @@ class DialogoTexto:
             tk.Button(botones, text=texto, font=esc.fuente(18, True), bg=color, fg=BLANCO,
                       activebackground=color, activeforeground=BLANCO, relief="flat", bd=0,
                       padx=esc.px(26), pady=esc.px(10), command=cmd).pack(side="left", padx=esc.px(10))
-        self.top.bind("<Return>", lambda e: self.aceptar())
-        self.top.bind("<Escape>", lambda e: self.cancelar())
-        self.top.protocol("WM_DELETE_WINDOW", self.cancelar)
-        self.top.grab_set()
+        self.entry.bind("<Return>", lambda e: (self.aceptar(), "break")[1])
+        self.entry.bind("<Escape>", lambda e: (self.cancelar(), "break")[1])
+        app.modal = self
         self.entry.focus_force()
         self.entry.select_range(0, "end")
 
@@ -427,9 +630,10 @@ class DialogoTexto:
 
     def cerrar(self):
         self.abierto = False
+        if self.app.modal is self:
+            self.app.modal = None
         try:
-            self.top.grab_release()
-            self.top.destroy()
+            self.frame.destroy()
         except Exception:
             pass
 
@@ -449,21 +653,13 @@ LEDS = [
 ]
 
 
-class VentanaInfo:
-    """Colores del LED del ESP32-S3 (selector de modo), en pantalla completa sobre el menu."""
+class PantallaInfo(Pantalla):
+    """Colores del LED del ESP32-S3 (selector de modo)."""
 
-    def __init__(self, root, esc, iconos):
-        self.abierta = True
-        self.top = tk.Toplevel(root)
-        self.top.configure(bg=FONDO)
-        try:
-            self.top.attributes("-fullscreen", True)
-        except Exception:
-            self.top.geometry("900x500")
-        if os.environ.get("PS3RP_VENTANA"):
-            self.top.attributes("-fullscreen", False)
-            self.top.geometry(root.geometry())
-        marco = tk.Frame(self.top, bg=FONDO, padx=esc.px(24), pady=esc.px(20))
+    def __init__(self, app):
+        super().__init__(app)
+        esc, iconos = app.esc, app.iconos
+        marco = tk.Frame(self.frame, bg=FONDO, padx=esc.px(24), pady=esc.px(16))
         marco.pack(fill="both", expand=True)
         cab, _ = cabecera(marco, esc, "Selector de modo del ESP32-S3")
         cab.pack(fill="x")
@@ -479,23 +675,11 @@ class VentanaInfo:
         tk.Label(marco, text="El modo elegido queda guardado en la placa hasta que se cambie a mano.",
                  font=esc.fuente(14), bg=FONDO, fg=TENUE).pack(anchor="w", pady=(esc.px(6), esc.px(4)))
         pie = fila(marco, esc, expandir=False)
-        volver = Mosaico(pie, esc, iconos, "back", "Volver", "B o Escape", GRIS, on_a=self.cerrar,
+        volver = Mosaico(pie, esc, iconos, "back", "Volver", "B o Escape", GRIS, on_a=app.volver,
                          tam_titulo=22, tam_detalle=13, tam_icono=40, horizontal=True, alto=esc.px(84))
         disponer(pie, [volver], esc)
         self.nav = Navegador([[volver]])
-        self.top.bind("<Escape>", lambda e: self.cerrar())
-        self.top.bind("<Return>", lambda e: self.cerrar())
-        self.top.protocol("WM_DELETE_WINDOW", self.cerrar)
-        self.top.grab_set()
-
-    def cerrar(self):
-        self.abierta = False
-        try:
-            self.top.grab_release()
-            self.top.destroy()
-        except Exception:
-            pass
 
     def tecla(self, nombre):
         if nombre in ("B", "A"):
-            self.cerrar()
+            self.app.volver()

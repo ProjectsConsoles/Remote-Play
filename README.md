@@ -58,7 +58,9 @@ El menú (`deck-client/client_menu.py`) usa el mismo estilo de **mosaicos con
 icono** que el cliente Android (las piezas visuales están en
 `deck-client/ui_mosaicos.py` y los iconos en `deck-client/iconos/`). Tiene una
 tira de estado del servidor arriba y dos pantallas de configuración,
-navegables con el mando (cruceta mueve el foco, A activa, B vuelve):
+navegables con el mando (cruceta mueve el foco, A activa, B vuelve). Todo
+vive en una sola ventana: abrir una pantalla la desliza de derecha a
+izquierda y volver la desliza de izquierda a derecha, como en Android:
 
 - **Configurar servidor** — modo de captura (720p/1080p MJPEG, o crudos) e
   IP de la Deck, por UDP (puerto 9200) a `config_listener.ps1`. Reinicia el

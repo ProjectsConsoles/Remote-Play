@@ -7,18 +7,22 @@ start_client_stream.sh:
     streaming -> video + audio + control (lo de siempre)
     control   -> SOLO el control, con la pantalla de la Deck apagada
 
-Ademas hay dos pantallas de configuracion (2026-09-11) que NO salen del
-menu: se abren, y al cerrarse vuelven a mostrar este mismo menu.
-    - "Configurar servidor": modo de captura del PC Windows, en remoto
-      (client_server_config.py, habla con config_listener.ps1 por UDP).
-    - "Configurar cliente": las variables de latencia de este mismo lado
-      (client_settings.py, escribe client_config.env).
+Ademas hay tres pantallas que NO salen del menu: "Configurar servidor" (modo de captura
+del PC Windows, en remoto: client_server_config.py, habla con config_listener.ps1 por UDP),
+"Configurar cliente" (las variables de latencia de este mismo lado: client_settings.py,
+escribe client_config.env) e "Info" (colores del LED del ESP32-S3).
 
-Estilo (2026-09-20): mosaicos con icono, igual que el cliente Android. Las piezas
-visuales viven en ui_mosaicos.py (compartidas con las otras pantallas y, despues,
-con la Ally); aqui solo se arma el menu y se lee el mando. Arriba hay una tira con
-el estado del servidor, consultado en un hilo aparte para que el menu abra al
-instante.
+Estilo (2026-09-20): mosaicos con icono, igual que el cliente Android, y TODO dentro de UNA
+sola ventana: abrir una pantalla la desliza de derecha a izquierda y volver la desliza de
+izquierda a derecha (ver ui_mosaicos.App). Arriba del menu hay una tira con el estado del
+servidor, consultado en un hilo aparte para que el menu abra al instante.
+
+Por que una sola ventana y un solo Mando (2026-09-20, bug reportado: "le doy Volver y me saca
+de la app"): antes cada pantalla abria su propia ventana y creaba su propio deck_gamepad.Mando.
+Un Mando nuevo arranca sin memoria de lo que ya esta apretado y lo cuenta como "recien
+pulsado": al soltar B (o A sobre Volver) la pantalla anterior se cerraba y el menu nuevo leia
+ese mismo boton como suyo - B cancelaba el menu y A activaba el primer mosaico (Streaming).
+Con un solo Mando que vive toda la sesion, el boton se cuenta una vez.
 
 Se usa tkinter y no zenity/kdialog a proposito: tkinter ya viene con el Python
 del sistema y con el del venv, y deja hacer botones del tamano que uno quiera.
@@ -74,159 +78,139 @@ def _texto_estado_servidor(ip_servidor, resp, ip_local):
     return ui.OK, f"Servidor {ip_servidor}: transmitiendo a {destino} ({modo})"
 
 
-def mostrar_menu():
-    """Una vuelta del menu. Devuelve la eleccion (string) o None si cancelo."""
-    import tkinter as tk
+class PantallaMenu(ui.Pantalla):
+    """El menu principal: 2x2 de mosaicos (jugar arriba, configurar abajo) y Info / Salir."""
 
-    eleccion = {"modo": None}
-    cerrado = {"v": False}
-    root = tk.Tk()
-    root.title("Remote Play")
-    root.configure(bg=ui.FONDO)
-    esc = ui.Escala(ui.configurar_ventana(root))
-    iconos = ui.Iconos()
+    def __init__(self, app):
+        super().__init__(app)
+        import tkinter as tk
+        import client_server_config
+        import client_settings
+        esc, iconos = app.esc, app.iconos
+        self.ip_local = obtener_ip_local()
+        self._consulta = 0
 
-    def cerrar_ventana():
-        cerrado["v"] = True
-        root.destroy()
+        marco = tk.Frame(self.frame, bg=ui.FONDO, padx=esc.px(24), pady=esc.px(16))
+        marco.pack(fill="both", expand=True)
+        cab, self.lbl_red = ui.cabecera(marco, esc, "Remote Play",
+                                        f"IP: {self.ip_local}" if self.ip_local else "")
+        cab.pack(fill="x")
+        self.tira = ui.TiraEstado(marco, esc)
+        self.tira.pack(fill="x", pady=esc.px(6))
+        self.tira.pintar(ui.TENUE, "Servidor: consultando...")
 
-    def elegir(modo):
-        eleccion["modo"] = modo
-        cerrar_ventana()
+        f1 = ui.fila(marco, esc)
+        t_stream = ui.Mosaico(f1, esc, iconos, "play", "Streaming",
+                              "Video y audio de la consola, mas el control.", ui.AZUL,
+                              on_a=self.elegir_streaming, tam_titulo=32, tam_detalle=16)
+        t_control = ui.Mosaico(f1, esc, iconos, "gamepad", "Solo control",
+                               "La Deck es nada mas el mando, con la pantalla apagada.", ui.VERDE,
+                               on_a=lambda: app.terminar("control"), tam_titulo=32, tam_detalle=16)
+        ui.disponer(f1, [t_stream, t_control], esc)
 
-    marco = tk.Frame(root, bg=ui.FONDO, padx=esc.px(24), pady=esc.px(16))
-    marco.pack(fill="both", expand=True)
+        f2 = ui.fila(marco, esc)
+        t_servidor = ui.Mosaico(
+            f2, esc, iconos, "server", "Configurar servidor",
+            "Modo de captura y estado de la PC Windows, en remoto.", ui.MORADO,
+            on_a=lambda: app.abrir(client_server_config.PantallaServidor(app)),
+            tam_titulo=32, tam_detalle=16)
+        t_cliente = ui.Mosaico(
+            f2, esc, iconos, "settings", "Configurar cliente",
+            "Variables de latencia de esta Deck (VSYNC, watchdog, etc.).", ui.NARANJA,
+            on_a=lambda: app.abrir(client_settings.PantallaCliente(app)),
+            tam_titulo=32, tam_detalle=16)
+        ui.disponer(f2, [t_servidor, t_cliente], esc)
 
-    ip_local = obtener_ip_local()
-    cab, lbl_red = ui.cabecera(marco, esc, "Remote Play", f"IP: {ip_local}" if ip_local else "")
-    cab.pack(fill="x")
+        f3 = ui.fila(marco, esc, expandir=False)
+        t_info = ui.Mosaico(f3, esc, iconos, "info", "Info: colores del ESP32-S3", "Y", ui.GRIS,
+                            on_a=self.abrir_info, tam_titulo=20, tam_detalle=13, tam_icono=40,
+                            horizontal=True, alto=esc.px(84))
+        t_salir = ui.Mosaico(f3, esc, iconos, "exit", "Salir", "B o Escape", ui.ROJO_OSCURO,
+                             on_a=lambda: app.terminar(None), tam_titulo=20, tam_detalle=13,
+                             tam_icono=40, horizontal=True, alto=esc.px(84))
+        ui.disponer(f3, [t_info, t_salir], esc)
 
-    tira = ui.TiraEstado(marco, esc)
-    tira.pack(fill="x", pady=esc.px(6))
-    tira.pintar(ui.TENUE, "Servidor: consultando...")
+        self.nav = ui.Navegador([[t_stream, t_control], [t_servidor, t_cliente], [t_info, t_salir]])
 
-    # 2x2 (las de jugar arriba, configuracion abajo) y una fila de abajo con Info y Salir.
-    f1 = ui.fila(marco, esc)
-    t_stream = ui.Mosaico(f1, esc, iconos, "play", "Streaming",
-                          "Video y audio de la consola, mas el control.", ui.AZUL,
-                          on_a=lambda: elegir("streaming"), tam_titulo=32, tam_detalle=16)
-    t_control = ui.Mosaico(f1, esc, iconos, "gamepad", "Solo control",
-                           "La Deck es nada mas el mando, con la pantalla apagada.", ui.VERDE,
-                           on_a=lambda: elegir("control"), tam_titulo=32, tam_detalle=16)
-    ui.disponer(f1, [t_stream, t_control], esc)
+        tk.Label(marco, font=esc.fuente(13), bg=ui.FONDO, fg=ui.TENUE,
+                 text=("Cruceta/stick para moverte, confirma con A, cancela con B, info con Y."
+                       if app.mando.ok else "Toca la pantalla para elegir.")
+                      + "   (el tactil siempre funciona)").pack(pady=(esc.px(4), 0))
 
-    f2 = ui.fila(marco, esc)
-    t_servidor = ui.Mosaico(f2, esc, iconos, "server", "Configurar servidor",
-                            "Modo de captura y estado de la PC Windows, en remoto.", ui.MORADO,
-                            on_a=lambda: elegir("config_servidor"), tam_titulo=32, tam_detalle=16)
-    t_cliente = ui.Mosaico(f2, esc, iconos, "settings", "Configurar cliente",
-                           "Variables de latencia de esta Deck (VSYNC, watchdog, etc.).", ui.NARANJA,
-                           on_a=lambda: elegir("config_cliente"), tam_titulo=32, tam_detalle=16)
-    ui.disponer(f2, [t_servidor, t_cliente], esc)
+    def abrir_info(self):
+        self.app.abrir(ui.PantallaInfo(self.app))
 
-    info = {"v": None}
+    def elegir_streaming(self):
+        # Antes de streaming (2026-09-11): confirma con el servidor que esta listo. Si no, el mensaje
+        # sale en la tira de arriba (ya no en una ventana emergente) y se queda en el menu.
+        self.tira.pintar(ui.TENUE, "Verificando el servidor...")
+        self.app.root.update_idletasks()
+        ok, mensaje = verificar_servidor_listo()
+        if not ok:
+            self.tira.pintar(ui.AVISO, "No se puede iniciar streaming: " + mensaje.replace("\n\n", "  "))
+            return
+        self.app.terminar("streaming")
 
-    def mostrar_info():
-        if info["v"] is None or not info["v"].abierta:
-            info["v"] = ui.VentanaInfo(root, esc, iconos)
+    def al_mostrar(self):
+        self.consultar_estado()
 
-    f3 = ui.fila(marco, esc, expandir=False)
-    t_info = ui.Mosaico(f3, esc, iconos, "info", "Info: colores del ESP32-S3", "Y", ui.GRIS,
-                        on_a=mostrar_info, tam_titulo=20, tam_detalle=13, tam_icono=40,
-                        horizontal=True, alto=esc.px(84))
-    t_salir = ui.Mosaico(f3, esc, iconos, "exit", "Salir", "B o Escape", ui.ROJO_OSCURO,
-                         on_a=cerrar_ventana, tam_titulo=20, tam_detalle=13, tam_icono=40,
-                         horizontal=True, alto=esc.px(84))
-    ui.disponer(f3, [t_info, t_salir], esc)
+    def consultar_estado(self):
+        """Estado del servidor en un hilo aparte (la consulta UDP tarda hasta 3 s si no responde)."""
+        self._consulta += 1
+        mia = self._consulta
+        self.tira.pintar(ui.TENUE, "Servidor: consultando...")
+        fondo = {"listo": False, "wifi": None, "ip": None, "resp": None}
 
-    nav = ui.Navegador([[t_stream, t_control], [t_servidor, t_cliente], [t_info, t_salir]])
-
-    mando = Mando()
-    tk.Label(marco, font=esc.fuente(13), bg=ui.FONDO, fg=ui.TENUE,
-             text=("Cruceta/stick para moverte, confirma con A, cancela con B, info con Y."
-                   if mando.ok else "Toca la pantalla para elegir.")
-                  + "   (el tactil siempre funciona)").pack(pady=(esc.px(4), 0))
-
-    root.bind("<Left>", lambda e: nav.mover(-1, 0))
-    root.bind("<Right>", lambda e: nav.mover(1, 0))
-    root.bind("<Up>", lambda e: nav.mover(0, -1))
-    root.bind("<Down>", lambda e: nav.mover(0, 1))
-    root.bind("<Tab>", lambda e: nav.mover(1, 0))
-    root.bind("<Return>", lambda e: nav.activar())
-    root.bind("<space>", lambda e: nav.activar())
-    root.bind("<y>", lambda e: mostrar_info())
-    root.bind("<Y>", lambda e: mostrar_info())
-    root.bind("<Escape>", lambda e: cerrar_ventana())
-
-    # --- estado del servidor, en un hilo aparte (la consulta UDP tarda hasta 3 s si no responde) ---
-    fondo = {"listo": False, "wifi": None, "ip": None, "resp": None}
-
-    def consultar_en_fondo():
-        try:
-            fondo["wifi"] = obtener_red_wifi()
-        except Exception:
-            pass
-        fondo["ip"] = leer_ip_servidor_guardada()
-        if fondo["ip"]:
+        def trabajo():
             try:
-                fondo["resp"] = obtener_config(fondo["ip"])
-            except Exception as e:
-                fondo["resp"] = (False, str(e))
-        fondo["listo"] = True
+                fondo["wifi"] = obtener_red_wifi()
+            except Exception:
+                pass
+            fondo["ip"] = leer_ip_servidor_guardada()
+            if fondo["ip"]:
+                try:
+                    fondo["resp"] = obtener_config(fondo["ip"])
+                except Exception as e:
+                    fondo["resp"] = (False, str(e))
+            fondo["listo"] = True
 
-    threading.Thread(target=consultar_en_fondo, daemon=True).start()
+        threading.Thread(target=trabajo, daemon=True).start()
 
-    def revisar_fondo():
-        if cerrado["v"]:
-            return
-        if not fondo["listo"]:
-            root.after(150, revisar_fondo)
-            return
-        partes = []
-        if ip_local:
-            partes.append(f"IP: {ip_local}")
-        if fondo["wifi"]:
-            partes.append(f"Red: {fondo['wifi']}")
-        lbl_red.configure(text="   ·   ".join(partes))
-        color, texto = _texto_estado_servidor(fondo["ip"], fondo["resp"], ip_local)
-        tira.pintar(color, texto)
-
-    root.after(150, revisar_fondo)
-
-    def revisar_mando():
-        for nombre in mando.nuevos():
-            # Mientras la ventana de info esta abierta, el mando solo la cierra (B o A) - todo lo
-            # demas (mover el foco) es del menu de atras y no deberia colar mientras se lee.
-            if info["v"] is not None and info["v"].abierta:
-                info["v"].tecla(nombre)
-                continue
-            if nombre == "DPAD_LEFT":
-                nav.mover(-1, 0)
-            elif nombre == "DPAD_RIGHT":
-                nav.mover(1, 0)
-            elif nombre == "DPAD_UP":
-                nav.mover(0, -1)
-            elif nombre == "DPAD_DOWN":
-                nav.mover(0, 1)
-            elif nombre == "A":
-                nav.activar()
-            elif nombre == "Y":
-                mostrar_info()
-            elif nombre == "B":
-                cerrar_ventana()
-            # OJO (2026-09-13): si activar() destruyo la ventana (elegir una tarjeta real) hay que
-            # dejar de re-programar el bucle; si solo abrio la info, el bucle DEBE seguir vivo o el
-            # mando se queda mudo ("no funciona la navegacion, solo el touch").
-            if cerrado["v"]:
+        def revisar():
+            if self.app.cerrado or mia != self._consulta:
                 return
-        # 40 ms: bastante fino para que no se sienta pegajoso y lo bastante
-        # espaciado para no gastar CPU en un menu.
-        root.after(40, revisar_mando)
+            if not fondo["listo"]:
+                self.app.root.after(150, revisar)
+                return
+            try:
+                partes = []
+                if self.ip_local:
+                    partes.append(f"IP: {self.ip_local}")
+                if fondo["wifi"]:
+                    partes.append(f"Red: {fondo['wifi']}")
+                self.lbl_red.configure(text="   ·   ".join(partes))
+                color, texto = _texto_estado_servidor(fondo["ip"], fondo["resp"], self.ip_local)
+                self.tira.pintar(color, texto)
+            except Exception:
+                pass  # la pantalla ya se cerro
 
-    root.after(40, revisar_mando)
-    root.mainloop()
+        self.app.root.after(150, revisar)
 
-    return eleccion["modo"]
+    def tecla(self, nombre):
+        if nombre == "DPAD_LEFT":
+            self.nav.mover(-1, 0)
+        elif nombre == "DPAD_RIGHT":
+            self.nav.mover(1, 0)
+        elif nombre == "DPAD_UP":
+            self.nav.mover(0, -1)
+        elif nombre == "DPAD_DOWN":
+            self.nav.mover(0, 1)
+        elif nombre == "A":
+            self.nav.activar()
+        elif nombre == "Y":
+            self.abrir_info()
+        elif nombre == "B":
+            self.app.terminar(None)
 
 
 def verificar_servidor_listo():
@@ -272,44 +256,15 @@ def verificar_servidor_listo():
 
 
 def main():
-    # Bucle (2026-09-11): "Configurar servidor"/"Configurar cliente" abren su
-    # propia pantalla y, al cerrarse, vuelven aca en vez de salir - por eso
-    # esto ya no es un tiro unico como streaming/control (que SI terminan el
-    # programa, imprimiendo la eleccion para que la lea start_client_stream.sh).
-    while True:
-        modo = mostrar_menu()
-
-        if modo is None:
-            return 1
-
-        if modo == "config_servidor":
-            import client_server_config
-            try:
-                client_server_config.main()
-            except Exception as e:
-                print(f"pantalla de config del servidor fallo: {e}", file=sys.stderr)
-            continue
-
-        if modo == "config_cliente":
-            import client_settings
-            try:
-                client_settings.main()
-            except Exception as e:
-                print(f"pantalla de config del cliente fallo: {e}", file=sys.stderr)
-            continue
-
-        if modo == "streaming":
-            ok, mensaje = verificar_servidor_listo()
-            if not ok:
-                try:
-                    from tkinter import messagebox
-                    messagebox.showwarning("Remote Play", mensaje)
-                except Exception as e:
-                    print(f"aviso de servidor no listo: {mensaje} ({e})", file=sys.stderr)
-                continue
-
-        print(modo)
-        return 0
+    # Una sola ventana y un solo Mando para toda la sesion (ver la nota arriba). Streaming/control
+    # terminan el programa imprimiendo la eleccion para que la lea start_client_stream.sh.
+    app = ui.App("Remote Play", Mando())
+    app.abrir_inicial(PantallaMenu(app))
+    modo = app.ejecutar()
+    if modo is None:
+        return 1
+    print(modo)
+    return 0
 
 
 if __name__ == "__main__":
