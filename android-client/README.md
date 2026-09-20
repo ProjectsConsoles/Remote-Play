@@ -46,8 +46,14 @@ transmitir o transmitiendo a otra IP.
 - **Tocar la pantalla** durante el streaming muestra/oculta las estadísticas
   (paquetes/s, cuadros dentro/fuera/tirados, errores del decodificador, Hz del
   mando, botones y sticks en vivo). Es lo primero que hay que mirar si algo falla.
-- Los menús se navegan con el mando: cruceta/stick para mover el foco, A para
-  activar, B para volver.
+- Todos los menús son mosaicos y se navegan con el mando: cruceta/stick para
+  mover el foco (borde blanco), A para activar, B para volver. En *Configurar
+  cliente*, los mosaicos de lista (imagen, Hz, botón PS, zona muerta, segundos
+  sin video) pasan al siguiente valor con cada toque; los de IP y puertos abren
+  un cuadro para escribirlos. Todo se guarda al instante.
+- La app va en **pantalla completa** (sin barra de estado ni de navegación;
+  deslizar desde el borde las muestra un momento). La primera vez, Android
+  muestra un aviso "Viewing full screen" que se cierra con "Entendido".
 
 ### Ajustes del cliente
 

@@ -1,50 +1,76 @@
 package com.projectsconsoles.remoteplay
 
+import android.graphics.Color
 import android.os.Bundle
-import android.view.Gravity
+import android.view.ViewGroup
 import android.widget.LinearLayout
+import android.widget.ScrollView
 
-/** Colores del LED del ESP32-S3 (selector de modo). Los mismos que la pantalla de la Deck. */
+/** Colores del LED del ESP32-S3 (selector de modo): cuatro mosaicos, cada uno del color real del LED. */
 class InfoActivity : PantallaActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val p = Ui.Pantalla(this)
-        p.agregar(Ui.titulo(this, "Selector de modo del ESP32-S3"))
-        p.agregar(
+        val compacto = resources.configuration.screenHeightDp < 500
+        val margen = Ui.dp(this, if (compacto) 10 else 20)
+
+        val raiz = LinearLayout(this)
+        raiz.orientation = LinearLayout.VERTICAL
+        raiz.clipChildren = false
+        raiz.clipToPadding = false
+        raiz.setPadding(margen, margen, margen, margen)
+        raiz.addView(Ui.cabecera(this, "Selector de modo del ESP32-S3", "", compacto))
+        raiz.addView(
             Ui.texto(
                 this,
                 "Con la placa ya encendida (nunca al conectarla o resetearla), mantén BOOT ~1.5 s. " +
                     "El LED cicla de color cada ~0.7 s; suelta el botón en el color que corresponda.",
+                Ui.TENUE, if (compacto) 12f else 16f,
             ),
         )
 
-        val colores = listOf(
-            Triple(0xFFD4B106.toInt(), "Amarillo", "PS3"),
-            Triple(0xFF2D6CDF.toInt(), "Azul", "PS2 / OPL"),
-            Triple(0xFF8E5FD6.toInt(), "Morado", "Xbox 360"),
-            Triple(0xFF2FA84F.toInt(), "Verde", "Xbox clásico"),
+        val oscuro = 0xFF1B1B1B.toInt()
+        val tam = if (compacto) 20f else 30f
+        fun led(color: Int, nombre: String, consola: String, texto: Int = Color.WHITE) =
+            Ui.mosaico(this, R.drawable.ic_gamepad, nombre, consola, color, compacto, texto, interactivo = false, tamTitulo = tam)
+
+        raiz.addView(
+            Ui.cuadricula(
+                this, compacto,
+                listOf(
+                    listOf(
+                        led(0xFFD4B106.toInt(), "Amarillo", "PS3", oscuro),
+                        led(0xFF2D6CDF.toInt(), "Azul", "PS2 / OPL"),
+                        led(0xFF8E5FD6.toInt(), "Morado", "Xbox 360"),
+                        led(0xFF2FA84F.toInt(), "Verde", "Xbox clásico"),
+                    ),
+                ),
+            ),
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
         )
-        for ((color, nombre, consola) in colores) {
-            val fila = LinearLayout(this)
-            fila.orientation = LinearLayout.HORIZONTAL
-            fila.gravity = Gravity.CENTER_VERTICAL
-            fila.setPadding(0, Ui.dp(this, 10), 0, Ui.dp(this, 10))
-            fila.addView(Ui.puntoDeColor(this, color))
-            val textos = LinearLayout(this)
-            textos.orientation = LinearLayout.VERTICAL
-            textos.setPadding(Ui.dp(this, 18), 0, 0, 0)
-            textos.addView(Ui.texto(this, nombre, Ui.TEXTO, 20f))
-            textos.addView(Ui.texto(this, consola, Ui.TENUE, 16f))
-            fila.addView(textos)
-            p.agregar(fila)
-        }
+        raiz.addView(
+            Ui.texto(this, "El modo elegido queda guardado en la placa hasta que se cambie a mano.", Ui.TENUE, if (compacto) 12f else 15f),
+        )
+        val pie = LinearLayout(this)
+        pie.orientation = LinearLayout.HORIZONTAL
+        val volver = Ui.botonIcono(this, R.drawable.ic_back, "Volver", 0xFF2A3441.toInt()) { finish() }
+        pie.addView(volver)
+        raiz.addView(
+            pie,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                .also { it.topMargin = Ui.dp(this, 4) },
+        )
 
-        p.agregar(Ui.texto(this, "El modo elegido queda guardado en la placa hasta que se cambie a mano."))
-        val volver = p.agregar(Ui.boton(this, "Volver", 0xFF2A3441.toInt()) { finish() })
-
-        setContentView(p.raiz)
+        val scroll = ScrollView(this)
+        scroll.isFillViewport = true
+        scroll.clipChildren = false
+        scroll.clipToPadding = false
+        scroll.addView(
+            raiz,
+            ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+        )
+        setContentView(scroll)
         volver.requestFocus()
     }
 }

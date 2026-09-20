@@ -1,92 +1,113 @@
 package com.projectsconsoles.remoteplay
 
 import android.os.Bundle
-import android.widget.EditText
+import android.view.ViewGroup
+import android.widget.LinearLayout
 
-/** Ajustes de esta tableta. Se guardan solos al salir de la pantalla. */
+/**
+ * Ajustes de esta tableta en mosaicos (3x3, sin scroll). Los de lista (imagen, Hz, boton PS...) cambian
+ * al siguiente valor con un toque o A; IP y puertos abren un cuadro para escribirlos. Todo se guarda
+ * al instante.
+ */
 class ClientConfigActivity : PantallaActivity() {
 
     private lateinit var prefs: Prefs
-    private lateinit var campoEsp32: EditText
-    private lateinit var campoPuertoEsp32: EditText
-    private lateinit var campoPuertoVideo: EditText
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
 
-        val p = Ui.Pantalla(this)
-        p.agregar(Ui.titulo(this, "Configurar cliente"))
+        val compacto = resources.configuration.screenHeightDp < 500
+        val margen = Ui.dp(this, if (compacto) 10 else 20)
+        val azul = 0xFF2D6CDF.toInt()
+        val naranja = 0xFFC07D2F.toInt()
+        val verde = 0xFF3F8F4A.toInt()
+        val morado = 0xFF8E5FD6.toInt()
 
-        p.agregar(Ui.texto(this, "IP del ESP32-S3 (el que emula el control)"))
-        campoEsp32 = p.agregar(Ui.campo(this, prefs.esp32Ip, soloIp = true))
+        val raiz = LinearLayout(this)
+        raiz.orientation = LinearLayout.VERTICAL
+        raiz.clipChildren = false
+        raiz.clipToPadding = false
+        raiz.setPadding(margen, margen, margen, margen)
+        raiz.addView(
+            Ui.cabecera(this, "Configurar cliente", "Salir del streaming: L1 + R1 + SELECT + START", compacto),
+        )
 
-        p.agregar(Ui.texto(this, "Puerto del ESP32 (por defecto 9000)"))
-        campoPuertoEsp32 = p.agregar(Ui.campo(this, prefs.esp32Puerto.toString(), soloNumero = true))
+        val ip = Ui.mosaicoTexto(
+            this, R.drawable.ic_wifi, "IP del ESP32-S3", prefs.esp32Ip, azul, compacto, esIp = true,
+        ) { v -> Ui.ipValida(v).also { if (it) prefs.esp32Ip = v } }
 
-        p.agregar(Ui.texto(this, "Puerto donde llega el video (por defecto 5000)"))
-        campoPuertoVideo = p.agregar(Ui.campo(this, prefs.puertoVideo.toString(), soloNumero = true))
+        val puertoEsp = Ui.mosaicoTexto(
+            this, R.drawable.ic_port, "Puerto del ESP32", prefs.esp32Puerto.toString(), azul, compacto, esIp = false,
+        ) { v -> puerto(v)?.let { prefs.esp32Puerto = it; true } ?: false }
 
-        p.agregar(
-            Ui.opcion(
-                this, "Ajuste de imagen",
+        val puertoVideo = Ui.mosaicoTexto(
+            this, R.drawable.ic_play, "Puerto de video", prefs.puertoVideo.toString(), azul, compacto, esIp = false,
+        ) { v -> puerto(v)?.let { prefs.puertoVideo = it; true } ?: false }
+
+        val imagen = Ui.mosaicoCiclo(
+            this, R.drawable.ic_image, "Ajuste de imagen",
+            listOf("barras" to "Barras negras", "estirar" to "Estirar", "zoom" to "Llenar recortando"),
+            { prefs.ajusteImagen }, naranja, compacto,
+        ) { prefs.ajusteImagen = it }
+
+        val hz = Ui.mosaicoCiclo(
+            this, R.drawable.ic_speed, "Frecuencia del mando",
+            listOf(60, 90, 120, 180, 250).map { it.toString() to "$it Hz" },
+            { prefs.frecuenciaMando.toString() }, verde, compacto,
+        ) { prefs.frecuenciaMando = it.toInt() }
+
+        val botonPs = Ui.mosaicoCiclo(
+            this, R.drawable.ic_gamepad, "Botón PS (acorde)",
+            listOf(
+                "SELECT+R1" to "SELECT + R1",
+                "SELECT+L1" to "SELECT + L1",
+                "SELECT+START" to "SELECT + START",
+                "none" to "Ninguno (solo Guía)",
+            ),
+            { prefs.acordePs }, verde, compacto,
+        ) { prefs.acordePs = it }
+
+        val zona = Ui.mosaicoCiclo(
+            this, R.drawable.ic_tune, "Zona muerta de sticks",
+            listOf("nada" to "Ninguna", "medio" to "Media (6 %)", "alta" to "Alta (12 %)"),
+            { prefs.zonaMuerta }, verde, compacto,
+        ) { prefs.zonaMuerta = it }
+
+        val sinVideo = Ui.mosaicoCiclo(
+            this, R.drawable.ic_timer, "Cerrar si no hay video en",
+            listOf(15, 25, 40, 60, 120).map { it.toString() to "$it s" },
+            { prefs.segundosSinVideo.toString() }, morado, compacto,
+        ) { prefs.segundosSinVideo = it.toInt() }
+
+        val volver = Ui.mosaico(
+            this, R.drawable.ic_back, "Volver", "Todo se guarda solo", 0xFF2A3441.toInt(), compacto,
+            tamTitulo = if (compacto) 15f else 22f,
+        ) { finish() }
+
+        raiz.addView(
+            Ui.cuadricula(
+                this, compacto,
                 listOf(
-                    "barras" to "barras negras (sin deformar)",
-                    "estirar" to "estirar a toda la pantalla",
-                    "zoom" to "llenar recortando bordes",
+                    listOf(ip, puertoEsp, puertoVideo),
+                    listOf(imagen, hz, botonPs),
+                    listOf(zona, sinVideo, volver),
                 ),
-                prefs.ajusteImagen,
-            ) { prefs.ajusteImagen = it },
+            ),
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
         )
 
-        p.agregar(
-            Ui.opcion(
-                this, "Frecuencia del mando",
-                listOf(60, 90, 120, 180, 250).map { it.toString() to "$it Hz" },
-                prefs.frecuenciaMando.toString(),
-            ) { prefs.frecuenciaMando = it.toInt() },
+        val scroll = android.widget.ScrollView(this)
+        scroll.isFillViewport = true
+        scroll.clipChildren = false
+        scroll.clipToPadding = false
+        scroll.addView(
+            raiz,
+            ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
-
-        p.agregar(
-            Ui.opcion(
-                this, "Botón PS (acorde)",
-                listOf(
-                    "SELECT+R1" to "SELECT + R1",
-                    "SELECT+L1" to "SELECT + L1",
-                    "SELECT+START" to "SELECT + START",
-                    "none" to "ninguno (solo el botón Home/Guía del mando)",
-                ),
-                prefs.acordePs,
-            ) { prefs.acordePs = it },
-        )
-
-        p.agregar(
-            Ui.opcion(
-                this, "Zona muerta de los sticks",
-                listOf("nada" to "ninguna", "medio" to "media (6 %)", "alta" to "alta (12 %)"),
-                prefs.zonaMuerta,
-            ) { prefs.zonaMuerta = it },
-        )
-
-        p.agregar(
-            Ui.opcion(
-                this, "Cerrar si no hay video en",
-                listOf(15, 25, 40, 60, 120).map { it.toString() to "$it s" },
-                prefs.segundosSinVideo.toString(),
-            ) { prefs.segundosSinVideo = it.toInt() },
-        )
-
-        p.agregar(Ui.texto(this, "Salir del streaming: L1 + R1 + SELECT + START a la vez."))
-        p.agregar(Ui.boton(this, "Guardar y volver", 0xFF3F8F4A.toInt()) { finish() })
-
-        setContentView(p.raiz)
+        setContentView(scroll)
+        ip.requestFocus()
     }
 
-    override fun onPause() {
-        super.onPause()
-        val ip = campoEsp32.text.toString().trim()
-        if (ip.isNotEmpty()) prefs.esp32Ip = ip
-        campoPuertoEsp32.text.toString().toIntOrNull()?.takeIf { it in 1..65535 }?.let { prefs.esp32Puerto = it }
-        campoPuertoVideo.text.toString().toIntOrNull()?.takeIf { it in 1..65535 }?.let { prefs.puertoVideo = it }
-    }
+    private fun puerto(s: String): Int? = s.toIntOrNull()?.takeIf { it in 1..65535 }
 }
