@@ -29,6 +29,47 @@ por USB. No es un emulador: la consola sigue siendo la real.
     +---------- USB (control emulado) ---- ESP32-S3 <--UDP-- (estado del control)
 ```
 
+## Capturas
+
+Todos los clientes y la ventana del servidor comparten el mismo estilo de
+mosaicos, con foco animado y transición deslizante entre pantallas.
+
+### Tableta Android
+
+<p>
+  <img src="docs/capturas/android-menu.png" width="49%" alt="Menú principal de Android">
+  <img src="docs/capturas/android-servidor.png" width="49%" alt="Configurar servidor en Android">
+</p>
+<p>
+  <img src="docs/capturas/android-cliente.png" width="49%" alt="Configurar cliente en Android">
+  <img src="docs/capturas/android-info.png" width="49%" alt="Colores del ESP32 en Android">
+</p>
+
+<sub>Capturas del emulador de Android con un servidor simulado (por eso las IP
+`10.0.2.x`).</sub>
+
+### ROG Ally X
+
+<p>
+  <img src="docs/capturas/ally-menu.png" width="49%" alt="Menú principal de la Ally">
+  <img src="docs/capturas/ally-servidor.png" width="49%" alt="Configurar servidor en la Ally">
+</p>
+<p>
+  <img src="docs/capturas/ally-cliente.png" width="49%" alt="Configurar cliente en la Ally">
+  <img src="docs/capturas/ally-info.png" width="49%" alt="Colores del ESP32 en la Ally">
+</p>
+
+<sub>La interfaz de la Ally dibujada a 1920×1080 con el mismo código del cliente
+(datos simulados).</sub>
+
+### Servidor (PC con Windows)
+
+<p align="center">
+  <img src="docs/capturas/servidor-ventana.png" width="60%" alt="Ventana del servidor">
+</p>
+
+<sub>La ventana real del servidor, con el estado real de la transmisión.</sub>
+
 ## Estructura del repo
 
 - **`deck-client/`** — cliente Steam Deck (pygame + GStreamer, o `ffplay`), firmware del
