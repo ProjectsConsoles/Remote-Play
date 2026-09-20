@@ -72,10 +72,22 @@ ahi para que funcione tambien desde la Ally.
   mismo patron "solo si no esta puesta" que la Deck: una variable de entorno
   puesta a mano (acceso directo/`.bat`) sigue ganando sobre lo guardado aca.
 
-Navegable por completo con el mando: cruceta mueve el foco, izquierda/derecha
-cambia el valor, A confirma/edita (Enter en teclado), X restaura los
-defaults, Y guarda, B vuelve al menu. **Sin probar contra hardware real**
-(mismo estado que el resto de este cliente - ver "Lo que falta verificar").
+**Interfaz en mosaicos con icono y transicion deslizante (2026-09-20).** El menu
+y sus pantallas usan el mismo estilo que el cliente Android y la Deck
+(`src/ui_pygame.py`): mosaicos redondeados con icono, una tira de estado del
+servidor arriba del menu, y una sola ventana donde abrir una pantalla la desliza
+de derecha a izquierda y volver la desliza de izquierda a derecha (0.32 s). Los
+iconos estan en `iconos/` (PNG; ver "Recompilar").
+
+Navegable por completo con el mando: la cruceta mueve el foco entre mosaicos, A
+activa (en un texto o numero abre un cuadro para escribirlo; Enter en teclado),
+B vuelve. En **Configurar cliente**, L1 / R1 = valor anterior / siguiente (en los
+numeros, -1 / +1), X restaura los defaults (sin guardar todavia) e Y guarda. En
+**Configurar servidor** los atajos son los de siempre de la Ally: A aplica (sobre
+un modo), X consulta, Y manda la IP, L1 reinicia el servidor y R1 lo apaga; tocar
+un modo solo lo elige. **Sin probar contra hardware real** (mismo estado que el
+resto de este cliente - ver "Lo que falta verificar"); la interfaz se reviso
+renderizada fuera de pantalla a 1280x720 y 1920x1080.
 
 ## Diferencias de arquitectura contra la Deck (y por que)
 
@@ -187,14 +199,23 @@ reinstalar nada):
 
 ```powershell
 cd C:\ps3rp-build\src
-# copiar aca los .py actualizados, despues:
+# copiar aca los .py actualizados (main_client.py, ui_pygame.py, gamepad_common.py,
+# server_udp.py, brightness_win.py, wifi_power.py) y la carpeta iconos\ de este repo
+# (rog-ally-client\iconos), despues:
 C:\ps3rp-build\python\python.exe -m PyInstaller --noconfirm --onefile --windowed `
     --name "RemotePlay_Ally" `
     --distpath "C:\ps3rp-build\dist" `
     --workpath "C:\ps3rp-build\pyibuild" `
     --specpath "C:\ps3rp-build" `
+    --add-data "C:\ps3rp-build\src\iconos;iconos" `
     main_client.py
 ```
+
+`--add-data` empaqueta los iconos dentro del .exe (2026-09-20). Ademas, la app
+los busca en una carpeta `iconos\` junto al .exe: copiarla ahi tambien es un
+respaldo por si el empaquetado fallara (sin iconos la interfaz sigue funcionando,
+solo que sin dibujitos). `ui_pygame.py` no hay que pasarlo aparte: PyInstaller lo
+detecta por el `import`.
 
 El .exe nuevo queda en `C:\ps3rp-build\dist\RemotePlay_Ally.exe`; copiarlo
 a esta carpeta (`ROG Ally Windows Client\`) para reemplazar el viejo.
