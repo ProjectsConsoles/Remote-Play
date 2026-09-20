@@ -13,9 +13,15 @@ Los nombres, defaults y el "por que" de cada perilla son los mismos que
 documenta OPCIONES.md - esta pantalla no inventa comportamiento nuevo, solo
 le da una forma mas comoda de tocarlas que editar texto.
 
-No hay suficiente pantalla para 18 variables sin scroll: se arma con un
-Canvas + Frame desplazable. La edicion de texto es con teclado/tactil (no
-hay teclado en pantalla para el mando); el mando solo mueve el scroll.
+Estilo (2026-09-20): mosaicos con icono, igual que el cliente Android (las piezas
+visuales viven en ui_mosaicos.py). Las 18 variables no caben sin scroll: los mosaicos
+van de 3 en 3, agrupados por seccion, y la lista se desplaza sola al bajar con la
+cruceta. Cada mosaico muestra el VALOR; la descripcion larga de la variable sale en la
+linea de ayuda de abajo cuando el mosaico tiene el foco.
+
+Manejo:  cruceta = mover el foco;  A = cambiar (sobre un texto o numero abre un cuadro
+para escribirlo, con teclado/tactil);  L1 / R1 = valor anterior / siguiente (en los
+numeros, -1 / +1);  B = volver.
 """
 
 import os
@@ -23,13 +29,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from deck_gamepad import Mando  # noqa: E402
-
-FONDO = "#101014"
-PANEL = "#181c28"
-TEXTO = "#e8e8ea"
-TENUE = "#8a8a95"
-VERDE = "#3f8f4a"
-AZUL = "#2d6cdf"
+import ui_mosaicos as ui  # noqa: E402
 
 ARCHIVO_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "client_config.env")
 
@@ -120,47 +120,53 @@ def guardar(valores: dict):
         f.write("\n".join(lineas) + "\n")
 
 
+
+# Icono y color de los mosaicos de cada seccion (los mismos colores que el resto de menus).
+ESTILO_SECCION = {
+    "Pantalla": ("image", ui.NARANJA),
+    "Control remoto (ESP32 -> PS3)": ("gamepad", ui.VERDE),
+    "Video y latencia": ("play", ui.AZUL),
+    "Watchdog de atasco de video": ("timer", ui.MORADO),
+    "Diagnostico": ("info", ui.GRIS),
+}
+COLUMNAS = 3
+
+
 def main():
     import tkinter as tk
-    from tkinter import font as tkfont
 
     root = tk.Tk()
     root.title("Configurar cliente")
-    root.configure(bg=FONDO)
-    try:
-        root.attributes("-fullscreen", True)
-    except Exception:
-        root.geometry("900x600")
+    root.configure(bg=ui.FONDO)
+    esc = ui.Escala(ui.configurar_ventana(root))
+    iconos = ui.Iconos()
+    cerrado = {"v": False}
+    estado = {"dialogo": None}
 
-    f_titulo = tkfont.Font(family="DejaVu Sans", size=22, weight="bold")
-    f_seccion = tkfont.Font(family="DejaVu Sans", size=14, weight="bold")
-    f_label = tkfont.Font(family="DejaVu Sans", size=12)
-    f_ayuda = tkfont.Font(family="DejaVu Sans", size=10)
-    f_entry = tkfont.Font(family="DejaVu Sans", size=12)
-    f_boton = tkfont.Font(family="DejaVu Sans", size=14, weight="bold")
-    f_pie = tkfont.Font(family="DejaVu Sans", size=11)
+    def salir():
+        cerrado["v"] = True
+        root.destroy()
 
-    tk.Label(root, text="Configurar cliente", font=f_titulo,
-             bg=FONDO, fg=TEXTO).pack(pady=(18, 2))
-    tk.Label(root, text="Variables de latencia del cliente (Deck). Vacio = usar el default.",
-             font=f_ayuda, bg=FONDO, fg=TENUE).pack(pady=(0, 10))
+    marco = tk.Frame(root, bg=ui.FONDO, padx=esc.px(24), pady=esc.px(16))
+    marco.pack(fill="both", expand=True)
+    cab, _ = ui.cabecera(marco, esc, "Configurar cliente", "Vacío = usar el default")
+    cab.pack(fill="x")
+    tira = ui.TiraEstado(marco, esc, alto=46)
+    tira.pack(fill="x", pady=esc.px(6))
+    AYUDA_GENERAL = "Cruceta: mover · A: cambiar · L1/R1: anterior / siguiente · B: volver"
+    tira.pintar(ui.TENUE, AYUDA_GENERAL)
 
     # --- area con scroll ---
-    contenedor = tk.Frame(root, bg=FONDO)
-    contenedor.pack(fill="both", expand=True, padx=20)
-
-    canvas = tk.Canvas(contenedor, bg=FONDO, highlightthickness=0)
-    scrollbar = tk.Scrollbar(contenedor, orient="vertical", command=canvas.yview)
-    interior = tk.Frame(canvas, bg=FONDO)
-
+    contenedor = tk.Frame(marco, bg=ui.FONDO)
+    contenedor.pack(fill="both", expand=True)
+    canvas = tk.Canvas(contenedor, bg=ui.FONDO, highlightthickness=0)
+    scrollbar = tk.Scrollbar(contenedor, orient="vertical", command=canvas.yview, width=esc.px(16),
+                             bg=ui.GRIS, troughcolor=ui.FONDO, relief="flat", bd=0)
+    interior = tk.Frame(canvas, bg=ui.FONDO)
     interior.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
     ventana_interior = canvas.create_window((0, 0), window=interior, anchor="nw")
-    # Sin esto, "interior" solo mide lo que su contenido pide y las filas
-    # (fill="x") quedan angostas y pegadas a la izquierda dentro del canvas,
-    # con hueco vacio a la derecha - "no esta centrado, se ve a la
-    # izquierda" (reportado 2026-09-11). Igualando el ancho de la ventana
-    # interna al del canvas en cada resize, las filas ocupan todo el ancho
-    # real de la pantalla.
+    # Sin esto, "interior" solo mide lo que su contenido pide y las filas quedan angostas y pegadas
+    # a la izquierda dentro del canvas (reportado 2026-09-11): se iguala el ancho al del canvas.
     canvas.bind("<Configure>", lambda e: canvas.itemconfig(ventana_interior, width=e.width))
     canvas.configure(yscrollcommand=scrollbar.set)
     canvas.pack(side="left", fill="both", expand=True)
@@ -174,243 +180,201 @@ def main():
     canvas.bind_all("<Button-5>", lambda e: _scroll(1))
 
     guardado = leer_guardado()
-    widgets = {}   # variable -> (tipo, getter_callable)
-    filas_nav = []  # [{"frame":.., "on_left":fn, "on_right":fn, "on_a":fn}, ...] en orden visual
+    valores = {}        # variable -> texto guardable ("1"/"0", opcion del enum, o el texto/numero)
+    orden = []          # variables en el orden de CAMPOS (asi sale igual en client_config.env)
+    filas = []          # [(frame_de_la_fila, [mosaicos])] en orden visual
+    ayuda_de = {}       # mosaico -> texto largo para la linea de ayuda
 
-    def _cambiar_numero(entry, delta):
-        actual = entry.get().strip()
-        try:
-            base = int(actual) if actual else 0
-        except ValueError:
-            return
-        entry.delete(0, "end")
-        entry.insert(0, str(base + delta))
+    def abrir_cuadro(titulo, actual, al_aceptar):
+        estado["dialogo"] = ui.DialogoTexto(root, esc, titulo, actual, al_aceptar)
 
+    def crear_mosaico(padre, var, etiqueta, tipo, default, opciones, ayuda, icono, color):
+        valor = guardado.get(var, default)
+        if tipo == "bool":
+            valores[var] = "1" if valor == "1" else "0"
+        elif tipo == "enum":
+            valores[var] = valor if valor in opciones else opciones[0]
+        else:
+            valores[var] = valor
+        orden.append(var)
+
+        def visible():
+            v = valores[var]
+            if tipo == "bool":
+                return "SI" if v == "1" else "NO"
+            return v if v != "" else "(vacío)"
+
+        def color_actual():
+            if tipo == "bool":
+                return ui.VERDE if valores[var] == "1" else ui.GRIS
+            return color
+
+        t = ui.Mosaico(padre, esc, iconos, icono, visible(), etiqueta, color_actual(),
+                       tam_titulo=26, tam_detalle=14, tam_icono=40, alto=esc.px(150))
+
+        def refrescar():
+            t.titulo = visible()
+            t.poner_color(color_actual())
+
+        def cambiar_numero(delta):
+            actual = valores[var].strip()
+            try:
+                base = int(actual) if actual else 0
+            except ValueError:
+                return
+            valores[var] = str(base + delta)
+            refrescar()
+
+        def ciclar(paso):
+            i = opciones.index(valores[var]) if valores[var] in opciones else 0
+            valores[var] = opciones[(i + paso) % len(opciones)]
+            refrescar()
+
+        def alternar(_paso=1):
+            valores[var] = "0" if valores[var] == "1" else "1"
+            refrescar()
+
+        def editar():
+            def aceptar(texto):
+                valores[var] = texto
+                refrescar()
+            abrir_cuadro(etiqueta, valores[var], aceptar)
+
+        if tipo == "bool":
+            t.on_a = alternar
+            t.delta = alternar
+        elif tipo == "enum":
+            t.on_a = lambda: ciclar(1)
+            t.delta = ciclar
+        elif tipo == "numero":
+            t.on_a = editar
+            t.delta = cambiar_numero
+        else:
+            t.on_a = editar
+            t.delta = None
+        ayuda_de[t] = f"{etiqueta}: {ayuda}" if ayuda else etiqueta
+        return t
+
+    seccion_actual = None
+    fila_actual = None
     for campo in CAMPOS:
         var, etiqueta, tipo, default, opciones, ayuda = campo
-
         if var == "__SECCION__":
-            tk.Label(interior, text=etiqueta, font=f_seccion, bg=FONDO, fg=AZUL,
-                     anchor="w").pack(fill="x", pady=(16, 4))
+            icono, color = ESTILO_SECCION.get(etiqueta, ("settings", ui.AZUL))
+            rotulo = tk.Label(interior, text=etiqueta, font=esc.fuente(20, True), bg=ui.FONDO,
+                              fg=ui.TENUE if color == ui.GRIS else color, anchor="w")
+            rotulo.pack(fill="x", pady=(esc.px(14), esc.px(2)))
+            seccion_actual = {"icono": icono, "color": color, "rotulo": rotulo, "primera": True}
+            fila_actual = None
             continue
-
-        fila = tk.Frame(interior, bg=PANEL, padx=12, pady=8,
-                         highlightthickness=2, highlightbackground=PANEL)
-        fila.pack(fill="x", pady=3)
-
-        izq = tk.Frame(fila, bg=PANEL)
-        izq.pack(side="left", fill="x", expand=True)
-        tk.Label(izq, text=etiqueta, font=f_label, bg=PANEL, fg=TEXTO,
-                 anchor="w").pack(anchor="w")
-        if ayuda:
-            tk.Label(izq, text=ayuda, font=f_ayuda, bg=PANEL, fg=TENUE,
-                     anchor="w", wraplength=560, justify="left").pack(anchor="w")
-
-        valor_actual = guardado.get(var, default)
-
-        if tipo in ("texto", "numero"):
-            entry = tk.Entry(fila, font=f_entry, width=14, justify="center")
-            entry.insert(0, valor_actual)
-            entry.pack(side="right", padx=(10, 0))
-            widgets[var] = ("texto", lambda e=entry: e.get().strip())
-
-            nav = {"frame": fila, "on_a": lambda e=entry: e.focus_set()}
-            if tipo == "numero":
-                nav["on_left"] = lambda e=entry: _cambiar_numero(e, -1)
-                nav["on_right"] = lambda e=entry: _cambiar_numero(e, 1)
-            filas_nav.append(nav)
-
-        elif tipo == "bool":
-            estado = {"v": valor_actual == "1"}
-            btn = tk.Button(fila, font=f_boton, width=6, relief="flat", bd=0)
-
-            def refrescar(b=btn, e=estado):
-                b.configure(text="SI" if e["v"] else "NO",
-                            bg=VERDE if e["v"] else "#3a3a42",
-                            fg="#ffffff", activebackground=VERDE if e["v"] else "#3a3a42",
-                            activeforeground="#ffffff")
-
-            def alternar(e=estado, r=refrescar):
-                e["v"] = not e["v"]
-                r()
-
-            btn.configure(command=alternar)
-            refrescar()
-            btn.pack(side="right", padx=(10, 0))
-            widgets[var] = ("bool", lambda e=estado: ("1" if e["v"] else "0"))
-            filas_nav.append({"frame": fila, "on_a": alternar,
-                               "on_left": alternar, "on_right": alternar})
-
-        elif tipo == "enum":
-            estado = {"i": opciones.index(valor_actual) if valor_actual in opciones else 0}
-            btn = tk.Button(fila, font=f_boton, width=12, relief="flat", bd=0,
-                             bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55",
-                             activeforeground="#ffffff")
-
-            def refrescar(b=btn, e=estado, ops=opciones):
-                b.configure(text=ops[e["i"]])
-
-            def ciclar(paso, e=estado, ops=opciones, r=refrescar):
-                e["i"] = (e["i"] + paso) % len(ops)
-                r()
-
-            btn.configure(command=lambda c=ciclar: c(1))
-            refrescar()
-            btn.pack(side="right", padx=(10, 0))
-            widgets[var] = ("enum", lambda e=estado, ops=opciones: ops[e["i"]])
-            filas_nav.append({"frame": fila, "on_a": lambda c=ciclar: c(1),
-                               "on_left": lambda c=ciclar: c(-1),
-                               "on_right": lambda c=ciclar: c(1)})
+        if fila_actual is None or len(filas[-1][1]) >= COLUMNAS:
+            f = tk.Frame(interior, bg=ui.FONDO)
+            f.pack(fill="x")
+            filas.append((f, []))
+            fila_actual = f
+            primera_fila = seccion_actual["primera"]
+            seccion_actual["primera"] = False
+        t = crear_mosaico(filas[-1][0], var, etiqueta, tipo, default, opciones, ayuda,
+                          seccion_actual["icono"], seccion_actual["color"])
+        # al enfocarlo, la lista debe dejar visible tambien el titulo de su seccion si es la 1a fila
+        t.arriba = seccion_actual["rotulo"] if primera_fila and not filas[-1][1] else filas[-1][0]
+        filas[-1][1].append(t)
+    for f, tiles in filas:
+        ui.disponer(f, tiles, esc, columnas=COLUMNAS)
 
     # --- botones de accion, fijos abajo (fuera del scroll) ---
-    filaBotones = tk.Frame(root, bg=FONDO)
-    filaBotones.pack(pady=14)
-
-    lblEstado = tk.Label(root, text="", font=f_pie, bg=FONDO, fg=TENUE)
-    lblEstado.pack(pady=(0, 6))
-
     def guardar_todo():
-        valores = {var: getter() for var, (tipo, getter) in widgets.items()}
-        guardar(valores)
-        lblEstado.configure(text="Guardado. Se aplica la proxima vez que arranques streaming/control.",
-                             fg=VERDE)
+        guardar({var: valores[var] for var in orden})
+        tira.pintar(ui.OK, "Guardado. Se aplica la proxima vez que arranques streaming/control.")
 
     def restaurar_defaults():
-        for campo in CAMPOS:
-            var = campo[0]
-            if var == "__SECCION__" or var not in widgets:
-                continue
         try:
             os.remove(ARCHIVO_CONFIG)
         except FileNotFoundError:
             pass
-        root.destroy()
+        salir()
         main()  # reabre la pantalla limpia, releyendo (ya no hay archivo) los defaults
 
-    # highlightthickness/highlightbackground (2026-09-13, "quiero que TODOS
-    # los botones sean ejecutables [y focuseables]"): antes estos 3 botones
-    # solo se alcanzaban con mouse/tactil. Primer intento los agrego a
-    # filas_nav como si fueran una fila mas (arriba/abajo los recorria) -
-    # "no puedo navegar en ellos con izq/der, solo con arriba/abajo"
-    # (reportado el mismo dia): estan uno al lado del otro, no uno debajo
-    # del otro, asi que van en su PROPIA zona horizontal (botones_nav),
-    # igual que se hizo en client_server_config.py para sus botones.
-    btnGuardar = tk.Button(filaBotones, text="Guardar", font=f_boton, width=14, height=2,
-                            bg=AZUL, fg="#ffffff", activebackground=AZUL, activeforeground="#ffffff",
-                            relief="flat", bd=0, highlightthickness=3, highlightbackground=FONDO,
-                            command=guardar_todo)
-    btnGuardar.pack(side="left", padx=10)
-    btnRestaurar = tk.Button(filaBotones, text="Restaurar defaults", font=f_boton, width=18, height=2,
-                              bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55", activeforeground="#ffffff",
-                              relief="flat", bd=0, highlightthickness=3, highlightbackground=FONDO,
-                              command=restaurar_defaults)
-    btnRestaurar.pack(side="left", padx=10)
-    btnVolver = tk.Button(filaBotones, text="Volver", font=f_boton, width=10, height=2,
-                           bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55", activeforeground="#ffffff",
-                           relief="flat", bd=0, highlightthickness=3, highlightbackground=FONDO,
-                           command=root.destroy)
-    btnVolver.pack(side="left", padx=10)
+    f_pie = ui.fila(marco, esc, expandir=False)
+    t_guardar = ui.Mosaico(f_pie, esc, iconos, "check", "Guardar", "", ui.AZUL, on_a=guardar_todo,
+                           tam_titulo=22, tam_icono=40, horizontal=True, alto=esc.px(84))
+    t_restaurar = ui.Mosaico(f_pie, esc, iconos, "refresh", "Restaurar defaults", "", ui.GRIS,
+                             on_a=restaurar_defaults, tam_titulo=22, tam_icono=40,
+                             horizontal=True, alto=esc.px(84))
+    t_volver = ui.Mosaico(f_pie, esc, iconos, "back", "Volver", "", ui.GRIS, on_a=salir,
+                          tam_titulo=22, tam_icono=40, horizontal=True, alto=esc.px(84))
+    ui.disponer(f_pie, [t_guardar, t_restaurar, t_volver], esc)
+    ayuda_de[t_guardar] = "Guardar: escribe client_config.env; se aplica en el proximo arranque."
+    ayuda_de[t_restaurar] = "Restaurar defaults: borra client_config.env y reabre esta pantalla."
+    ayuda_de[t_volver] = "Volver al menu (lo no guardado se pierde)."
 
-    botones_nav = [
-        (btnGuardar, guardar_todo),
-        (btnRestaurar, restaurar_defaults),
-        (btnVolver, root.destroy),
-    ]
+    # --- linea de ayuda de la variable enfocada ---
+    lbl_ayuda = tk.Label(marco, text="", font=esc.fuente(14), bg=ui.FONDO, fg=ui.TENUE,
+                         justify="left", anchor="w", wraplength=esc.px(1200))
+    lbl_ayuda.pack(fill="x", pady=(esc.px(2), 0), before=f_pie)
 
-    tk.Label(root, text="Cruceta arriba/abajo mueve el foco (baja hasta los botones), "
-                         "izq/der cambia el valor o el boton, A activa, B vuelve.",
-             font=f_pie, bg=FONDO, fg=TENUE).pack(side="bottom", pady=10)
-
-    # --- navegacion (2026-09-11, zonas agregadas 2026-09-13) ----------------
-    # Antes el mando solo movia el scroll y todo lo demas era tactil/teclado -
-    # "por cada opcion deberia responder a la botonera de la Deck" (reportado
-    # el 2026-09-11). Con filas_nav armado arriba, cada fila sabe reaccionar
-    # a izquierda/derecha/A segun su tipo (bool alterna, enum cicla, numero
-    # suma/resta 1, texto solo enfoca el Entry para teclear).
-    #
-    # zona="opciones": arriba/abajo recorre filas_nav (como siempre);
-    # bajar desde la ULTIMA fila entra a zona="botones" (foco=0). Ahi
-    # izq/der recorre los 3 botones y A ejecuta el marcado; arriba regresa
-    # a la ultima fila de opciones.
-    foco = {"zona": "opciones", "i": 0, "boton": 0}
-
-    def marcar():
-        for i, nav in enumerate(filas_nav):
-            en_foco = foco["zona"] == "opciones" and i == foco["i"]
-            nav["frame"].configure(highlightbackground="#ffffff" if en_foco else PANEL)
-        for i, (widget, _) in enumerate(botones_nav):
-            en_foco = foco["zona"] == "botones" and i == foco["boton"]
-            widget.configure(highlightbackground="#ffffff" if en_foco else FONDO)
-        if foco["zona"] == "opciones" and filas_nav:
-            fila_actual = filas_nav[foco["i"]]["frame"]
-            root.update_idletasks()
-            y = fila_actual.winfo_y()
-            alto_total = interior.winfo_height() or 1
-            canvas.yview_moveto(max(0.0, (y - 40) / alto_total))
-
-    def mover_foco(delta):
-        """Arriba/abajo. Dentro de zona="botones" solo entiende "arriba"
-        (regresa a opciones) - los botones no tienen mas filas entre si."""
-        if foco["zona"] == "botones":
-            if delta < 0:
-                foco["zona"] = "opciones"
-                marcar()
+    def asegurar_visible(t):
+        """Desplaza la lista para que el mosaico enfocado (y su titulo de seccion) queden a la vista."""
+        if not str(t).startswith(str(interior)) or t.arriba is None:
             return
-        if not filas_nav:
-            return
-        nuevo = foco["i"] + delta
-        if nuevo >= len(filas_nav) and botones_nav:
-            foco["zona"] = "botones"
-            foco["boton"] = 0
-            marcar()
-            return
-        foco["i"] = nuevo % len(filas_nav)
-        marcar()
+        root.update_idletasks()
+        total = interior.winfo_height() or 1
+        vista = canvas.winfo_height()
+        y1 = t.arriba.winfo_y()
+        y2 = t.master.winfo_y() + t.master.winfo_height()
+        arriba_actual = canvas.canvasy(0)
+        margen = esc.px(8)
+        if y1 - margen < arriba_actual:
+            canvas.yview_moveto(max(0.0, (y1 - margen) / total))
+        elif y2 + margen > arriba_actual + vista:
+            canvas.yview_moveto(min(1.0, (y2 + margen - vista) / total))
 
-    def mover_lateral(delta):
-        """Izquierda/derecha. En zona="botones" recorre los 3 botones; en
-        zona="opciones" cambia el valor de la fila (comportamiento de
-        siempre, via accionar)."""
-        if foco["zona"] == "botones":
-            if botones_nav:
-                foco["boton"] = (foco["boton"] + delta) % len(botones_nav)
-                marcar()
-            return
-        accionar("on_left" if delta < 0 else "on_right")
+    def al_cambiar(t):
+        lbl_ayuda.configure(text=ayuda_de.get(t, ""))
+        asegurar_visible(t)
 
-    def accionar(lado):
-        if foco["zona"] == "botones":
-            if lado == "on_a" and botones_nav:
-                botones_nav[foco["boton"]][1]()
-            return
-        if not filas_nav:
-            return
-        nav = filas_nav[foco["i"]]
-        fn = nav.get(lado)
-        if fn:
-            fn()
+    nav = ui.Navegador([tiles for _, tiles in filas] + [[t_guardar, t_restaurar, t_volver]],
+                       al_cambiar=al_cambiar)
 
-    root.bind("<Escape>", lambda e: root.destroy())
+    def delta(paso):
+        d = getattr(nav.actual(), "delta", None)
+        if d:
+            d(paso)
 
-    if filas_nav:
-        marcar()
+    root.bind("<Left>", lambda e: nav.mover(-1, 0))
+    root.bind("<Right>", lambda e: nav.mover(1, 0))
+    root.bind("<Up>", lambda e: nav.mover(0, -1))
+    root.bind("<Down>", lambda e: nav.mover(0, 1))
+    root.bind("<Return>", lambda e: nav.activar())
+    root.bind("<Prior>", lambda e: delta(-1))
+    root.bind("<Next>", lambda e: delta(1))
+    root.bind("<Escape>", lambda e: salir())
 
     mando = Mando()
 
     def revisar_mando():
         for nombre in mando.nuevos():
+            dlg = estado["dialogo"]
+            if dlg is not None and dlg.abierto:
+                dlg.tecla(nombre)   # con el cuadro de texto abierto, el mando solo maneja el cuadro
+                continue
             if nombre == "DPAD_UP":
-                mover_foco(-1)
+                nav.mover(0, -1)
             elif nombre == "DPAD_DOWN":
-                mover_foco(1)
+                nav.mover(0, 1)
             elif nombre == "DPAD_LEFT":
-                mover_lateral(-1)
+                nav.mover(-1, 0)
             elif nombre == "DPAD_RIGHT":
-                mover_lateral(1)
+                nav.mover(1, 0)
             elif nombre == "A":
-                accionar("on_a")
+                nav.activar()
+            elif nombre == "L1":
+                delta(-1)
+            elif nombre == "R1":
+                delta(1)
             elif nombre == "B":
-                root.destroy()
+                salir()
+            if cerrado["v"]:
                 return
         root.after(40, revisar_mando)
 

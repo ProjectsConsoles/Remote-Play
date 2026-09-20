@@ -1,0 +1,501 @@
+#!/usr/bin/env python3
+"""Piezas visuales compartidas de los menus (Deck, y despues la Ally): el mismo estilo de
+"mosaicos" que el cliente Android.
+
+Nada de aqui lee el mando ni habla con la red: solo dibuja y lleva el foco. Cada pantalla
+(client_menu.py, client_server_config.py, client_settings.py) arma sus mosaicos, se los da a un
+`Navegador` y sigue leyendo el mando con deck_gamepad.Mando como siempre.
+
+Piezas:
+    Escala        tamanos relativos a la pantalla (la Deck, 1280x800, es escala 1.0)
+    Iconos        PNG blancos con transparencia (carpeta iconos/, sacados de los vectores de Android)
+    Mosaico       tarjeta redondeada con icono, titulo y descripcion; el foco la "agranda" y le pone
+                  borde blanco (tkinter no tiene escalado, asi que se logra achicando el margen)
+    TiraEstado    tira redondeada con un punto de color y un mensaje
+    Navegador     foco por fila/columna entre mosaicos (cruceta), activar con A, tocar con el dedo
+    DialogoTexto  cuadro para escribir un texto (IP, numero), tambien en pantalla completa
+    VentanaInfo   los colores del LED del ESP32-S3
+
+PS3RP_VENTANA=1280x800 (solo para probar en una PC): abre una ventana de ese tamano en vez de
+pantalla completa.
+"""
+
+import os
+import tkinter as tk
+from tkinter import font as tkfont
+
+FONDO = "#12161c"
+PANEL = "#1e252e"
+TEXTO = "#e9eef3"
+TENUE = "#93a1b0"
+OK = "#3ddc84"
+AVISO = "#ffb74d"
+ERROR = "#ff6b6b"
+
+AZUL = "#2d6cdf"
+VERDE = "#3f8f4a"
+MORADO = "#8e5fd6"
+NARANJA = "#c07d2f"
+GRIS = "#2a3441"
+ROJO = "#b03a3a"
+ROJO_OSCURO = "#7a2e2e"
+BLANCO = "#ffffff"
+
+FAMILIA = "DejaVu Sans"
+CARPETA_ICONOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "iconos")
+
+
+def configurar_ventana(root):
+    """Pantalla completa (o el tamano de PS3RP_VENTANA para pruebas). Devuelve el alto en pixeles."""
+    prueba = os.environ.get("PS3RP_VENTANA", "")
+    if prueba and "x" in prueba:
+        try:
+            ancho, alto = (int(v) for v in prueba.lower().split("x", 1))
+            root.geometry(f"{ancho}x{alto}+0+40")
+            return alto
+        except ValueError:
+            pass
+    try:
+        root.attributes("-fullscreen", True)
+    except Exception:
+        root.geometry("1280x800")
+        return 800
+    return root.winfo_screenheight()
+
+
+def mezclar(color, con, f):
+    """Mezcla dos colores '#rrggbb': f=0 -> color, f=1 -> con."""
+    a = [int(color[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(con[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(x + (y - x) * f):02x}" for x, y in zip(a, b))
+
+
+class Escala:
+    def __init__(self, alto):
+        self.f = max(0.7, min(1.8, alto / 800.0))
+        self._fuentes = {}
+
+    def px(self, n):
+        return max(1, round(n * self.f))
+
+    def fuente(self, tam, negrita=False):
+        clave = (tam, negrita)
+        if clave not in self._fuentes:
+            self._fuentes[clave] = tkfont.Font(
+                family=FAMILIA, size=-self.px(tam), weight="bold" if negrita else "normal")
+        return self._fuentes[clave]
+
+
+class Iconos:
+    """Carga perezosa de los PNG. Hay que crear uno por ventana (las imagenes pertenecen a su Tk)."""
+
+    def __init__(self):
+        self._cache = {}
+
+    def get(self, nombre, lado):
+        if not nombre:
+            return None
+        disco = 72 if lado >= 56 else 40
+        clave = (nombre, disco)
+        if clave not in self._cache:
+            try:
+                self._cache[clave] = tk.PhotoImage(file=os.path.join(CARPETA_ICONOS, f"{nombre}_{disco}.png"))
+            except Exception:
+                self._cache[clave] = None  # sin icono, pero el mosaico se dibuja igual
+        return self._cache[clave]
+
+
+def _rect_redondeado(x1, y1, x2, y2, r):
+    # Poligono con esquinas repetidas + smooth=True = rectangulo con esquinas redondas.
+    return [x1 + r, y1, x1 + r, y1, x2 - r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y1 + r,
+            x2, y2 - r, x2, y2 - r, x2, y2, x2 - r, y2, x2 - r, y2, x1 + r, y2, x1 + r, y2,
+            x1, y2, x1, y2 - r, x1, y2 - r, x1, y1 + r, x1, y1 + r, x1, y1]
+
+
+class Mosaico(tk.Canvas):
+    """Tarjeta con icono, titulo y descripcion. `horizontal=True` = icono a la izquierda y texto a
+    la derecha (botones de abajo: Volver, Guardar...)."""
+
+    def __init__(self, parent, esc, iconos, icono, titulo, detalle="", color=AZUL, on_a=None,
+                 tam_titulo=24, tam_detalle=13, tam_icono=72, color_texto=BLANCO,
+                 interactivo=True, horizontal=False, alto=None, on_click=None):
+        super().__init__(parent, bg=FONDO, highlightthickness=0, bd=0, takefocus=0,
+                         height=alto if alto else esc.px(150), width=esc.px(200))
+        self.esc = esc
+        self.iconos = iconos
+        self.icono = icono
+        self.titulo = titulo
+        self.detalle = detalle
+        self.color = color
+        self.color_texto = color_texto
+        self.tam_titulo = tam_titulo
+        self.tam_detalle = tam_detalle
+        self.tam_icono = tam_icono
+        self.on_a = on_a
+        self.on_click = on_click  # si se da, el dedo hace esto en vez de on_a (solo enfoca/elige)
+        self.interactivo = interactivo
+        self.horizontal = horizontal
+        self.habilitado = True
+        self.foco = False
+        self.marcado = False
+        self.al_tocar = None      # lo pone el Navegador
+        self.arriba = None        # widget que debe quedar visible al enfocar (listas con scroll)
+        self.bind("<Configure>", lambda e: self._pintar())
+        if interactivo:
+            self.bind("<Button-1>", self._tocado)
+
+    # --- estado -------------------------------------------------------------------------------
+    def poner_foco(self, si):
+        if si != self.foco:
+            self.foco = si
+            self._pintar()
+
+    def poner_titulo(self, texto):
+        self.titulo = texto
+        self._pintar()
+
+    def poner_detalle(self, texto):
+        self.detalle = texto
+        self._pintar()
+
+    def poner_color(self, color):
+        self.color = color
+        self._pintar()
+
+    def poner_marca(self, si):
+        if si != self.marcado:
+            self.marcado = si
+            self._pintar()
+
+    def habilitar(self, si):
+        self.habilitado = si
+        self._pintar()
+
+    def activar(self):
+        if self.habilitado and self.on_a:
+            self.on_a()
+
+    def _tocado(self, _e):
+        if self.al_tocar:
+            self.al_tocar(self)
+        if self.on_click is not None:
+            if self.habilitado:
+                self.on_click()
+        else:
+            self.activar()
+
+    # --- dibujo -------------------------------------------------------------------------------
+    def _pintar(self):
+        self.delete("all")
+        w, h = self.winfo_width(), self.winfo_height()
+        if w < 30 or h < 30:
+            return
+        esc = self.esc
+        color = self.color if self.habilitado else mezclar(self.color, FONDO, 0.55)
+        inset = esc.px(1) if self.foco else esc.px(7)
+        grosor = esc.px(4)
+        self.create_polygon(
+            _rect_redondeado(inset, inset, w - inset, h - inset, esc.px(20)), smooth=True,
+            fill=color, outline=BLANCO if self.foco else color, width=grosor)
+
+        pad = esc.px(20) + inset
+        ancho_txt = max(40, w - 2 * pad)
+        lado_icono = esc.px(self.tam_icono)
+        img = self.iconos.get(self.icono, lado_icono) if self.icono else None
+        color_txt = self.color_texto if self.habilitado else mezclar(self.color_texto, color, 0.4)
+        color_det = mezclar(color_txt, color, 0.12)
+        f_tit = esc.fuente(self.tam_titulo, True)
+        f_det = esc.fuente(self.tam_detalle)
+
+        # Todo lo de adentro se arma apilado desde y=0 y al final se baja la mitad del espacio libre,
+        # asi queda centrado en vertical y alineado a la izquierda (como en Android).
+        partes = []
+        if self.horizontal:
+            x = pad
+            if img:
+                partes.append(self.create_image(x, 0, image=img, anchor="nw"))
+                x += img.width() + esc.px(14)
+            ancho_txt = max(40, w - x - pad)
+            t = self.create_text(x, 0, text=self.titulo, fill=color_txt, font=f_tit,
+                                 anchor="nw", width=ancho_txt)
+            partes.append(t)
+            fin = self.bbox(t)[3]
+            if self.detalle:
+                d = self.create_text(x, fin + esc.px(2), text=self.detalle, fill=color_det,
+                                     font=f_det, anchor="nw", width=ancho_txt)
+                partes.append(d)
+                fin = self.bbox(d)[3]
+            if img:
+                # el icono se centra respecto del bloque de texto
+                self.move(partes[0], 0, max(0, (fin - img.height()) // 2))
+        else:
+            y = 0
+            if img:
+                partes.append(self.create_image(pad, y, image=img, anchor="nw"))
+                y += img.height() + esc.px(8)
+            t = self.create_text(pad, y, text=self.titulo, fill=color_txt, font=f_tit,
+                                 anchor="nw", width=ancho_txt)
+            partes.append(t)
+            fin = self.bbox(t)[3]
+            if self.detalle:
+                d = self.create_text(pad, fin + esc.px(3), text=self.detalle, fill=color_det,
+                                     font=f_det, anchor="nw", width=ancho_txt)
+                partes.append(d)
+                fin = self.bbox(d)[3]
+        libre = max(0, (h - fin) // 2)
+        for p in partes:
+            self.move(p, 0, libre)
+
+        if self.marcado:
+            r = esc.px(15)
+            cx, cy = w - pad + esc.px(6) - r, pad - esc.px(6) + r
+            self.create_oval(cx - r, cy - r, cx + r, cy + r, fill=BLANCO, outline=BLANCO)
+            self.create_text(cx, cy, text="✓", fill=self.color, font=esc.fuente(17, True))
+
+
+class TiraEstado(tk.Canvas):
+    """Tira redondeada con un punto de color y un mensaje (puede tener varias lineas)."""
+
+    def __init__(self, parent, esc, alto=54):
+        super().__init__(parent, bg=FONDO, highlightthickness=0, bd=0, height=esc.px(alto))
+        self.esc = esc
+        self.alto_min = esc.px(alto)
+        self._color = TENUE
+        self._texto = ""
+        self._ajustes = 0
+        self.bind("<Configure>", lambda e: self._pintar())
+
+    def pintar(self, color, texto):
+        self._color, self._texto = color, texto
+        self._ajustes = 0
+        self._pintar()
+
+    def _pintar(self):
+        self.delete("all")
+        w, h = self.winfo_width(), self.winfo_height()
+        if w < 60:
+            return
+        esc = self.esc
+        x_txt = esc.px(46)
+        t = self.create_text(x_txt, 0, text=self._texto, fill=TEXTO, font=esc.fuente(15),
+                             anchor="nw", width=w - x_txt - esc.px(20))
+        bb = self.bbox(t)
+        alto_txt = bb[3] - bb[1]
+        necesario = max(self.alto_min, alto_txt + esc.px(24))
+        if abs(necesario - h) > 1 and self._ajustes < 4:
+            # el mensaje tiene mas (o menos) lineas: la tira cambia de alto y se repinta sola
+            self._ajustes += 1
+            self.configure(height=necesario)
+            return
+        self.create_polygon(_rect_redondeado(1, 1, w - 1, h - 1, esc.px(14)), smooth=True,
+                            fill=PANEL, outline=PANEL, tags="fondo")
+        self.tag_lower("fondo")
+        self.coords(t, x_txt, max(0, (h - alto_txt) // 2))
+        r = esc.px(7)
+        self.create_oval(esc.px(24) - r, h // 2 - r, esc.px(24) + r, h // 2 + r,
+                         fill=self._color, outline=self._color)
+
+
+def cabecera(parent, esc, titulo, derecha=""):
+    """Titulo grande a la izquierda y una nota tenue a la derecha. Devuelve (frame, label_derecha)."""
+    f = tk.Frame(parent, bg=FONDO)
+    tk.Label(f, text=titulo, font=esc.fuente(34, True), bg=FONDO, fg=TEXTO).pack(side="left")
+    der = tk.Label(f, text=derecha, font=esc.fuente(14), bg=FONDO, fg=TENUE, justify="right")
+    der.pack(side="right", anchor="s", pady=(0, esc.px(4)))
+    return f, der
+
+
+def fila(parent, esc, expandir=True, alto=None):
+    """Una fila donde los mosaicos se reparten el ancho por igual. Crea los mosaicos con esta fila de
+    padre y luego llama a disponer(fila, [mosaicos])."""
+    f = tk.Frame(parent, bg=FONDO)
+    if alto:
+        f.configure(height=alto)
+    f.pack(fill="both" if expandir else "x", expand=expandir)
+    return f
+
+
+def disponer(f, mosaicos, esc, columnas=None):
+    """Coloca los mosaicos en columnas iguales. `columnas` fija cuantas columnas tiene la fila (para que
+    una fila incompleta deje el hueco vacio en vez de estirar sus mosaicos)."""
+    n = columnas or len(mosaicos)
+    m = esc.px(6)
+    for i in range(n):
+        f.columnconfigure(i, weight=1, uniform="col")
+    f.rowconfigure(0, weight=1)
+    for i, t in enumerate(mosaicos):
+        t.grid(row=0, column=i, sticky="nsew", padx=m, pady=m)
+
+
+class Navegador:
+    """Foco por fila/columna. `filas` = lista de listas de Mosaico (en el orden visual)."""
+
+    def __init__(self, filas, al_cambiar=None, recordar=False):
+        self.filas = [f for f in filas if f]
+        self.f = 0
+        self.c = 0
+        self.al_cambiar = al_cambiar
+        # recordar=True: al volver a una fila por arriba/abajo se cae en la columna donde se estuvo
+        # (la fila de modos de "Configurar servidor" lo necesita: ahi la columna ES la eleccion).
+        self.recordar = recordar
+        self.memoria = {}
+        for fila_ in self.filas:
+            for t in fila_:
+                t.al_tocar = self.ir_a
+        self.marcar()
+
+    def actual(self):
+        return self.filas[self.f][self.c]
+
+    def ir_a(self, mosaico):
+        for fi, fila_ in enumerate(self.filas):
+            if mosaico in fila_:
+                self.f, self.c = fi, fila_.index(mosaico)
+                self.marcar()
+                return
+
+    def mover(self, dx, dy):
+        if dy:
+            self.f = (self.f + dy) % len(self.filas)
+            if self.recordar and self.f in self.memoria:
+                self.c = self.memoria[self.f]
+            self.c = min(self.c, len(self.filas[self.f]) - 1)
+        if dx:
+            self.c = (self.c + dx) % len(self.filas[self.f])
+        self.marcar()
+
+    def marcar(self):
+        self.memoria[self.f] = self.c
+        act = self.actual()
+        for fila_ in self.filas:
+            for t in fila_:
+                t.poner_foco(t is act)
+        if self.al_cambiar:
+            self.al_cambiar(act)
+
+    def activar(self):
+        self.actual().activar()
+
+
+class DialogoTexto:
+    """Cuadro (ventana completa oscura con un panel al centro) para escribir un texto. Se maneja con
+    teclado/tactil como el Entry de antes; con el mando, A acepta y B cancela (ver `tecla`)."""
+
+    def __init__(self, root, esc, titulo, actual, al_aceptar):
+        self.abierto = True
+        self.al_aceptar = al_aceptar
+        self.top = tk.Toplevel(root)
+        self.top.configure(bg=FONDO)
+        try:
+            self.top.attributes("-fullscreen", True)
+        except Exception:
+            self.top.geometry("900x500")
+        if os.environ.get("PS3RP_VENTANA"):
+            self.top.attributes("-fullscreen", False)
+            self.top.geometry(root.geometry())
+        panel = tk.Frame(self.top, bg=PANEL, padx=esc.px(40), pady=esc.px(30))
+        panel.place(relx=0.5, rely=0.32, anchor="center")
+        tk.Label(panel, text=titulo, font=esc.fuente(18), bg=PANEL, fg=TENUE).pack(anchor="w")
+        self.entry = tk.Entry(panel, font=esc.fuente(28), width=20, justify="center",
+                              bg=FONDO, fg=TEXTO, insertbackground=TEXTO, relief="flat",
+                              highlightthickness=3, highlightbackground=TENUE, highlightcolor=BLANCO)
+        self.entry.insert(0, actual)
+        self.entry.pack(pady=esc.px(16), ipady=esc.px(8))
+        botones = tk.Frame(panel, bg=PANEL)
+        botones.pack()
+        for texto, color, cmd in (("Cancelar (B)", GRIS, self.cancelar), ("Aceptar (A)", VERDE, self.aceptar)):
+            tk.Button(botones, text=texto, font=esc.fuente(18, True), bg=color, fg=BLANCO,
+                      activebackground=color, activeforeground=BLANCO, relief="flat", bd=0,
+                      padx=esc.px(26), pady=esc.px(10), command=cmd).pack(side="left", padx=esc.px(10))
+        self.top.bind("<Return>", lambda e: self.aceptar())
+        self.top.bind("<Escape>", lambda e: self.cancelar())
+        self.top.protocol("WM_DELETE_WINDOW", self.cancelar)
+        self.top.grab_set()
+        self.entry.focus_force()
+        self.entry.select_range(0, "end")
+
+    def aceptar(self):
+        if not self.abierto:
+            return
+        valor = self.entry.get().strip()
+        self.cerrar()
+        self.al_aceptar(valor)
+
+    def cancelar(self):
+        if self.abierto:
+            self.cerrar()
+
+    def cerrar(self):
+        self.abierto = False
+        try:
+            self.top.grab_release()
+            self.top.destroy()
+        except Exception:
+            pass
+
+    def tecla(self, nombre):
+        """Botones del mando mientras el cuadro esta abierto."""
+        if nombre == "A":
+            self.aceptar()
+        elif nombre == "B":
+            self.cancelar()
+
+
+LEDS = [
+    ("#d4b106", "Amarillo", "PS3", "#1b1b1b"),
+    ("#2d6cdf", "Azul", "PS2 / OPL", BLANCO),
+    ("#8e5fd6", "Morado", "Xbox 360", BLANCO),
+    ("#2fa84f", "Verde", "Xbox clásico", BLANCO),
+]
+
+
+class VentanaInfo:
+    """Colores del LED del ESP32-S3 (selector de modo), en pantalla completa sobre el menu."""
+
+    def __init__(self, root, esc, iconos):
+        self.abierta = True
+        self.top = tk.Toplevel(root)
+        self.top.configure(bg=FONDO)
+        try:
+            self.top.attributes("-fullscreen", True)
+        except Exception:
+            self.top.geometry("900x500")
+        if os.environ.get("PS3RP_VENTANA"):
+            self.top.attributes("-fullscreen", False)
+            self.top.geometry(root.geometry())
+        marco = tk.Frame(self.top, bg=FONDO, padx=esc.px(24), pady=esc.px(20))
+        marco.pack(fill="both", expand=True)
+        cab, _ = cabecera(marco, esc, "Selector de modo del ESP32-S3")
+        cab.pack(fill="x")
+        tk.Label(marco, text="Con la placa ya encendida (nunca al conectarla o resetearla), mantén BOOT ~1.5 s. "
+                             "El LED cicla de color cada ~0.7 s; suelta el botón en el color que corresponda.",
+                 font=esc.fuente(15), bg=FONDO, fg=TENUE, justify="left",
+                 wraplength=esc.px(1180)).pack(anchor="w", pady=(esc.px(6), esc.px(10)))
+        f = fila(marco, esc)
+        tiles = [Mosaico(f, esc, iconos, "gamepad", nombre, consola, color, color_texto=ct,
+                         tam_titulo=32, tam_detalle=18, interactivo=False)
+                 for color, nombre, consola, ct in LEDS]
+        disponer(f, tiles, esc)
+        tk.Label(marco, text="El modo elegido queda guardado en la placa hasta que se cambie a mano.",
+                 font=esc.fuente(14), bg=FONDO, fg=TENUE).pack(anchor="w", pady=(esc.px(6), esc.px(4)))
+        pie = fila(marco, esc, expandir=False)
+        volver = Mosaico(pie, esc, iconos, "back", "Volver", "B o Escape", GRIS, on_a=self.cerrar,
+                         tam_titulo=22, tam_detalle=13, tam_icono=40, horizontal=True, alto=esc.px(84))
+        disponer(pie, [volver], esc)
+        self.nav = Navegador([[volver]])
+        self.top.bind("<Escape>", lambda e: self.cerrar())
+        self.top.bind("<Return>", lambda e: self.cerrar())
+        self.top.protocol("WM_DELETE_WINDOW", self.cerrar)
+        self.top.grab_set()
+
+    def cerrar(self):
+        self.abierta = False
+        try:
+            self.top.grab_release()
+            self.top.destroy()
+        except Exception:
+            pass
+
+    def tecla(self, nombre):
+        if nombre in ("B", "A"):
+            self.cerrar()

@@ -54,13 +54,19 @@ por USB. No es un emulador: la consola sigue siendo la real.
 
 ## Configurar servidor y cliente desde el menú de la Deck
 
-El menú (`deck-client/client_menu.py`) tiene dos pantallas, navegables
-con el mando (cruceta + A/B, izquierda/derecha cambia cada valor):
+El menú (`deck-client/client_menu.py`) usa el mismo estilo de **mosaicos con
+icono** que el cliente Android (las piezas visuales están en
+`deck-client/ui_mosaicos.py` y los iconos en `deck-client/iconos/`). Tiene una
+tira de estado del servidor arriba y dos pantallas de configuración,
+navegables con el mando (cruceta mueve el foco, A activa, B vuelve):
 
 - **Configurar servidor** — modo de captura (720p/1080p MJPEG, o crudos) e
   IP de la Deck, por UDP (puerto 9200) a `config_listener.ps1`. Reinicia el
-  servidor solo si ya estaba transmitiendo.
-- **Configurar cliente** — variables de latencia de `deck-client/OPCIONES.md`.
+  servidor solo si ya estaba transmitiendo. Atajos: Y manda la IP, X reinicia
+  el servidor, L1 lo apaga.
+- **Configurar cliente** — variables de latencia de `deck-client/OPCIONES.md`,
+  como mosaicos de 3 en 3 que se desplazan solos. A cambia el valor (en los
+  textos y números abre un cuadro para escribirlo) y L1 / R1 lo bajan / suben.
 
 ## Reproductor de video: GStreamer (menos delay)
 

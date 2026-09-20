@@ -10,8 +10,13 @@ nueva (unos segundos de corte). Si esta apagado, solo queda guardado para
 la proxima vez que le den Iniciar en la PC - eso lo decide el listener, no
 esta pantalla.
 
-Mismo estilo visual que client_menu.py (mismos colores, misma fuente,
-mismo patron de navegacion con el mando via deck_gamepad.Mando).
+Estilo (2026-09-20): mosaicos con icono, igual que el cliente Android (las piezas
+visuales viven en ui_mosaicos.py). El comportamiento no cambio: mismos mensajes,
+mismo protocolo, mismos atajos (Y manda la IP, X reinicia, L1 apaga, B vuelve).
+
+Como se maneja: la fila de modos sigue al foco (el modo marcado con el visto es el que
+se aplica), A sobre un modo lo APLICA (como antes), tocar un modo solo lo elige. La IP
+del servidor se edita con A / tocando su mosaico (cuadro de texto, con teclado).
 """
 
 import os
@@ -20,12 +25,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from deck_gamepad import Mando  # noqa: E402
 import server_udp  # noqa: E402
-
-FONDO = "#101014"
-TEXTO = "#e8e8ea"
-TENUE = "#8a8a95"
-VERDE = "#3f8f4a"
-ROJO = "#c0392b"
+import ui_mosaicos as ui  # noqa: E402
 
 # Mismo texto que $Modos en server_engine_lib.ps1 (Windows) - duplicado a
 # proposito: son 4 lineas fijas, y mantenerlas identicas en las dos
@@ -49,148 +49,119 @@ IP_SERVIDOR_DEFAULT = "192.168.0.90"
 
 def main():
     import tkinter as tk
-    from tkinter import font as tkfont
 
     root = tk.Tk()
     root.title("Configurar servidor")
-    root.configure(bg=FONDO)
-    try:
-        root.attributes("-fullscreen", True)
-    except Exception:
-        root.geometry("900x600")
+    root.configure(bg=ui.FONDO)
+    esc = ui.Escala(ui.configurar_ventana(root))
+    iconos = ui.Iconos()
+    cerrado = {"v": False}
 
-    f_titulo = tkfont.Font(family="DejaVu Sans", size=26, weight="bold")
-    f_label = tkfont.Font(family="DejaVu Sans", size=13)
-    f_entry = tkfont.Font(family="DejaVu Sans", size=14)
-    f_boton = tkfont.Font(family="DejaVu Sans", size=15, weight="bold")
-    f_modo_titulo = tkfont.Font(family="DejaVu Sans", size=13, weight="bold")
-    f_modo_detalle = tkfont.Font(family="DejaVu Sans", size=10)
-    f_estado = tkfont.Font(family="DejaVu Sans", size=12)
-    f_pie = tkfont.Font(family="DejaVu Sans", size=11)
-
-    tk.Label(root, text="Configurar servidor", font=f_titulo,
-             bg=FONDO, fg=TEXTO).pack(pady=(30, 4))
+    def salir():
+        cerrado["v"] = True
+        root.destroy()
 
     ip_deck = server_udp.obtener_ip_local() or "?"
-    tk.Label(root, text=f"Esta Deck: {ip_deck}", font=f_pie,
-             bg=FONDO, fg=TENUE).pack(pady=(0, 14))
+    estado = {"ip": server_udp.leer_ip_servidor_guardada() or IP_SERVIDOR_DEFAULT,
+              "sel": 0, "dialogo": None}
 
-    # --- IP del servidor ---
-    filaIp = tk.Frame(root, bg=FONDO)
-    filaIp.pack(pady=(0, 8))
-    tk.Label(filaIp, text="IP del servidor Windows:", font=f_label,
-             bg=FONDO, fg=TEXTO).pack(side="left", padx=(0, 10))
-    ip_guardada = server_udp.leer_ip_servidor_guardada() or IP_SERVIDOR_DEFAULT
-    entryIp = tk.Entry(filaIp, font=f_entry, width=16, justify="center")
-    entryIp.insert(0, ip_guardada)
-    entryIp.pack(side="left")
+    marco = tk.Frame(root, bg=ui.FONDO, padx=esc.px(24), pady=esc.px(16))
+    marco.pack(fill="both", expand=True)
+    cab, _ = ui.cabecera(marco, esc, "Configurar servidor", f"Esta Deck: {ip_deck}")
+    cab.pack(fill="x")
+    tira = ui.TiraEstado(marco, esc)
+    tira.pack(fill="x", pady=esc.px(6))
+    tira.pintar(ui.TENUE, "Sin consultar todavia.")
 
-    lblEstado = tk.Label(root, text="Sin consultar todavia.", font=f_estado,
-                          bg=FONDO, fg=TENUE)
-    lblEstado.pack(pady=(6, 18))
-
-    # --- Tarjetas de modo ---
-    fila = tk.Frame(root, bg=FONDO)
-    fila.pack(expand=True)
-
-    # "zona"/"boton" (2026-09-13, "quiero que TODOS los botones sean
-    # ejecutables y focuseables"): antes la cruceta solo se movia entre las
-    # 4 tarjetas de modo, y los botones de abajo (Consultar, Enviar IP,
-    # Aplicar, Reiniciar, Volver) solo se alcanzaban con mouse/tactil o los
-    # atajos fijos que ya existian (Y/X/Enter, que se quedan igual). Ahora
-    # bajar desde la fila de abajo de tarjetas mete el foco a la fila de
-    # botones (zona="botones"), izq/der se mueve entre ellos, A ejecuta el
-    # que este marcado, y arriba desde ahi regresa a las tarjetas.
-    estado = {"seleccionado": 0, "zona": "tarjetas", "boton": 0}
-    tarjetas = []
-    botones_nav = []  # se llena mas abajo, tras crear los botones: [(widget, funcion), ...]
-
-    def elegir_modo(i):
-        estado["seleccionado"] = i
-        estado["zona"] = "tarjetas"
-        marcar()
-
-    for i, (clave, nombre, detalle) in enumerate(MODOS):
-        marco = tk.Frame(fila, bg="#181c28", padx=14, pady=12,
-                          highlightthickness=3, highlightbackground=FONDO)
-        marco.grid(row=i // 2, column=i % 2, padx=10, pady=10, sticky="nsew")
-        marco.bind("<Button-1>", lambda e, i=i: elegir_modo(i))
-        t = tk.Label(marco, text=nombre, font=f_modo_titulo, bg="#181c28", fg=TEXTO)
-        t.pack(anchor="w")
-        t.bind("<Button-1>", lambda e, i=i: elegir_modo(i))
-        d = tk.Label(marco, text=detalle, font=f_modo_detalle, bg="#181c28",
-                     fg=TENUE, wraplength=280, justify="left")
-        d.pack(anchor="w", pady=(4, 0))
-        d.bind("<Button-1>", lambda e, i=i: elegir_modo(i))
-        tarjetas.append(marco)
-
-    def marcar():
-        for i, m in enumerate(tarjetas):
-            if estado["zona"] == "tarjetas" and i == estado["seleccionado"]:
-                color = "#ffffff"
-            elif i == estado["seleccionado"]:
-                # elegido pero el foco esta en los botones - se queda visible
-                # cual es el modo activo sin competir con el foco de verdad.
-                color = "#5a5a66"
-            else:
-                color = FONDO
-            m.configure(highlightbackground=color)
-        for i, (widget, _) in enumerate(botones_nav):
-            en_foco = estado["zona"] == "botones" and i == estado["boton"]
-            widget.configure(highlightbackground="#ffffff" if en_foco else FONDO)
-
-    def mover(dx, dy):
-        if estado["zona"] == "tarjetas":
-            # Calculo por fila/columna, no por indice plano (2026-09-17,
-            # tras agregar crudo720 - con un numero IMPAR de tarjetas la
-            # ultima fila queda incompleta, y la aritmetica plana vieja
-            # (indice +-2) se salia de rango o envolvia mal ahi).
-            n = len(MODOS)
-            filas_totales = (n + 1) // 2  # 2 columnas
-            fila, col = divmod(estado["seleccionado"], 2)
-            if dy > 0 and fila == filas_totales - 1:
-                estado["zona"] = "botones"
-                estado["boton"] = 0
-                marcar()
-                return
-            if dy != 0:
-                fila = (fila + dy) % filas_totales
-            if dx != 0:
-                col = (col + dx) % 2
-            nuevo = fila * 2 + col
-            if nuevo >= n:
-                nuevo = n - 1  # la ultima fila puede venir incompleta
-            estado["seleccionado"] = nuevo
-            marcar()
-        else:
-            if dy < 0:
-                estado["zona"] = "tarjetas"
-                marcar()
-                return
-            if dx != 0 and botones_nav:
-                estado["boton"] = (estado["boton"] + dx) % len(botones_nav)
-                marcar()
-
-    def accionar():
-        if estado["zona"] == "botones" and botones_nav:
-            botones_nav[estado["boton"]][1]()
-        else:
-            aplicar()
-
-    # --- Botones de accion ---
-    filaBotones = tk.Frame(root, bg=FONDO)
-    filaBotones.pack(pady=(18, 10))
-
-    def consultar():
-        ip = entryIp.get().strip()
-        if not ip:
-            lblEstado.configure(text="Pon una IP primero.", fg=ROJO)
-            return
-        lblEstado.configure(text="Consultando...", fg=TENUE)
+    def msg(color, texto):
+        tira.pintar(color, texto)
         root.update_idletasks()
+
+    # --- IP del servidor (editable) + IP de esta Deck (informativa) ---
+    f_ip = ui.fila(marco, esc, expandir=False)
+    t_ip = ui.Mosaico(f_ip, esc, iconos, "server", estado["ip"],
+                      "IP del servidor Windows  (A o tocar para cambiarla)", ui.MORADO,
+                      tam_titulo=26, tam_detalle=14, tam_icono=40, horizontal=True,
+                      alto=esc.px(96))
+    t_deck = ui.Mosaico(f_ip, esc, iconos, "wifi", ip_deck, "IP de esta Deck (a donde llega el video)",
+                        ui.GRIS, tam_titulo=26, tam_detalle=14, tam_icono=40, horizontal=True,
+                        alto=esc.px(96), interactivo=False)
+    ui.disponer(f_ip, [t_ip, t_deck], esc)
+
+    def editar_ip():
+        def aceptar(valor):
+            estado["ip"] = valor
+            t_ip.poner_titulo(valor or "(sin IP)")
+        estado["dialogo"] = ui.DialogoTexto(root, esc, "IP del servidor Windows", estado["ip"], aceptar)
+
+    t_ip.on_a = editar_ip
+
+    # --- modos de captura ---
+    f_modos = ui.fila(marco, esc)
+    t_modos = []
+    for i, (clave, nombre, detalle) in enumerate(MODOS):
+        t = ui.Mosaico(f_modos, esc, iconos, "image", nombre, detalle, ui.MORADO,
+                       tam_titulo=18, tam_detalle=13, tam_icono=40,
+                       on_a=lambda: aplicar(), on_click=lambda: None)
+        t_modos.append(t)
+    ui.disponer(f_modos, t_modos, esc)
+
+    def refrescar_marcas():
+        for i, t in enumerate(t_modos):
+            t.poner_marca(i == estado["sel"])
+
+    # --- acciones ---
+    f_acc = ui.fila(marco, esc, expandir=False)
+    t_consultar = ui.Mosaico(f_acc, esc, iconos, "refresh", "Consultar", "Estado del servidor",
+                             ui.AZUL, tam_titulo=20, tam_detalle=13, tam_icono=40,
+                             alto=esc.px(140), on_a=lambda: consultar())
+    t_enviar = ui.Mosaico(f_acc, esc, iconos, "wifi", "Enviar IP (Y)", "Manda la IP de esta Deck",
+                          ui.AZUL, tam_titulo=20, tam_detalle=13, tam_icono=40,
+                          alto=esc.px(140), on_a=lambda: enviar_ip())
+    t_aplicar = ui.Mosaico(f_acc, esc, iconos, "check", "Aplicar", "Pone el modo marcado",
+                           ui.VERDE, tam_titulo=20, tam_detalle=13, tam_icono=40,
+                           alto=esc.px(140), on_a=lambda: aplicar())
+    t_reiniciar = ui.Mosaico(f_acc, esc, iconos, "refresh", "Reiniciar (X)", "Reinicia el servidor",
+                             "#a04a2d", tam_titulo=20, tam_detalle=13, tam_icono=40,
+                             alto=esc.px(140), on_a=lambda: reiniciar_servidor())
+    t_apagar = ui.Mosaico(f_acc, esc, iconos, "power", "Apagar (L1)", "Detiene la transmision",
+                          ui.ROJO, tam_titulo=20, tam_detalle=13, tam_icono=40,
+                          alto=esc.px(140), on_a=lambda: apagar_servidor())
+    ui.disponer(f_acc, [t_consultar, t_enviar, t_aplicar, t_reiniciar, t_apagar], esc)
+
+    f_pie = ui.fila(marco, esc, expandir=False)
+    t_volver = ui.Mosaico(f_pie, esc, iconos, "back", "Volver", "B o Escape", ui.GRIS,
+                          tam_titulo=20, tam_detalle=13, tam_icono=40, horizontal=True,
+                          alto=esc.px(84), on_a=salir)
+    ui.disponer(f_pie, [t_volver], esc)
+
+    def al_cambiar(t):
+        # el foco sobre un modo LO ELIGE (asi el marcado siempre es el que Aplicar va a usar)
+        if t in t_modos:
+            estado["sel"] = t_modos.index(t)
+            refrescar_marcas()
+
+    nav = ui.Navegador([[t_ip], t_modos, [t_consultar, t_enviar, t_aplicar, t_reiniciar, t_apagar],
+                        [t_volver]], al_cambiar=al_cambiar, recordar=True)
+    refrescar_marcas()
+
+    def elegir_modo_por_clave(clave):
+        for i, (c, _, _) in enumerate(MODOS):
+            if c == clave:
+                estado["sel"] = i
+                nav.memoria[1] = i
+        refrescar_marcas()
+
+    # --- acciones de red (mismos mensajes y mismo flujo que antes) ---
+    def consultar():
+        ip = estado["ip"].strip()
+        if not ip:
+            msg(ui.ERROR, "Pon una IP primero.")
+            return
+        msg(ui.TENUE, "Consultando...")
         ok, resp = server_udp.obtener_config(ip)
         if not ok:
-            lblEstado.configure(text=str(resp), fg=ROJO)
+            msg(ui.ERROR, str(resp))
             return
         server_udp.guardar_ip_servidor(ip)
         corriendo = "SI" if resp.get("corriendo") else "no"
@@ -206,36 +177,30 @@ def main():
                 texto += f"\nIP sincronizada: SI (le manda el video a {ip_deck})"
             else:
                 texto += (f"\nIP sincronizada: NO (le manda el video a "
-                           f"{ip_servidor_tiene or '?'}, no a esta Deck)")
-        lblEstado.configure(text=texto, fg=VERDE if resp.get("corriendo") else TENUE)
-        for i, (clave, _, _) in enumerate(MODOS):
-            if clave == resp.get("modo"):
-                estado["seleccionado"] = i
-        marcar()
+                          f"{ip_servidor_tiene or '?'}, no a esta Deck)")
+        msg(ui.OK if resp.get("corriendo") else ui.TENUE, texto)
+        elegir_modo_por_clave(resp.get("modo"))
 
     def aplicar():
-        ip = entryIp.get().strip()
+        ip = estado["ip"].strip()
         if not ip:
-            lblEstado.configure(text="Pon una IP primero.", fg=ROJO)
+            msg(ui.ERROR, "Pon una IP primero.")
             return
-        clave = MODOS[estado["seleccionado"]][0]
-        lblEstado.configure(text="Aplicando... si el servidor ya esta corriendo, puede tardar unos "
-                                  "segundos en reiniciar (no se congelo).", fg=TENUE)
-        root.update_idletasks()
+        clave = MODOS[estado["sel"]][0]
+        msg(ui.TENUE, "Aplicando... si el servidor ya esta corriendo, puede tardar unos "
+                      "segundos en reiniciar (no se congelo).")
         ok, resp = server_udp.aplicar_config(ip, ip_deck, clave)
         if not ok:
-            lblEstado.configure(text=str(resp), fg=ROJO)
+            msg(ui.ERROR, str(resp))
             return
         server_udp.guardar_ip_servidor(ip)
         aplicado = resp.get("aplicado")
         if aplicado == "reiniciado":
-            lblEstado.configure(text="Listo: servidor reiniciado con la config nueva.", fg=VERDE)
+            msg(ui.OK, "Listo: servidor reiniciado con la config nueva.")
         elif aplicado == "guardado_para_proxima_vez":
-            lblEstado.configure(
-                text="Guardado. El servidor no estaba corriendo; se aplicara la proxima vez que le den Iniciar.",
-                fg=VERDE)
+            msg(ui.OK, "Guardado. El servidor no estaba corriendo; se aplicara la proxima vez que le den Iniciar.")
         else:
-            lblEstado.configure(text=str(resp), fg=ROJO)
+            msg(ui.ERROR, str(resp))
 
     def enviar_ip():
         # "que no sea necesario escribirla en el servidor por si cambia"
@@ -244,39 +209,31 @@ def main():
         # el servidor y se lo vuelve a mandar junto con la IP nueva, asi
         # Aplicar-config actualiza Guardar-Ip en la PC sin que el usuario
         # tenga que ir a escribirla a mano ahi ni elegir un modo aca.
-        ip = entryIp.get().strip()
+        ip = estado["ip"].strip()
         if not ip:
-            lblEstado.configure(text="Pon una IP primero.", fg=ROJO)
+            msg(ui.ERROR, "Pon una IP primero.")
             return
-        lblEstado.configure(text="Consultando modo actual del servidor...", fg=TENUE)
-        root.update_idletasks()
+        msg(ui.TENUE, "Consultando modo actual del servidor...")
         ok, resp = server_udp.obtener_config(ip)
         if not ok:
-            lblEstado.configure(text=str(resp), fg=ROJO)
+            msg(ui.ERROR, str(resp))
             return
-        modo_actual = resp.get("modo") or MODOS[estado["seleccionado"]][0]
-        lblEstado.configure(
-            text=f"Enviando IP de esta Deck ({ip_deck})... si el servidor esta "
-                 "corriendo, puede tardar unos segundos en reiniciar.", fg=TENUE)
-        root.update_idletasks()
+        modo_actual = resp.get("modo") or MODOS[estado["sel"]][0]
+        msg(ui.TENUE, f"Enviando IP de esta Deck ({ip_deck})... si el servidor esta "
+                      "corriendo, puede tardar unos segundos en reiniciar.")
         ok, resp = server_udp.aplicar_config(ip, ip_deck, modo_actual)
         if not ok:
-            lblEstado.configure(text=str(resp), fg=ROJO)
+            msg(ui.ERROR, str(resp))
             return
         server_udp.guardar_ip_servidor(ip)
         aplicado = resp.get("aplicado")
         if aplicado == "reiniciado":
-            lblEstado.configure(
-                text=f"IP enviada ({ip_deck}). Servidor reiniciado con el mismo modo.", fg=VERDE)
+            msg(ui.OK, f"IP enviada ({ip_deck}). Servidor reiniciado con el mismo modo.")
         elif aplicado == "guardado_para_proxima_vez":
-            lblEstado.configure(
-                text=f"IP enviada ({ip_deck}). Se aplicara la proxima vez que arranque.", fg=VERDE)
+            msg(ui.OK, f"IP enviada ({ip_deck}). Se aplicara la proxima vez que arranque.")
         else:
-            lblEstado.configure(text=str(resp), fg=ROJO)
-        for i, (clave, _, _) in enumerate(MODOS):
-            if clave == modo_actual:
-                estado["seleccionado"] = i
-        marcar()
+            msg(ui.ERROR, str(resp))
+        elegir_modo_por_clave(modo_actual)
 
     def reiniciar_servidor():
         # Reusa el mismo camino que "Enviar IP" (set_config con el modo
@@ -284,131 +241,81 @@ def main():
         # cuando esto llega con el servidor corriendo (ver
         # server_engine_lib.ps1 / Iniciar-Servidor). No hace falta un
         # comando nuevo del lado de Windows para esto.
-        ip = entryIp.get().strip()
+        ip = estado["ip"].strip()
         if not ip:
-            lblEstado.configure(text="Pon una IP primero.", fg=ROJO)
+            msg(ui.ERROR, "Pon una IP primero.")
             return
-        lblEstado.configure(text="Consultando servidor antes de reiniciar...", fg=TENUE)
-        root.update_idletasks()
+        msg(ui.TENUE, "Consultando servidor antes de reiniciar...")
         ok, resp = server_udp.obtener_config(ip)
         if not ok:
-            lblEstado.configure(text=str(resp), fg=ROJO)
+            msg(ui.ERROR, str(resp))
             return
         if not resp.get("corriendo"):
-            lblEstado.configure(text="El servidor no esta corriendo; no hay nada que reiniciar.", fg=TENUE)
+            msg(ui.TENUE, "El servidor no esta corriendo; no hay nada que reiniciar.")
             return
-        modo_actual = resp.get("modo") or MODOS[estado["seleccionado"]][0]
-        lblEstado.configure(text="Reiniciando servidor... puede tardar unos segundos.", fg=TENUE)
-        root.update_idletasks()
+        modo_actual = resp.get("modo") or MODOS[estado["sel"]][0]
+        msg(ui.TENUE, "Reiniciando servidor... puede tardar unos segundos.")
         ok, resp2 = server_udp.aplicar_config(ip, ip_deck, modo_actual)
         if not ok:
-            lblEstado.configure(text=str(resp2), fg=ROJO)
+            msg(ui.ERROR, str(resp2))
             return
         server_udp.guardar_ip_servidor(ip)
         if resp2.get("aplicado") == "reiniciado":
-            lblEstado.configure(text="Listo: servidor reiniciado.", fg=VERDE)
+            msg(ui.OK, "Listo: servidor reiniciado.")
         else:
-            lblEstado.configure(text=str(resp2), fg=ROJO)
+            msg(ui.ERROR, str(resp2))
 
     def apagar_servidor():
         # A diferencia de reiniciar_servidor, esto usa el comando nuevo
         # stop_server (2026-09-17) - set_config SIEMPRE vuelve a arrancar,
         # no sirve para apagar de verdad.
-        ip = entryIp.get().strip()
+        ip = estado["ip"].strip()
         if not ip:
-            lblEstado.configure(text="Pon una IP primero.", fg=ROJO)
+            msg(ui.ERROR, "Pon una IP primero.")
             return
-        lblEstado.configure(text="Apagando servidor...", fg=TENUE)
-        root.update_idletasks()
+        msg(ui.TENUE, "Apagando servidor...")
         ok, resp = server_udp.detener_servidor(ip)
         if not ok:
-            lblEstado.configure(text=str(resp), fg=ROJO)
+            msg(ui.ERROR, str(resp))
             return
         if resp.get("aplicado") == "detenido":
-            lblEstado.configure(text="Listo: servidor apagado.", fg=VERDE)
+            msg(ui.OK, "Listo: servidor apagado.")
         else:
-            lblEstado.configure(text="El servidor ya estaba apagado.", fg=TENUE)
+            msg(ui.TENUE, "El servidor ya estaba apagado.")
 
-    btnConsultar = tk.Button(filaBotones, text="Consultar estado", font=f_boton,
-                              bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55",
-                              activeforeground="#ffffff", relief="flat", bd=0,
-                              highlightthickness=3, highlightbackground=FONDO,
-                              width=16, height=2, command=consultar)
-    btnConsultar.pack(side="left", padx=10)
+    tk.Label(marco, font=esc.fuente(13), bg=ui.FONDO, fg=ui.TENUE,
+             text="Cruceta: mueve el foco. A ejecuta (sobre un modo, lo aplica). "
+                  "Y manda la IP, X reinicia el servidor, L1 lo apaga, B vuelve.").pack(pady=(esc.px(4), 0))
 
-    btnEnviarIp = tk.Button(filaBotones, text="Enviar IP (Y)", font=f_boton,
-                             bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55",
-                             activeforeground="#ffffff", relief="flat", bd=0,
-                             highlightthickness=3, highlightbackground=FONDO,
-                             width=14, height=2, command=enviar_ip)
-    btnEnviarIp.pack(side="left", padx=10)
-
-    btnAplicar = tk.Button(filaBotones, text="Aplicar", font=f_boton,
-                            bg="#2d6cdf", fg="#ffffff", activebackground="#2d6cdf",
-                            activeforeground="#ffffff", relief="flat", bd=0,
-                            highlightthickness=3, highlightbackground=FONDO,
-                            width=16, height=2, command=aplicar)
-    btnAplicar.pack(side="left", padx=10)
-
-    btnReiniciar = tk.Button(filaBotones, text="Reiniciar servidor (X)", font=f_boton,
-                              bg="#a04a2d", fg="#ffffff", activebackground="#b5552f",
-                              activeforeground="#ffffff", relief="flat", bd=0,
-                              highlightthickness=3, highlightbackground=FONDO,
-                              width=18, height=2, command=reiniciar_servidor)
-    btnReiniciar.pack(side="left", padx=10)
-
-    btnApagar = tk.Button(filaBotones, text="Apagar servidor (L1)", font=f_boton,
-                           bg="#7a2020", fg="#ffffff", activebackground="#8f2626",
-                           activeforeground="#ffffff", relief="flat", bd=0,
-                           highlightthickness=3, highlightbackground=FONDO,
-                           width=22, height=2, command=apagar_servidor)
-    btnApagar.pack(side="left", padx=10)
-
-    btnVolver = tk.Button(filaBotones, text="Volver", font=f_boton,
-                           bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55",
-                           activeforeground="#ffffff", relief="flat", bd=0,
-                           highlightthickness=3, highlightbackground=FONDO,
-                           width=12, height=2, command=root.destroy)
-    btnVolver.pack(side="left", padx=10)
-
-    botones_nav.extend([
-        (btnConsultar, consultar),
-        (btnEnviarIp, enviar_ip),
-        (btnAplicar, aplicar),
-        (btnReiniciar, reiniciar_servidor),
-        (btnApagar, apagar_servidor),
-        (btnVolver, root.destroy),
-    ])
-
-    tk.Label(root, text="Cruceta: elige modo o (bajando) botones. A ejecuta. "
-                         "Y manda la IP, X reinicia el servidor, L1 lo apaga, Escape vuelve.",
-             font=f_pie, bg=FONDO, fg=TENUE).pack(side="bottom", pady=16)
-
-    root.bind("<Left>", lambda e: mover(-1, 0))
-    root.bind("<Right>", lambda e: mover(1, 0))
-    root.bind("<Up>", lambda e: mover(0, -1))
-    root.bind("<Down>", lambda e: mover(0, 1))
-    root.bind("<Return>", lambda e: accionar())
+    root.bind("<Left>", lambda e: nav.mover(-1, 0))
+    root.bind("<Right>", lambda e: nav.mover(1, 0))
+    root.bind("<Up>", lambda e: nav.mover(0, -1))
+    root.bind("<Down>", lambda e: nav.mover(0, 1))
+    root.bind("<Return>", lambda e: nav.activar())
     root.bind("<y>", lambda e: enviar_ip())
     root.bind("<Y>", lambda e: enviar_ip())
     root.bind("<x>", lambda e: reiniciar_servidor())
     root.bind("<X>", lambda e: reiniciar_servidor())
-    root.bind("<Escape>", lambda e: root.destroy())
+    root.bind("<Escape>", lambda e: salir())
 
     mando = Mando()
 
     def revisar_mando():
         for nombre in mando.nuevos():
+            dlg = estado["dialogo"]
+            if dlg is not None and dlg.abierto:
+                dlg.tecla(nombre)   # con el cuadro de texto abierto, el mando solo maneja el cuadro
+                continue
             if nombre == "DPAD_LEFT":
-                mover(-1, 0)
+                nav.mover(-1, 0)
             elif nombre == "DPAD_RIGHT":
-                mover(1, 0)
+                nav.mover(1, 0)
             elif nombre == "DPAD_UP":
-                mover(0, -1)
+                nav.mover(0, -1)
             elif nombre == "DPAD_DOWN":
-                mover(0, 1)
+                nav.mover(0, 1)
             elif nombre == "A":
-                accionar()
+                nav.activar()
             elif nombre == "Y":
                 enviar_ip()
             elif nombre == "X":
@@ -416,12 +323,12 @@ def main():
             elif nombre == "L1":
                 apagar_servidor()
             elif nombre == "B":
-                root.destroy()
+                salir()
+            if cerrado["v"]:
                 return
         root.after(40, revisar_mando)
 
-    marcar()
-    consultar()
+    root.after(60, consultar)   # despues de dibujar la ventana, para que se vea "Consultando..."
     root.after(40, revisar_mando)
     root.mainloop()
 

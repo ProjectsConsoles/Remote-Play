@@ -14,6 +14,12 @@ menu: se abren, y al cerrarse vuelven a mostrar este mismo menu.
     - "Configurar cliente": las variables de latencia de este mismo lado
       (client_settings.py, escribe client_config.env).
 
+Estilo (2026-09-20): mosaicos con icono, igual que el cliente Android. Las piezas
+visuales viven en ui_mosaicos.py (compartidas con las otras pantallas y, despues,
+con la Ally); aqui solo se arma el menu y se lee el mando. Arriba hay una tira con
+el estado del servidor, consultado en un hilo aparte para que el menu abra al
+instante.
+
 Se usa tkinter y no zenity/kdialog a proposito: tkinter ya viene con el Python
 del sistema y con el del venv, y deja hacer botones del tamano que uno quiera.
 
@@ -25,7 +31,7 @@ traduce a mover el foco / confirmar. El tactil y el raton siguen funcionando.
 
 Codigos de salida:
     0 = eligio streaming o control, esta impreso en stdout
-    1 = cancelo (B, Escape, o cerro la ventana)
+    1 = cancelo (B, Escape, "Salir", o cerro la ventana)
     2 = no se pudo abrir ninguna ventana (sin DISPLAY, por ejemplo)
 
 El 2 importa: el .sh lo trata como "sigue en streaming, como siempre", para que
@@ -34,6 +40,7 @@ un problema con el menu nunca deje al usuario sin nada.
 
 import os
 import sys
+import threading
 
 # La lectura del mando vive en deck_gamepad.py, compartida con
 # client_control_ui.py. Ese modulo tambien fija SDL_VIDEODRIVER=dummy y
@@ -44,266 +51,178 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from deck_gamepad import Mando            # noqa: E402
 from server_udp import (obtener_ip_local, obtener_red_wifi,  # noqa: E402
                          obtener_config, leer_ip_servidor_guardada)
+import ui_mosaicos as ui                  # noqa: E402
 
-FONDO = "#101014"
-TEXTO = "#e8e8ea"
-TENUE = "#8a8a95"
+
+def _texto_estado_servidor(ip_servidor, resp, ip_local):
+    """(color, texto) para la tira de estado del menu. `resp` es lo que devuelve obtener_config."""
+    if not ip_servidor:
+        return ui.TENUE, "Servidor sin configurar: entra a \"Configurar servidor\" para poner su IP."
+    ok, datos = resp if resp else (False, "sin respuesta")
+    if not ok:
+        return ui.ERROR, f"Servidor {ip_servidor}: sin respuesta. ¿Prendido y en la misma red?"
+    modo = datos.get("modo") or "?"
+    if not datos.get("corriendo"):
+        return ui.AVISO, (f"Servidor {ip_servidor}: detenido (modo {modo}). "
+                          "Prendelo en la PC o aplica la configuracion.")
+    if datos.get("transmitiendo") is False:
+        return ui.AVISO, f"Servidor {ip_servidor}: corriendo pero SIN transmitir. Revisa la capturadora."
+    destino = datos.get("ip") or ""
+    if ip_local and destino and destino != ip_local:
+        return ui.AVISO, (f"Servidor {ip_servidor}: transmite a {destino}, no a esta Deck ({ip_local}). "
+                          "Entra a \"Configurar servidor\" y manda tu IP.")
+    return ui.OK, f"Servidor {ip_servidor}: transmitiendo a {destino} ({modo})"
 
 
 def mostrar_menu():
     """Una vuelta del menu. Devuelve la eleccion (string) o None si cancelo."""
     import tkinter as tk
-    from tkinter import font as tkfont
 
     eleccion = {"modo": None}
+    cerrado = {"v": False}
     root = tk.Tk()
     root.title("Remote Play")
-    root.configure(bg=FONDO)
+    root.configure(bg=ui.FONDO)
+    esc = ui.Escala(ui.configurar_ventana(root))
+    iconos = ui.Iconos()
 
-    try:
-        root.attributes("-fullscreen", True)
-    except Exception:
-        root.geometry("900x600")
-
-    f_titulo = tkfont.Font(family="DejaVu Sans", size=26, weight="bold")
-    f_boton = tkfont.Font(family="DejaVu Sans", size=16, weight="bold")
-    f_ayuda = tkfont.Font(family="DejaVu Sans", size=12)
-    f_detalle = tkfont.Font(family="DejaVu Sans", size=10)
-    f_pie = tkfont.Font(family="DejaVu Sans", size=11)
-
-    tk.Label(root, text="Remote Play", font=f_titulo,
-             bg=FONDO, fg=TEXTO).pack(pady=(40, 6))
-
-    ip_local = obtener_ip_local()
-    red_wifi = obtener_red_wifi()
-    partes_red = []
-    if ip_local:
-        partes_red.append(f"IP: {ip_local}")
-    if red_wifi:
-        partes_red.append(f"Red: {red_wifi}")
-    if partes_red:
-        tk.Label(root, text="   ·   ".join(partes_red), font=f_pie,
-                 bg=FONDO, fg=TENUE).pack(pady=(0, 4))
-
-    tk.Label(root, text="¿Que quieres hacer?", font=f_ayuda,
-             bg=FONDO, fg=TENUE).pack(pady=(0, 26))
-
-    grilla = tk.Frame(root, bg=FONDO)
-    grilla.pack(expand=True)
+    def cerrar_ventana():
+        cerrado["v"] = True
+        root.destroy()
 
     def elegir(modo):
         eleccion["modo"] = modo
-        root.destroy()
+        cerrar_ventana()
 
-    def tarjeta(fila, columna, titulo, detalle, color, modo):
-        marco = tk.Frame(grilla, bg=FONDO)
-        marco.grid(row=fila, column=columna, padx=18, pady=14)
-        b = tk.Button(marco, text=titulo, font=f_boton,
-                      bg=color, fg="#ffffff",
-                      activebackground=color, activeforeground="#ffffff",
-                      width=15, height=3, relief="flat", bd=0,
-                      highlightthickness=5, highlightbackground=FONDO,
-                      highlightcolor="#ffffff",
-                      command=lambda: elegir(modo))
-        b.pack()
-        tk.Label(marco, text=detalle, font=f_detalle, bg=FONDO, fg=TENUE,
-                 wraplength=240, justify="center").pack(pady=(10, 0))
-        return b
+    marco = tk.Frame(root, bg=ui.FONDO, padx=esc.px(24), pady=esc.px(16))
+    marco.pack(fill="both", expand=True)
 
-    # 2x2: streaming/control arriba (las de jugar), configuracion abajo.
-    b_stream = tarjeta(0, 0, "Streaming",
-        "Video y audio de la consola en la Deck, mas el control.",
-        "#2d6cdf", "streaming")
-    b_control = tarjeta(0, 1, "Solo control",
-        "La Deck es nada mas el mando, con la pantalla apagada.",
-        "#3f8f4a", "control")
-    b_config_srv = tarjeta(1, 0, "Configurar servidor",
-        "Modo de captura y estado de la PC Windows, en remoto.",
-        "#8e5fd6", "config_servidor")
-    b_config_cli = tarjeta(1, 1, "Configurar cliente",
-        "Variables de latencia de esta Deck (VSYNC, watchdog, etc.).",
-        "#c07d2f", "config_cliente")
+    ip_local = obtener_ip_local()
+    cab, lbl_red = ui.cabecera(marco, esc, "Remote Play", f"IP: {ip_local}" if ip_local else "")
+    cab.pack(fill="x")
 
-    # Info del selector de modo del ESP32-S3 (2026-09-13, "se me olvidan los
-    # colores"): boton aparte, NO metido en la grilla 2x2 de arriba (esa
-    # tiene su propia matematica de foco por fila/columna, meterle un 5to
-    # elemento la complicaria sin necesidad) - mismo patron que Y/X en las
-    # otras pantallas (atajo fijo, no parte de la navegacion principal).
-    # "abierta"/"cerrar" (no solo un bool): revisar_mando esta fuera del
-    # scope de mostrar_info y necesita poder cerrar la ventana de info al
-    # apretar B sin destruir TAMBIEN el menu de atras (los dos escuchan al
-    # mismo mando via el mainloop de tkinter, sin importar cual ventana
-    # tiene el foco - sin esto, B cerraba las dos de un jalon).
-    info_estado = {"abierta": False, "cerrar": None}
+    tira = ui.TiraEstado(marco, esc)
+    tira.pack(fill="x", pady=esc.px(6))
+    tira.pintar(ui.TENUE, "Servidor: consultando...")
+
+    # 2x2 (las de jugar arriba, configuracion abajo) y una fila de abajo con Info y Salir.
+    f1 = ui.fila(marco, esc)
+    t_stream = ui.Mosaico(f1, esc, iconos, "play", "Streaming",
+                          "Video y audio de la consola, mas el control.", ui.AZUL,
+                          on_a=lambda: elegir("streaming"), tam_titulo=32, tam_detalle=16)
+    t_control = ui.Mosaico(f1, esc, iconos, "gamepad", "Solo control",
+                           "La Deck es nada mas el mando, con la pantalla apagada.", ui.VERDE,
+                           on_a=lambda: elegir("control"), tam_titulo=32, tam_detalle=16)
+    ui.disponer(f1, [t_stream, t_control], esc)
+
+    f2 = ui.fila(marco, esc)
+    t_servidor = ui.Mosaico(f2, esc, iconos, "server", "Configurar servidor",
+                            "Modo de captura y estado de la PC Windows, en remoto.", ui.MORADO,
+                            on_a=lambda: elegir("config_servidor"), tam_titulo=32, tam_detalle=16)
+    t_cliente = ui.Mosaico(f2, esc, iconos, "settings", "Configurar cliente",
+                           "Variables de latencia de esta Deck (VSYNC, watchdog, etc.).", ui.NARANJA,
+                           on_a=lambda: elegir("config_cliente"), tam_titulo=32, tam_detalle=16)
+    ui.disponer(f2, [t_servidor, t_cliente], esc)
+
+    info = {"v": None}
 
     def mostrar_info():
-        info_estado["abierta"] = True
-        ventana = tk.Toplevel(root)
-        ventana.title("Selector de modo del ESP32-S3")
-        ventana.configure(bg=FONDO)
-        try:
-            ventana.attributes("-fullscreen", True)
-        except Exception:
-            ventana.geometry("700x500")
+        if info["v"] is None or not info["v"].abierta:
+            info["v"] = ui.VentanaInfo(root, esc, iconos)
 
-        tk.Label(ventana, text="Selector de modo del ESP32-S3", font=f_titulo,
-                 bg=FONDO, fg=TEXTO).pack(pady=(40, 10))
-        tk.Label(ventana,
-                 text="Con la placa ya encendida (nunca al conectarla/resetear),\n"
-                      "mantén BOOT ~1.5s. El LED cicla de color cada ~0.7s;\n"
-                      "suelta el botón en el color que corresponda.",
-                 font=f_ayuda, bg=FONDO, fg=TENUE, justify="center").pack(pady=(0, 30))
+    f3 = ui.fila(marco, esc, expandir=False)
+    t_info = ui.Mosaico(f3, esc, iconos, "info", "Info: colores del ESP32-S3", "Y", ui.GRIS,
+                        on_a=mostrar_info, tam_titulo=20, tam_detalle=13, tam_icono=40,
+                        horizontal=True, alto=esc.px(84))
+    t_salir = ui.Mosaico(f3, esc, iconos, "exit", "Salir", "B o Escape", ui.ROJO_OSCURO,
+                         on_a=cerrar_ventana, tam_titulo=20, tam_detalle=13, tam_icono=40,
+                         horizontal=True, alto=esc.px(84))
+    ui.disponer(f3, [t_info, t_salir], esc)
 
-        colores = [
-            ("#d4b106", "Amarillo", "PS3"),
-            ("#2d6cdf", "Azul", "PS2 / OPL"),
-            ("#8e5fd6", "Morado", "Xbox 360"),
-            ("#2fa84f", "Verde", "Xbox clásico"),
-        ]
-        filaColores = tk.Frame(ventana, bg=FONDO)
-        filaColores.pack(pady=10)
-        for color, nombre, consola in colores:
-            marco = tk.Frame(filaColores, bg=FONDO)
-            marco.pack(side="left", padx=24)
-            tk.Frame(marco, bg=color, width=48, height=48,
-                     highlightthickness=2, highlightbackground=TEXTO).pack()
-            tk.Label(marco, text=nombre, font=f_boton, bg=FONDO, fg=TEXTO).pack(pady=(10, 0))
-            tk.Label(marco, text=consola, font=f_detalle, bg=FONDO, fg=TENUE).pack()
-
-        tk.Label(ventana, text="El modo elegido queda guardado en la placa hasta que se cambie a mano.",
-                 font=f_pie, bg=FONDO, fg=TENUE).pack(pady=(30, 0))
-
-        def cerrar_info():
-            info_estado["abierta"] = False
-            ventana.destroy()
-
-        info_estado["cerrar"] = cerrar_info
-
-        btnCerrar = tk.Button(ventana, text="Volver", font=f_boton,
-                               bg="#3a3a42", fg="#ffffff", activebackground="#4a4a55",
-                               activeforeground="#ffffff", relief="flat", bd=0,
-                               highlightthickness=3, highlightbackground="#ffffff",
-                               highlightcolor="#ffffff",
-                               width=12, height=2, command=cerrar_info)
-        btnCerrar.pack(pady=30)
-        btnCerrar.focus_set()
-
-        tk.Label(ventana, text="B o Escape para volver.", font=f_pie,
-                 bg=FONDO, fg=TENUE).pack(side="bottom", pady=16)
-
-        ventana.bind("<Escape>", lambda e: cerrar_info())
-        ventana.bind("<Return>", lambda e: cerrar_info())
-        ventana.protocol("WM_DELETE_WINDOW", cerrar_info)
-        ventana.grab_set()
-
-    opciones = [b_stream, b_control, b_config_srv, b_config_cli]
-
-    btnInfo = tk.Button(root, text="Info: colores del ESP32-S3", font=f_pie,
-                         bg=FONDO, fg=TENUE, activebackground=FONDO, activeforeground=TEXTO,
-                         relief="flat", bd=0, highlightthickness=3, highlightbackground=FONDO,
-                         highlightcolor="#ffffff", command=mostrar_info)
-    btnInfo.pack(side="bottom", pady=(0, 4))
-
-    # zona="grid"/"info" (2026-09-13, "otra vez el boton solo es tactil, no
-    # puedo focusearlo" - mismo patron ya usado en client_server_config.py y
-    # client_settings.py): bajar desde la fila de abajo de la grilla 2x2
-    # entra al boton de Info; arriba desde ahi regresa a la grilla.
-    foco = {"zona": "grid", "i": 0}
-
-    def marcar():
-        for i, b in enumerate(opciones):
-            en_foco = foco["zona"] == "grid" and i == foco["i"]
-            b.configure(highlightbackground="#ffffff" if en_foco else FONDO)
-        btnInfo.configure(highlightbackground="#ffffff" if foco["zona"] == "info" else FONDO)
-        if foco["zona"] == "grid":
-            opciones[foco["i"]].focus_set()
-        else:
-            btnInfo.focus_set()
-
-    def mover(dx, dy):
-        if foco["zona"] == "info":
-            if dy < 0:
-                foco["zona"] = "grid"
-                marcar()
-            return
-        fila, col = divmod(foco["i"], 2)
-        if dy > 0 and fila == 1:
-            foco["zona"] = "info"
-            marcar()
-            return
-        fila = (fila + dy) % 2
-        col = (col + dx) % 2
-        foco["i"] = fila * 2 + col
-        marcar()
-
-    def confirmar():
-        if foco["zona"] == "info":
-            mostrar_info()
-            return
-        opciones[foco["i"]].invoke()
-
-    pie = tk.Label(root, font=f_pie, bg=FONDO, fg=TENUE)
-    pie.pack(side="bottom", pady=24)
-
-    root.bind("<Left>", lambda e: mover(-1, 0))
-    root.bind("<Right>", lambda e: mover(1, 0))
-    root.bind("<Up>", lambda e: mover(0, -1))
-    root.bind("<Down>", lambda e: mover(0, 1))
-    root.bind("<Tab>", lambda e: mover(1, 0))
-    root.bind("<Return>", lambda e: confirmar())
-    root.bind("<space>", lambda e: confirmar())
-    root.bind("<y>", lambda e: mostrar_info())
-    root.bind("<Y>", lambda e: mostrar_info())
-    root.bind("<Escape>", lambda e: root.destroy())
+    nav = ui.Navegador([[t_stream, t_control], [t_servidor, t_cliente], [t_info, t_salir]])
 
     mando = Mando()
-    pie.configure(
-        text=("Cruceta/stick para moverte, confirma con A, cancela con B, info con Y."
-              if mando.ok else
-              "Toca la pantalla para elegir.")
-        + "   (el tactil siempre funciona)")
+    tk.Label(marco, font=esc.fuente(13), bg=ui.FONDO, fg=ui.TENUE,
+             text=("Cruceta/stick para moverte, confirma con A, cancela con B, info con Y."
+                   if mando.ok else "Toca la pantalla para elegir.")
+                  + "   (el tactil siempre funciona)").pack(pady=(esc.px(4), 0))
+
+    root.bind("<Left>", lambda e: nav.mover(-1, 0))
+    root.bind("<Right>", lambda e: nav.mover(1, 0))
+    root.bind("<Up>", lambda e: nav.mover(0, -1))
+    root.bind("<Down>", lambda e: nav.mover(0, 1))
+    root.bind("<Tab>", lambda e: nav.mover(1, 0))
+    root.bind("<Return>", lambda e: nav.activar())
+    root.bind("<space>", lambda e: nav.activar())
+    root.bind("<y>", lambda e: mostrar_info())
+    root.bind("<Y>", lambda e: mostrar_info())
+    root.bind("<Escape>", lambda e: cerrar_ventana())
+
+    # --- estado del servidor, en un hilo aparte (la consulta UDP tarda hasta 3 s si no responde) ---
+    fondo = {"listo": False, "wifi": None, "ip": None, "resp": None}
+
+    def consultar_en_fondo():
+        try:
+            fondo["wifi"] = obtener_red_wifi()
+        except Exception:
+            pass
+        fondo["ip"] = leer_ip_servidor_guardada()
+        if fondo["ip"]:
+            try:
+                fondo["resp"] = obtener_config(fondo["ip"])
+            except Exception as e:
+                fondo["resp"] = (False, str(e))
+        fondo["listo"] = True
+
+    threading.Thread(target=consultar_en_fondo, daemon=True).start()
+
+    def revisar_fondo():
+        if cerrado["v"]:
+            return
+        if not fondo["listo"]:
+            root.after(150, revisar_fondo)
+            return
+        partes = []
+        if ip_local:
+            partes.append(f"IP: {ip_local}")
+        if fondo["wifi"]:
+            partes.append(f"Red: {fondo['wifi']}")
+        lbl_red.configure(text="   ·   ".join(partes))
+        color, texto = _texto_estado_servidor(fondo["ip"], fondo["resp"], ip_local)
+        tira.pintar(color, texto)
+
+    root.after(150, revisar_fondo)
 
     def revisar_mando():
         for nombre in mando.nuevos():
-            # Mientras la ventana de info esta abierta, el mando solo la
-            # cierra (B) - todo lo demas (mover el foco, A) es del menu de
-            # atras y no deberia colar mientras se esta leyendo la info.
-            if info_estado["abierta"]:
-                if nombre == "B" and info_estado["cerrar"]:
-                    info_estado["cerrar"]()
+            # Mientras la ventana de info esta abierta, el mando solo la cierra (B o A) - todo lo
+            # demas (mover el foco) es del menu de atras y no deberia colar mientras se lee.
+            if info["v"] is not None and info["v"].abierta:
+                info["v"].tecla(nombre)
                 continue
             if nombre == "DPAD_LEFT":
-                mover(-1, 0)
+                nav.mover(-1, 0)
             elif nombre == "DPAD_RIGHT":
-                mover(1, 0)
+                nav.mover(1, 0)
             elif nombre == "DPAD_UP":
-                mover(0, -1)
+                nav.mover(0, -1)
             elif nombre == "DPAD_DOWN":
-                mover(0, 1)
+                nav.mover(0, 1)
             elif nombre == "A":
-                # OJO (2026-09-13): "return" sin re-programar solo es
-                # correcto cuando confirmar() destruye root de verdad (elegir
-                # una tarjeta real). Para zona="info", confirmar() solo abre
-                # el Toplevel de info - root sigue viva, y si no se
-                # re-programa revisar_mando(), el mando se queda MUDO para
-                # siempre (ni B adentro de info, ni nada al volver por
-                # touch) - "no funciona la navegacion, solo el touch"
-                # (reportado en vivo). Se distingue ANTES de llamar
-                # confirmar(), porque confirmar() puede cambiar la zona.
-                era_info = foco["zona"] == "info"
-                confirmar()
-                if not era_info:
-                    return      # la ventana ya se destruyo
+                nav.activar()
             elif nombre == "Y":
                 mostrar_info()
             elif nombre == "B":
-                root.destroy()
+                cerrar_ventana()
+            # OJO (2026-09-13): si activar() destruyo la ventana (elegir una tarjeta real) hay que
+            # dejar de re-programar el bucle; si solo abrio la info, el bucle DEBE seguir vivo o el
+            # mando se queda mudo ("no funciona la navegacion, solo el touch").
+            if cerrado["v"]:
                 return
         # 40 ms: bastante fino para que no se sienta pegajoso y lo bastante
         # espaciado para no gastar CPU en un menu.
         root.after(40, revisar_mando)
 
-    marcar()
     root.after(40, revisar_mando)
     root.mainloop()
 
