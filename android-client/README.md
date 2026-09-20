@@ -9,9 +9,10 @@ Samsung + GameSir G8+). Hace lo mismo que los clientes de la Deck y la Ally:
 - configura el servidor Windows en remoto (UDP 9200: consultar, aplicar modo,
   apagar) y los ajustes del cliente.
 
-> **Estado:** compila y las pruebas unitarias pasan (demultiplexor probado con
-> un `.ts` real de ffmpeg y el JSON del mando contra el contrato del firmware).
-> **Todavía no se ha probado en una tableta real.**
+> **Estado:** funcional. Probado en una Samsung Galaxy Tab A9 (Android 16) con
+> mando Bluetooth: el video, el audio y el control funcionan bien. Las pruebas
+> unitarias también pasan (demultiplexor contra un `.ts` real de ffmpeg y el JSON
+> del mando contra el contrato del firmware).
 
 Sin bibliotecas externas: el demultiplexor MPEG-TS (`TsDemuxer.kt`) es propio.
 Los cuadros y el audio se entregan al decodificador apenas llegan, sin reloj de

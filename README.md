@@ -47,7 +47,7 @@ por USB. No es un emulador: la consola sigue siendo la real.
 | Cliente Steam Deck | ✅ Funcional |
 | Servidor Windows | ✅ Funcional |
 | Cliente ROG Ally X (Windows) | ✅ Funcional |
-| Cliente Android | 🧪 Compila y el demultiplexor/mando pasan pruebas con datos reales; **sin probar todavía en una tableta** |
+| Cliente Android | ✅ Funcional (probado en una Samsung Galaxy Tab A9 con mando Bluetooth) |
 | PS2 (Open PS2 Loader / PADEMU) | ✅ Funcional. Pendiente: el menú de OPL a veces pierde el control por USB unos segundos (se recupera solo). |
 | Xbox 360 (RGH/JTAG + Aurora) | ✅ Funcional vía hiddriver360 |
 | Xbox clásico (el original de 2001) | ✅ Funcional (probado en consola real); necesita cable propio |
