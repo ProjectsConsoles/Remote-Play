@@ -48,6 +48,21 @@ mosaicos, con foco animado y transición deslizante entre pantallas.
 <sub>Capturas del emulador de Android con un servidor simulado (por eso las IP
 `10.0.2.x`).</sub>
 
+### Steam Deck
+
+<p>
+  <img src="docs/capturas/deck-menu.png" width="49%" alt="Menú principal de la Deck">
+  <img src="docs/capturas/deck-servidor.png" width="49%" alt="Configurar servidor en la Deck">
+</p>
+<p>
+  <img src="docs/capturas/deck-cliente.png" width="49%" alt="Configurar cliente en la Deck">
+  <img src="docs/capturas/deck-info.png" width="49%" alt="Colores del ESP32 en la Deck">
+</p>
+
+<sub>El cliente real de la Deck (tkinter, 1280×800) dibujado en una ventana
+oculta de gamescope, sin tocar la sesión de juego. El estado del servidor que
+muestran es simulado.</sub>
+
 ### ROG Ally X
 
 <p>
