@@ -472,6 +472,14 @@ class App:
 
     DURACION = 0.32    # segundos (0.22 le parecio muy rapida al usuario, 2026-09-20)
     PARALAJE = 0.28    # cuanto se corre la pantalla de abajo (fraccion del ancho)
+    # 2026-09-22: el usuario vio la transicion con "pocos fps" en la Deck real. Medido con
+    # un arnes que parchea _animar en memoria (no toca lo desplegado): el paso corre firme
+    # a ~8.2 ms incluso con las pantallas reales (Menu/Configurar servidor), asi que el
+    # calculo en Python no es el cuello de botella. Pedir un paso cada 8 ms (~120 fps) es
+    # mas rapido que cualquier pantalla real (60-90 Hz) y solo le compite trabajo de mas
+    # al compositor de gamescope en Modo Juego (headless no lo reproduce). Bajado a 16 ms
+    # (~60 fps, lo que cualquier pantalla puede mostrar) para no pelear con el compositor.
+    PASO_MS = 16
 
     def __init__(self, titulo, mando):
         self.root = tk.Tk()
@@ -617,7 +625,7 @@ class App:
             entrante.frame.place_configure(x=x_ent(e))
             saliente.frame.place_configure(x=x_sal(e))
             if t < 1.0:
-                self.root.after(8, paso)
+                self.root.after(self.PASO_MS, paso)
             else:
                 entrante.frame.place_configure(x=0)
                 self.animando = False
