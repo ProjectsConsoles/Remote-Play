@@ -32,8 +32,12 @@ class InfoActivity : PantallaActivity() {
 
         val oscuro = 0xFF1B1B1B.toInt()
         val tam = if (compacto) 20f else 30f
+        // Los logos de consola son wordmarks anchos y bajitos (no un icono cuadrado):
+        // con el icono() cuadrado de siempre (52dp) se veian minusculos, igual que nos
+        // paso primero en la Deck con el mismo problema.
         fun led(icono: Int, color: Int, nombre: String, consola: String, texto: Int = Color.WHITE) =
-            Ui.mosaico(this, icono, nombre, consola, color, compacto, texto, interactivo = false, tamTitulo = tam)
+            Ui.mosaico(this, icono, nombre, consola, color, compacto, texto, interactivo = false, tamTitulo = tam,
+                anchoIconoDp = if (compacto) 100 else 150)
 
         raiz.addView(
             Ui.cuadricula(

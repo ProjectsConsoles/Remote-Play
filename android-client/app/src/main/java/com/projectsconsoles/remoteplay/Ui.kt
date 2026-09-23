@@ -96,6 +96,20 @@ object Ui {
         return v
     }
 
+    /** Como icono(), pero para logos anchos y bajitos (wordmarks tipo "PS3"/"XBOX 360"):
+     * ancho fijo, alto segun la proporcion real de la imagen (si se mete en un cuadrado
+     * queda minuscula, igual que nos paso primero en la Deck). */
+    fun iconoAncho(ctx: Context, recurso: Int, anchoDp: Int, color: Int = Color.WHITE): android.widget.ImageView {
+        val v = android.widget.ImageView(ctx)
+        val d = ctx.getDrawable(recurso)?.mutate()
+        d?.setTint(color)
+        v.setImageDrawable(d)
+        v.adjustViewBounds = true
+        v.scaleType = android.widget.ImageView.ScaleType.FIT_START
+        v.layoutParams = LinearLayout.LayoutParams(dp(ctx, anchoDp), ViewGroup.LayoutParams.WRAP_CONTENT)
+        return v
+    }
+
     /** Boton compacto con icono a la izquierda; para colocarlo en una fila (peso 1). */
     fun botonIcono(ctx: Context, recurso: Int, texto: String, color: Int, alClic: () -> Unit): Button {
         val b = boton(ctx, texto, color, alClic)
@@ -142,6 +156,7 @@ object Ui {
         colorTexto: Int = Color.WHITE,
         interactivo: Boolean = true,
         tamTitulo: Float? = null,
+        anchoIconoDp: Int? = null,
         alClic: () -> Unit = {},
     ): LinearLayout {
         val t = LinearLayout(ctx)
@@ -159,7 +174,11 @@ object Ui {
         sl.addState(intArrayOf(), normal)
         t.background = sl
 
-        t.addView(icono(ctx, recurso, if (compacto) 26 else 52, colorTexto))
+        if (anchoIconoDp != null) {
+            t.addView(iconoAncho(ctx, recurso, anchoIconoDp, colorTexto))
+        } else {
+            t.addView(icono(ctx, recurso, if (compacto) 26 else 52, colorTexto))
+        }
         val tit = TextView(ctx)
         tit.text = titulo
         tit.setTextColor(colorTexto)
