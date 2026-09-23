@@ -702,10 +702,10 @@ class DialogoTexto:
 
 
 LEDS = [
-    ("#d4b106", "Amarillo", "PS3", "#1b1b1b"),
-    ("#2d6cdf", "Azul", "PS2 / OPL", BLANCO),
-    ("#8e5fd6", "Morado", "Xbox 360", BLANCO),
-    ("#2fa84f", "Verde", "Xbox clásico", BLANCO),
+    ("#d4b106", "Amarillo", "PS3", "#1b1b1b", "ps3"),
+    ("#2d6cdf", "Azul", "PS2 / OPL", BLANCO, "ps2"),
+    ("#8e5fd6", "Morado", "Xbox 360", BLANCO, "xbox360"),
+    ("#2fa84f", "Verde", "Xbox clásico", BLANCO, "xboxclasico"),
 ]
 
 
@@ -724,9 +724,9 @@ class PantallaInfo(Pantalla):
                  font=esc.fuente(15), bg=FONDO, fg=TENUE, justify="left",
                  wraplength=esc.px(1180)).pack(anchor="w", pady=(esc.px(6), esc.px(10)))
         f = fila(marco, esc)
-        tiles = [Mosaico(f, esc, iconos, "gamepad", nombre, consola, color, color_texto=ct,
+        tiles = [Mosaico(f, esc, iconos, icono, nombre, consola, color, color_texto=ct,
                          tam_titulo=32, tam_detalle=18, interactivo=False)
-                 for color, nombre, consola, ct in LEDS]
+                 for color, nombre, consola, ct, icono in LEDS]
         disponer(f, tiles, esc)
         tk.Label(marco, text="El modo elegido queda guardado en la placa hasta que se cambie a mano.",
                  font=esc.fuente(14), bg=FONDO, fg=TENUE).pack(anchor="w", pady=(esc.px(6), esc.px(4)))

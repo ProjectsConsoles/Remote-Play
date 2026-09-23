@@ -32,18 +32,18 @@ class InfoActivity : PantallaActivity() {
 
         val oscuro = 0xFF1B1B1B.toInt()
         val tam = if (compacto) 20f else 30f
-        fun led(color: Int, nombre: String, consola: String, texto: Int = Color.WHITE) =
-            Ui.mosaico(this, R.drawable.ic_gamepad, nombre, consola, color, compacto, texto, interactivo = false, tamTitulo = tam)
+        fun led(icono: Int, color: Int, nombre: String, consola: String, texto: Int = Color.WHITE) =
+            Ui.mosaico(this, icono, nombre, consola, color, compacto, texto, interactivo = false, tamTitulo = tam)
 
         raiz.addView(
             Ui.cuadricula(
                 this, compacto,
                 listOf(
                     listOf(
-                        led(0xFFD4B106.toInt(), "Amarillo", "PS3", oscuro),
-                        led(0xFF2D6CDF.toInt(), "Azul", "PS2 / OPL"),
-                        led(0xFF8E5FD6.toInt(), "Morado", "Xbox 360"),
-                        led(0xFF2FA84F.toInt(), "Verde", "Xbox clásico"),
+                        led(R.drawable.ic_console_ps3, 0xFFD4B106.toInt(), "Amarillo", "PS3", oscuro),
+                        led(R.drawable.ic_console_ps2, 0xFF2D6CDF.toInt(), "Azul", "PS2 / OPL"),
+                        led(R.drawable.ic_console_xbox360, 0xFF8E5FD6.toInt(), "Morado", "Xbox 360"),
+                        led(R.drawable.ic_console_xboxclasico, 0xFF2FA84F.toInt(), "Verde", "Xbox clásico"),
                     ),
                 ),
             ),

@@ -514,10 +514,10 @@ def pygame_rect(x, y, w, h):
 
 
 LEDS = [
-    ((212, 177, 6), "Amarillo", "PS3", (27, 27, 27)),
-    (ui.AZUL, "Azul", "PS2 / OPL", ui.BLANCO),
-    (ui.MORADO, "Morado", "Xbox 360", ui.BLANCO),
-    ((47, 168, 79), "Verde", "Xbox clasico", ui.BLANCO),
+    ((212, 177, 6), "Amarillo", "PS3", (27, 27, 27), "ps3"),
+    (ui.AZUL, "Azul", "PS2 / OPL", ui.BLANCO, "ps2"),
+    (ui.MORADO, "Morado", "Xbox 360", ui.BLANCO, "xbox360"),
+    ((47, 168, 79), "Verde", "Xbox clasico", ui.BLANCO, "xboxclasico"),
 ]
 
 
@@ -527,9 +527,9 @@ class PantallaInfo(ui.Pantalla):
     def __init__(self, app):
         super().__init__(app)
         esc, ic = self.esc, self.iconos
-        self.leds = [ui.Mosaico(esc, ic, "gamepad", nombre, consola, color, color_texto=ct,
+        self.leds = [ui.Mosaico(esc, ic, icono, nombre, consola, color, color_texto=ct,
                                 tam_titulo=32, tam_detalle=18, interactivo=False)
-                     for color, nombre, consola, ct in LEDS]
+                     for color, nombre, consola, ct, icono in LEDS]
         self.t_volver = ui.Mosaico(esc, ic, "back", "Volver", "A o B", ui.GRIS, on_a=app.volver,
                                    tam_titulo=22, tam_detalle=13, tam_icono=40, horizontal=True)
         self.nav = ui.Navegador([[self.t_volver]])
