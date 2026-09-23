@@ -717,8 +717,37 @@ LEDS = [
 ]
 
 
+def enviar_modo_esp32(indice):
+    """Manda {"set_modo": indice} al ESP32 (mismo mecanismo que mantener BOOT en la placa,
+    pero sin tener que sostenerlo): el firmware guarda el modo en flash y se reinicia para
+    aplicarlo, asi que el control se desconecta de la consola ~1-2s. Fire-and-forget, igual
+    que los paquetes de control de 120Hz (sin confirmacion del ESP32: si se reinicia, no
+    contesta). Import perezoso de client_settings para no crear un import circular (esa
+    pantalla ya importa ui_mosaicos)."""
+    import json
+    import socket
+    import client_settings
+    guardado = client_settings.leer_guardado()
+    ip = guardado.get("PS3RP_ESP32_IP") or "192.168.0.40"
+    try:
+        puerto = int(guardado.get("PS3RP_ESP32_PORT") or "9000")
+    except ValueError:
+        puerto = 9000
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.3)
+        s.sendto(json.dumps({"set_modo": indice}).encode(), (ip, puerto))
+        s.close()
+        return True
+    except Exception:
+        return False
+
+
 class PantallaInfo(Pantalla):
-    """Colores del LED del ESP32-S3 (selector de modo)."""
+    """Colores del LED del ESP32-S3 (selector de modo). Los mosaicos ahora tambien
+    ELIGEN el modo por UDP (2026-09-22): mismo resultado que mantener BOOT, sin tener
+    que tocar la placa. El texto de abajo sigue explicando el gesto fisico por si el
+    ESP32 no esta prendido o alcanzable (entonces esto no le llega a nadie)."""
 
     def __init__(self, app):
         super().__init__(app)
@@ -727,23 +756,40 @@ class PantallaInfo(Pantalla):
         marco.pack(fill="both", expand=True)
         cab, _ = cabecera(marco, esc, "Selector de modo del ESP32-S3")
         cab.pack(fill="x")
-        tk.Label(marco, text="Con la placa ya encendida (nunca al conectarla o resetearla), mantén BOOT ~1.5 s. "
-                             "El LED cicla de color cada ~0.7 s; suelta el botón en el color que corresponda.",
-                 font=esc.fuente(15), bg=FONDO, fg=TENUE, justify="left",
-                 wraplength=esc.px(1180)).pack(anchor="w", pady=(esc.px(6), esc.px(10)))
+        tira = TiraEstado(marco, esc)
+        tira.pack(fill="x", pady=(esc.px(6), esc.px(4)))
+        tira.pintar(TENUE, "A elige el modo (el control se reinicia ~2s). O mantén BOOT en la placa.")
         f = fila(marco, esc)
+
+        def elegir(indice, nombre_consola):
+            enviar_modo_esp32(indice)
+            tira.pintar("#d4b106", f"Modo {nombre_consola} enviado — el control se reinicia (~2 s)...")
+
         tiles = [Mosaico(f, esc, iconos, icono, nombre, consola, color, color_texto=ct,
-                         tam_titulo=32, tam_detalle=18, interactivo=False)
-                 for color, nombre, consola, ct, icono in LEDS]
+                         tam_titulo=32, tam_detalle=18,
+                         on_a=lambda i=i, c=consola: elegir(i, c))
+                 for i, (color, nombre, consola, ct, icono) in enumerate(LEDS)]
         disponer(f, tiles, esc)
-        tk.Label(marco, text="El modo elegido queda guardado en la placa hasta que se cambie a mano.",
-                 font=esc.fuente(14), bg=FONDO, fg=TENUE).pack(anchor="w", pady=(esc.px(6), esc.px(4)))
+        tk.Label(marco, text="El modo elegido queda guardado en la placa hasta que se cambie a mano "
+                             "(por acá o sosteniendo BOOT ~1.5 s; el LED cicla de color cada ~0.7 s).",
+                 font=esc.fuente(14), bg=FONDO, fg=TENUE, justify="left",
+                 wraplength=esc.px(1180)).pack(anchor="w", pady=(esc.px(6), esc.px(4)))
         pie = fila(marco, esc, expandir=False)
         volver = Mosaico(pie, esc, iconos, "back", "Volver", "B o Escape", GRIS, on_a=app.volver,
                          tam_titulo=22, tam_detalle=13, tam_icono=40, horizontal=True, alto=esc.px(84))
         disponer(pie, [volver], esc)
-        self.nav = Navegador([[volver]])
+        self.nav = Navegador([tiles, [volver]])
 
     def tecla(self, nombre):
-        if nombre in ("B", "A"):
+        if nombre == "DPAD_LEFT":
+            self.nav.mover(-1, 0)
+        elif nombre == "DPAD_RIGHT":
+            self.nav.mover(1, 0)
+        elif nombre == "DPAD_UP":
+            self.nav.mover(0, -1)
+        elif nombre == "DPAD_DOWN":
+            self.nav.mover(0, 1)
+        elif nombre == "A":
+            self.nav.activar()
+        elif nombre == "B":
             self.app.volver()

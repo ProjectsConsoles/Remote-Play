@@ -497,6 +497,23 @@ static bool jsonBool(JsonVariantConst v) {
 unsigned long parseOk = 0;
 unsigned long parseErr = 0;
 
+// 2026-09-22: comando remoto para elegir el modo desde el menu de colores en vez de
+// mantener BOOT en la placa. Paquete de un solo campo, {"set_modo": 0-3}, distinto del
+// JSON de control (buttons/axes/dpad) que llega a 120Hz. Mismo mecanismo que el gesto de
+// BOOT: guarda en flash y reinicia (el modo USB no se puede recargar sin reiniciar), asi
+// que el control se desconecta de la consola ~1-2s, igual que si se desconectara el cable.
+void aplicarModoRemoto(uint8_t nuevo) {
+  if (nuevo >= NUM_MODOS) {
+    debugLog("[modo] set_modo remoto fuera de rango: %u\n", (unsigned)nuevo);
+    return;
+  }
+  modoActual = (ModoConsola)nuevo;
+  guardarModo(modoActual);
+  debugLog("[modo] set_modo remoto -> %s, reiniciando para aplicarlo\n", nombreModo(modoActual));
+  delay(300);
+  ESP.restart();
+}
+
 void updateStateFromJson(const uint8_t *data, size_t len) {
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, data, len);
@@ -508,6 +525,11 @@ void updateStateFromJson(const uint8_t *data, size_t len) {
     return;
   }
   parseOk++;
+
+  if (!doc["set_modo"].isNull()) {
+    aplicarModoRemoto(doc["set_modo"].as<uint8_t>());
+    return;  // ESP.restart() no vuelve; por las dudas, no seguir leyendo el resto como control
+  }
 
   JsonObject buttons = doc["buttons"];
   state.cross = jsonBool(buttons["A"]);
