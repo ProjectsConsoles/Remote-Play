@@ -527,8 +527,10 @@ class PantallaInfo(ui.Pantalla):
     def __init__(self, app):
         super().__init__(app)
         esc, ic = self.esc, self.iconos
+        # tam_icono mas grande que el default (72): son wordmarks anchos, con el
+        # tamano normal (pensado para un icono cuadrado) se veian chicos/deformados.
         self.leds = [ui.Mosaico(esc, ic, icono, nombre, consola, color, color_texto=ct,
-                                tam_titulo=32, tam_detalle=18, interactivo=False)
+                                tam_titulo=32, tam_detalle=18, tam_icono=170, interactivo=False)
                      for color, nombre, consola, ct, icono in LEDS]
         self.t_volver = ui.Mosaico(esc, ic, "back", "Volver", "A o B", ui.GRIS, on_a=app.volver,
                                    tam_titulo=22, tam_detalle=13, tam_icono=40, horizontal=True)

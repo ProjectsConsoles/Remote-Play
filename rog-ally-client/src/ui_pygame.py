@@ -101,7 +101,11 @@ class Iconos:
             try:
                 img = pygame.image.load(os.path.join(self.dir, f"{nombre}_{disco}.png")).convert_alpha()
                 if img.get_width() != lado:
-                    img = pygame.transform.smoothscale(img, (lado, lado))
+                    # Por ancho, alto segun la proporcion real: los logos de consola (PS3,
+                    # XBOX 360...) son anchos y bajitos, no cuadrados. Forzar (lado, lado)
+                    # los aplastaba/deformaba.
+                    alto = max(1, round(img.get_height() * lado / img.get_width()))
+                    img = pygame.transform.smoothscale(img, (lado, alto))
                 self._cache[clave] = img
             except Exception:
                 self._cache[clave] = None  # sin icono, pero el mosaico se dibuja igual
