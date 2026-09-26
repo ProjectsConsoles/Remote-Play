@@ -521,20 +521,53 @@ LEDS = [
 ]
 
 
+def enviar_modo_esp32(indice):
+    """Manda {"set_modo": indice} al ESP32 (2026-09-26, igual que la Deck): el firmware lo
+    guarda en flash y se reinicia para aplicarlo, asi que el control se desconecta de la
+    consola ~1-2s. Fire-and-forget. La IP/puerto se leen del ally_config.json en el momento
+    (ESP32_IP/ESP32_PORT se fijan al arrancar y no ven un cambio hecho en Configurar cliente)."""
+    ip, puerto = ESP32_IP, ESP32_PORT
+    try:
+        with open(ARCHIVO_CONFIG_CLIENTE, "r", encoding="utf-8-sig") as f:
+            datos = json.load(f)
+        ip = datos.get("PS3RP_ESP32_IP") or ip
+        puerto = int(datos.get("PS3RP_ESP32_PORT") or puerto)
+    except Exception:
+        pass
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.3)
+        s.sendto(json.dumps({"set_modo": indice}).encode("utf-8"), (ip, puerto))
+        s.close()
+        return True
+    except Exception as e:
+        log.error("No se pudo mandar set_modo al ESP32 %s:%s (%s)", ip, puerto, e)
+        return False
+
+
 class PantallaInfo(ui.Pantalla):
-    """Colores del LED del ESP32-S3 (selector de modo). 2026-09-13: "se me olvidan los colores"."""
+    """Colores del LED del ESP32-S3 (selector de modo). 2026-09-13: "se me olvidan los colores".
+    2026-09-26: los mosaicos tambien ELIGEN el modo por UDP (como en la Deck), sin tocar BOOT."""
 
     def __init__(self, app):
         super().__init__(app)
         esc, ic = self.esc, self.iconos
+        self.msg = (ui.TENUE, "A elige el modo (el control se reinicia ~2 s). O mantén BOOT en la placa.")
         # tam_icono mas grande que el default (72): son wordmarks anchos, con el
         # tamano normal (pensado para un icono cuadrado) se veian chicos/deformados.
         self.leds = [ui.Mosaico(esc, ic, icono, nombre, consola, color, color_texto=ct,
-                                tam_titulo=32, tam_detalle=18, tam_icono=170, interactivo=False)
-                     for color, nombre, consola, ct, icono in LEDS]
-        self.t_volver = ui.Mosaico(esc, ic, "back", "Volver", "A o B", ui.GRIS, on_a=app.volver,
+                                tam_titulo=32, tam_detalle=18, tam_icono=170,
+                                on_a=lambda i=i, c=consola: self.elegir(i, c))
+                     for i, (color, nombre, consola, ct, icono) in enumerate(LEDS)]
+        self.t_volver = ui.Mosaico(esc, ic, "back", "Volver", "B", ui.GRIS, on_a=app.volver,
                                    tam_titulo=22, tam_detalle=13, tam_icono=40, horizontal=True)
-        self.nav = ui.Navegador([[self.t_volver]])
+        self.nav = ui.Navegador([self.leds, [self.t_volver]])
+
+    def elegir(self, indice, consola):
+        if enviar_modo_esp32(indice):
+            self.msg = ((212, 177, 6), f"Modo {consola} enviado — el control se reinicia (~2 s)...")
+        else:
+            self.msg = (ui.ERROR, "No se pudo mandar al ESP32 (revisa la IP en Configurar cliente).")
 
     def dibujar(self, surf):
         esc = self.esc
@@ -543,25 +576,32 @@ class PantallaInfo(ui.Pantalla):
         m = esc.px(24)
         x, ancho = m, w - 2 * m
         y = esc.px(16) + ui.dibujar_cabecera(surf, esc, x, esc.px(16), ancho, "Selector de modo del ESP32-S3") + esc.px(8)
-        f = esc.fuente(15)
-        for ln in ui.envolver(f, "Con la placa ya encendida (nunca al conectarla o resetearla), mantén BOOT ~1.5 s. "
-                                 "El LED cicla de color cada ~0.7 s; suelta el botón en el color que corresponda.",
-                              ancho):
-            ui.texto_en(surf, f, ln, ui.TENUE, x, y)
-            y += f.get_linesize()
-        y += esc.px(10)
+        color, texto = self.msg
+        alto_t = ui.alto_tira(esc, texto, ancho)
+        ui.dibujar_tira(surf, esc, pygame_rect(x, y, ancho, alto_t), color, texto)
+        y += alto_t + esc.px(10)
         alto_pie = esc.px(84)
         y_pie = h - m - alto_pie
-        ui.texto_en(surf, esc.fuente(14), "El modo elegido queda guardado en la placa hasta que se cambie a mano.",
-                    ui.TENUE, x, y_pie - esc.px(10), "bottomleft")
+        ui.texto_en(surf, esc.fuente(14), "El modo queda guardado en la placa hasta cambiarlo (por aquí o sosteniendo "
+                    "BOOT ~1.5 s; el LED cicla de color cada ~0.7 s).", ui.TENUE, x, y_pie - esc.px(10), "bottomleft")
         hueco = esc.px(14)
         alto_leds = y_pie - esc.px(40) - y
         for t, r in zip(self.leds, ui.columnas(pygame_rect(x, y, ancho, alto_leds), len(self.leds), hueco)):
-            t.dibujar(surf, r, False)
-        self.t_volver.dibujar(surf, pygame_rect(x, y_pie, ancho, alto_pie), True)
+            t.dibujar(surf, r, self.nav.es_foco(t))
+        self.t_volver.dibujar(surf, pygame_rect(x, y_pie, ancho, alto_pie), self.nav.es_foco(self.t_volver))
 
     def boton(self, nombre):
-        if nombre in ("A", "B"):
+        if nombre == "DPAD_LEFT":
+            self.nav.mover(-1, 0)
+        elif nombre == "DPAD_RIGHT":
+            self.nav.mover(1, 0)
+        elif nombre == "DPAD_UP":
+            self.nav.mover(0, -1)
+        elif nombre == "DPAD_DOWN":
+            self.nav.mover(0, 1)
+        elif nombre == "A":
+            self.nav.activar()
+        elif nombre == "B":
             self.app.volver()
 
 
