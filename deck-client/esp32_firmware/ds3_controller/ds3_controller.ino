@@ -776,6 +776,20 @@ unsigned long xidEnviados = 0, xidFallidos = 0, xidOcupado = 0, xidSalidas = 0, 
 unsigned long xidInOk = 0, xidXferMal = 0, xidStall = 0, xidResets = 0, xidClase = 0;
 static uint8_t xidLogsTrasMontar = 0;  // cuantas peticiones de control se loguean tras cada montaje
 
+// "Caja negra" del USB (2026-09-27): las ultimas 16 cosas que pasaron (peticiones de control,
+// cambios de rumble, reportes IN mandados) con su tiempo. Se vuelca al log cuando el Xbox
+// resetea el bus estando montado, para ver QUE paso justo antes. Se escribe desde la tarea de
+// USB y desde loop(); es solo diagnostico, una carrera ocasional no importa.
+struct XidEvento { uint32_t ms; char tipo; uint8_t a, b; uint16_t c, d; };
+static XidEvento xidCaja[16];
+static uint8_t xidCajaPos = 0;
+static volatile bool xidVolcarCaja = false;
+static void xidAnotar(char tipo, uint8_t a, uint8_t b, uint16_t c, uint16_t d) {
+  XidEvento &e = xidCaja[xidCajaPos % 16];
+  e.ms = millis(); e.tipo = tipo; e.a = a; e.b = b; e.c = c; e.d = d;
+  xidCajaPos++;
+}
+
 // Descriptor del interface: 9 (interface) + 7 (EP IN) + 7 (EP OUT) = 23 bytes.
 extern "C" uint16_t xid_load_descriptor(uint8_t *dst, uint8_t *itf) {
   uint8_t ep = tinyusb_get_free_duplex_endpoint();
@@ -797,8 +811,13 @@ static void xidProcesarSalida(const uint8_t *d, uint32_t n) {
   if (n < 6 || d[1] != 6) {
     return;
   }
-  xid_motor_izq = (uint16_t)(d[2] | (d[3] << 8));
-  xid_motor_der = (uint16_t)(d[4] | (d[5] << 8));
+  uint16_t izq = (uint16_t)(d[2] | (d[3] << 8));
+  uint16_t der = (uint16_t)(d[4] | (d[5] << 8));
+  if (izq != xid_motor_izq || der != xid_motor_der) {
+    xidAnotar('R', 0, 0, izq, der);  // solo los CAMBIOS de rumble (llegan ~60/s iguales)
+  }
+  xid_motor_izq = izq;
+  xid_motor_der = der;
   xidSalidas++;
   if (xidSalidas <= 5) {
     debugLog("[xid] rumble izq=%u der=%u (paquete %lu)\n", xid_motor_izq, xid_motor_der, xidSalidas);
@@ -808,6 +827,10 @@ static void xidProcesarSalida(const uint8_t *d, uint32_t n) {
 static void xid_drv_init(void) {}
 static void xid_drv_reset(uint8_t rhport) {
   (void)rhport;
+  if (xid_ep_in != 0) {
+    xidVolcarCaja = true;  // estaba montado y el host reseteo: volcar la caja negra desde loop()
+  }
+  xidAnotar('Z', 0, 0, 0, 0);
   xid_ep_in = 0;
   xid_ep_out = 0;
   xidResets++;
@@ -842,6 +865,9 @@ static bool xid_drv_control_xfer(uint8_t rhport, uint8_t stage, tusb_control_req
   const bool entrada = (req->bmRequestType_bit.direction == TUSB_DIR_IN);
   if (stage == CONTROL_STAGE_SETUP) {
     xidClase++;
+    if (req->bRequest != 0x09) {  // los SET_REPORT de rumble iguales (~60/s) llenarian la caja
+      xidAnotar('C', req->bmRequestType, req->bRequest, req->wValue, req->wLength);
+    }
     if (xidLogsTrasMontar < 8) {
       xidLogsTrasMontar++;
       debugLog("[xid] clase bmReq=0x%02X bReq=0x%02X wValue=0x%04X wLen=%u\n",
@@ -915,6 +941,7 @@ extern "C" bool tinyusb_vendor_control_request_cb(uint8_t rhport, uint8_t stage,
     return false;
   }
   xidVendor++;
+  xidAnotar('V', req->bmRequestType, req->bRequest, req->wValue, req->wLength);
   if (xidVendor <= 12) {
     debugLog("[xid] peticion vendor bReq=0x%02X wValue=0x%04X wIndex=%u wLen=%u\n",
              req->bRequest, req->wValue, req->wIndex, req->wLength);
@@ -1022,6 +1049,7 @@ static void xidEnviarEstado() {
   memcpy(xid_in_buf, &nuevo, sizeof(nuevo));
   if (usbd_edpt_xfer(0, xid_ep_in, xid_in_buf, sizeof(nuevo))) {
     xidEnviados++;
+    xidAnotar('I', nuevo.buttons, nuevo.analog[0], (uint16_t)nuevo.lx, (uint16_t)nuevo.ly);
     memcpy(&xid_enviado, &nuevo, sizeof(nuevo));
     xid_pendiente = false;
   } else {
@@ -1317,6 +1345,20 @@ void loop() {
   // montado y lleva XID_SUELTO_MS desmontado seguido, se reinicia la placa (~4 s) y el Xbox la
   // vuelve a reconocer como si se hubiera reconectado el cable. Las tandas de resets del Xbox
   // (~170 ms entre una y otra) no llegan a disparar esto; solo el abandono final.
+  if (modoActual == MODO_XBOX_CLASICO && xidVolcarCaja) {
+    xidVolcarCaja = false;
+    static uint8_t volcados = 0;
+    if (volcados < 3) {  // solo los primeros resets de cada arranque (la tanda repite lo mismo)
+      volcados++;
+      debugLog("[caja] reset del Xbox en %lu ms; ultimos eventos (C=clase V=vendor R=rumble I=reporte Z=reset):\n", now);
+      for (uint8_t k = 0; k < 16; k++) {
+        const XidEvento &e = xidCaja[(xidCajaPos + k) % 16];
+        if (e.tipo == 0) continue;
+        debugLog("[caja] %lu %c %02X %02X %04X %04X\n", (unsigned long)e.ms, e.tipo, e.a, e.b, e.c, e.d);
+      }
+    }
+  }
+
   if (modoActual == MODO_XBOX_CLASICO) {
     static bool xidMontadoAlgunaVez = false;
     static unsigned long xidUltimoMontado = 0;
