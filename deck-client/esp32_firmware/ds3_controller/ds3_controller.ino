@@ -767,8 +767,14 @@ static uint8_t xid_out_buf[32];
 static uint8_t xid_in_buf[32];
 static uint8_t xid_ctrl_buf[32];
 static XidInReport xid_ultimo;                 // ultimo reporte armado (GET_REPORT)
+static XidInReport xid_enviado;                // lo ultimo que SI salio por el endpoint IN
+static volatile bool xid_pendiente = true;     // hay un cambio que todavia no salio (ver xidEnviarEstado)
 static uint16_t xid_motor_izq = 0, xid_motor_der = 0;
 unsigned long xidEnviados = 0, xidFallidos = 0, xidOcupado = 0, xidSalidas = 0, xidVendor = 0;
+// Diagnostico de la desconexion en juego (2026-09-27): tras ~10 s jugando, el Xbox reseteaba el
+// control cada ~170 ms (6 veces) y luego lo abandonaba. Estos contadores/logs dicen QUE rechaza.
+unsigned long xidInOk = 0, xidXferMal = 0, xidStall = 0, xidResets = 0, xidClase = 0;
+static uint8_t xidLogsTrasMontar = 0;  // cuantas peticiones de control se loguean tras cada montaje
 
 // Descriptor del interface: 9 (interface) + 7 (EP IN) + 7 (EP OUT) = 23 bytes.
 extern "C" uint16_t xid_load_descriptor(uint8_t *dst, uint8_t *itf) {
@@ -804,6 +810,8 @@ static void xid_drv_reset(uint8_t rhport) {
   (void)rhport;
   xid_ep_in = 0;
   xid_ep_out = 0;
+  xidResets++;
+  xidLogsTrasMontar = 0;  // loguear de nuevo las primeras peticiones de la siguiente enumeracion
 }
 
 static uint16_t xid_drv_open(uint8_t rhport, tusb_desc_interface_t const *desc_itf, uint16_t max_len) {
@@ -821,6 +829,7 @@ static uint16_t xid_drv_open(uint8_t rhport, tusb_desc_interface_t const *desc_i
   debugLog("[xid] interface abierta: EP IN=0x%02X OUT=0x%02X\n", xid_ep_in, xid_ep_out);
   // Dejar el endpoint OUT listo para recibir el rumble.
   usbd_edpt_xfer(rhport, xid_ep_out, xid_out_buf, sizeof(xid_out_buf));
+  xid_pendiente = true;  // tras cada (re)enumeracion, mandar el estado actual aunque no haya cambiado
   return drv_len;
 }
 
@@ -832,6 +841,12 @@ static bool xid_drv_control_xfer(uint8_t rhport, uint8_t stage, tusb_control_req
   }
   const bool entrada = (req->bmRequestType_bit.direction == TUSB_DIR_IN);
   if (stage == CONTROL_STAGE_SETUP) {
+    xidClase++;
+    if (xidLogsTrasMontar < 8) {
+      xidLogsTrasMontar++;
+      debugLog("[xid] clase bmReq=0x%02X bReq=0x%02X wValue=0x%04X wLen=%u\n",
+               req->bmRequestType, req->bRequest, req->wValue, req->wLength);
+    }
     if (entrada && req->bRequest == 0x01) {
       uint16_t n = req->wLength < sizeof(xid_ultimo) ? req->wLength : sizeof(xid_ultimo);
       return tud_control_xfer(rhport, req, (void *)&xid_ultimo, n);
@@ -839,6 +854,11 @@ static bool xid_drv_control_xfer(uint8_t rhport, uint8_t stage, tusb_control_req
     if (!entrada && req->bRequest == 0x09) {
       uint16_t n = req->wLength < sizeof(xid_ctrl_buf) ? req->wLength : sizeof(xid_ctrl_buf);
       return tud_control_xfer(rhport, req, xid_ctrl_buf, n);
+    }
+    xidStall++;
+    if (xidStall <= 20) {
+      debugLog("[xid] STALL clase bmReq=0x%02X bReq=0x%02X wValue=0x%04X wLen=%u\n",
+               req->bmRequestType, req->bRequest, req->wValue, req->wLength);
     }
     return false;
   }
@@ -849,6 +869,15 @@ static bool xid_drv_control_xfer(uint8_t rhport, uint8_t stage, tusb_control_req
 }
 
 static bool xid_drv_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes) {
+  if (result != XFER_RESULT_SUCCESS) {
+    xidXferMal++;
+    if (xidXferMal <= 20) {
+      debugLog("[xid] transferencia fallida ep=0x%02X result=%d bytes=%lu\n",
+               ep_addr, (int)result, (unsigned long)xferred_bytes);
+    }
+  } else if (ep_addr == xid_ep_in) {
+    xidInOk++;
+  }
   if (ep_addr == xid_ep_out) {
     if (result == XFER_RESULT_SUCCESS) {
       xidProcesarSalida(xid_out_buf, xferred_bytes);
@@ -902,6 +931,10 @@ extern "C" bool tinyusb_vendor_control_request_cb(uint8_t rhport, uint8_t stage,
     datos = XID_CAPS_OUT;
     largo = sizeof(XID_CAPS_OUT);
   } else {
+    xidStall++;
+    if (xidStall <= 20) {
+      debugLog("[xid] STALL vendor bReq=0x%02X wValue=0x%04X wLen=%u\n", req->bRequest, req->wValue, req->wLength);
+    }
     return false;
   }
   if (req->wLength < largo) {
@@ -958,8 +991,22 @@ static void buildXboxReport(XidInReport *r) {
   r->ry = xidStick(-state.rstick_y);
 }
 
+// 2026-09-27: SOLO SE MANDA CUANDO EL ESTADO CAMBIA (o si el ultimo cambio aun no pudo
+// salir), igual que OGX-Mini, que emula este mismo control y funciona. Antes se mandaba
+// ademas un "latido" cada 8 ms aunque nada cambiara, como en el modo DS3 - sospechoso de
+// la desconexion en juego. El reporte se arma aparte y se copia de un golpe a xid_ultimo
+// porque GET_REPORT lo lee desde la tarea de USB. (xid_enviado/xid_pendiente estan arriba,
+// junto a xid_ultimo: xid_drv_open los necesita para mandar el primer reporte al montar.)
 static void xidEnviarEstado() {
-  buildXboxReport(&xid_ultimo);
+  XidInReport nuevo;
+  buildXboxReport(&nuevo);
+  memcpy(&xid_ultimo, &nuevo, sizeof(nuevo));
+  if (memcmp(&nuevo, &xid_enviado, sizeof(nuevo)) != 0) {
+    xid_pendiente = true;
+  }
+  if (!xid_pendiente) {
+    return;  // nada cambio desde el ultimo reporte que la consola ya recibio
+  }
   if (xid_ep_in == 0 || !tud_ready()) {
     xidFallidos++;
     return;
@@ -972,9 +1019,11 @@ static void xidEnviarEstado() {
     xidOcupado++;
     return;
   }
-  memcpy(xid_in_buf, &xid_ultimo, sizeof(xid_ultimo));
-  if (usbd_edpt_xfer(0, xid_ep_in, xid_in_buf, sizeof(xid_ultimo))) {
+  memcpy(xid_in_buf, &nuevo, sizeof(nuevo));
+  if (usbd_edpt_xfer(0, xid_ep_in, xid_in_buf, sizeof(nuevo))) {
     xidEnviados++;
+    memcpy(&xid_enviado, &nuevo, sizeof(nuevo));
+    xid_pendiente = false;
   } else {
     usbd_edpt_release(0, xid_ep_in);
     xidFallidos++;
@@ -1262,6 +1311,27 @@ void loop() {
     }
   }
 
+  // Vigilancia del USB en modo XBOX CLASICO (2026-09-27). La de abajo mira tud_hid_ready(), que
+  // en este modo nunca es verdadero (no hay HID): por eso, cuando el Xbox soltaba el control,
+  // la placa se quedaba desmontada para siempre con el WiFi perfecto. Aca: si alguna vez estuvo
+  // montado y lleva XID_SUELTO_MS desmontado seguido, se reinicia la placa (~4 s) y el Xbox la
+  // vuelve a reconocer como si se hubiera reconectado el cable. Las tandas de resets del Xbox
+  // (~170 ms entre una y otra) no llegan a disparar esto; solo el abandono final.
+  if (modoActual == MODO_XBOX_CLASICO) {
+    static bool xidMontadoAlgunaVez = false;
+    static unsigned long xidUltimoMontado = 0;
+    const unsigned long XID_SUELTO_MS = 2000;
+    if (tud_mounted()) {
+      xidMontadoAlgunaVez = true;
+      xidUltimoMontado = now;
+    } else if (xidMontadoAlgunaVez && (now - xidUltimoMontado) > XID_SUELTO_MS) {
+      debugLog("[xid] desmontado hace %lu ms: reiniciando la placa (resets=%lu stall=%lu xferMal=%lu)\n",
+               now - xidUltimoMontado, xidResets, xidStall, xidXferMal);
+      delay(50);
+      ESP.restart();
+    }
+  }
+
   // Vigilancia del USB (ver la nota larga de arriba).
   if (tud_hid_ready()) {
     ultimoReady = now;
@@ -1282,8 +1352,9 @@ void loop() {
              outputReports,
              (int)tud_hid_ready(), probe[1], probe[2], probe[3], (int)state.cross);
     if (modoActual == MODO_XBOX_CLASICO) {
-      debugLog("[hb-xid] montado=%d ep_in=0x%02X enviados=%lu fallidos=%lu ocupado=%lu rumble=%lu vendor=%lu\n",
-               (int)tud_mounted(), xid_ep_in, xidEnviados, xidFallidos, xidOcupado, xidSalidas, xidVendor);
+      debugLog("[hb-xid] montado=%d ep_in=0x%02X enviados=%lu inOk=%lu fallidos=%lu ocupado=%lu rumble=%lu vendor=%lu clase=%lu stall=%lu xferMal=%lu resets=%lu\n",
+               (int)tud_mounted(), xid_ep_in, xidEnviados, xidInOk, xidFallidos, xidOcupado, xidSalidas, xidVendor,
+               xidClase, xidStall, xidXferMal, xidResets);
     }
   }
 }
