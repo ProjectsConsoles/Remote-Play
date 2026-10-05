@@ -48,6 +48,10 @@ FPS = int(os.environ.get("PS3RP_PC_FPS", "60"))
 BITRATE = os.environ.get("PS3RP_PC_BITRATE", "15M")
 SIN_MANDO_S = 60
 INTRA_REFRESH = os.environ.get("PS3RP_PC_INTRA_REFRESH", "1") == "1"
+# Mientras se transmite, la salida predeterminada pasa a esta "bocina" virtual (la instala Steam) para que
+# el juego no suene en la laptop y se capture de ahi; al terminar se regresa la que estaba. Vacio = no tocar.
+SALIDA_VIRTUAL = os.environ.get("PS3RP_PC_SALIDA_VIRTUAL", "Steam Streaming Speakers")
+ARCHIVO_SALIDA_PREVIA = os.path.join(CARPETA, "salida_previa.txt")
 
 
 def buscar_ffmpeg():
@@ -60,6 +64,74 @@ def buscar_ffmpeg():
 
 
 # ------------------------------------------------------------------------------------------------
+# Salida de audio: que el juego suene en la tableta y NO en la laptop (reportado 2026-10-05)
+# ------------------------------------------------------------------------------------------------
+def _dispositivos_salida():
+    """{nombre: id} de las salidas de audio activas (pycaw). COM se inicializa en el hilo que llama."""
+    import warnings
+    try:
+        import comtypes
+        comtypes.CoInitialize()
+    except Exception:
+        pass
+    from pycaw.utils import AudioUtilities
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        todos = AudioUtilities.GetAllDevices()
+        bocinas = AudioUtilities.GetSpeakers()
+    salidas = {d.FriendlyName: d.id for d in todos
+               if d.id and d.id.startswith("{0.0.0.") and "Active" in str(d.state)}
+    actual = getattr(bocinas, "id", None) or bocinas.GetId()
+    return salidas, actual
+
+
+def _poner_salida(dev_id):
+    from pycaw.utils import AudioUtilities
+    AudioUtilities.SetDefaultDevice(dev_id)
+
+
+def silenciar_laptop():
+    """Pone SALIDA_VIRTUAL como predeterminada. Devuelve el id de la que estaba (o None si no se cambio)."""
+    if not SALIDA_VIRTUAL:
+        return None
+    try:
+        salidas, actual = _dispositivos_salida()
+        virtual = next((i for n, i in salidas.items() if SALIDA_VIRTUAL.lower() in n.lower()), None)
+        if not virtual:
+            log.warning("no hay '%s': el audio tambien sonara en la PC", SALIDA_VIRTUAL)
+            return None
+        if virtual == actual:
+            return None
+        with open(ARCHIVO_SALIDA_PREVIA, "w") as f:
+            f.write(actual)     # por si el servidor se cae: al volver a arrancar se restaura
+        _poner_salida(virtual)
+        log.info("salida de audio -> %s (estaba %s)", SALIDA_VIRTUAL, actual)
+        return actual
+    except Exception as e:
+        log.error("no se pudo cambiar la salida de audio: %s", e)
+        return None
+
+
+def restaurar_salida(previa=None):
+    if previa is None:
+        try:
+            with open(ARCHIVO_SALIDA_PREVIA) as f:
+                previa = f.read().strip()
+        except OSError:
+            return
+    try:
+        _dispositivos_salida()   # inicializa COM en este hilo
+        _poner_salida(previa)
+        log.info("salida de audio restaurada (%s)", previa)
+    except Exception as e:
+        log.error("no se pudo restaurar la salida de audio: %s", e)
+    try:
+        os.remove(ARCHIVO_SALIDA_PREVIA)
+    except OSError:
+        pass
+
+
+# ------------------------------------------------------------------------------------------------
 # Transmision: ffmpeg (pantalla + NVENC) y el audio del sistema por stdin
 # ------------------------------------------------------------------------------------------------
 class Transmision:
@@ -69,17 +141,38 @@ class Transmision:
         self.hilo_audio = None
         self.cerrojo = threading.Lock()
         self.inicio = 0.0
+        self.salida_previa = None
+        self.directo_falla = False   # el camino directo a NVENC fallo una vez: ya no se intenta
+        self.directo = False
 
     def corriendo(self):
         return self.proc is not None and self.proc.poll() is None
 
+    def murio(self):
+        """ffmpeg se cerro solo (no lo detuvimos nosotros)."""
+        return self.proc is not None and self.proc.poll() is not None
+
     def iniciar(self, ip):
         with self.cerrojo:
-            self._detener()
+            # (antes de _detener, que borra el proceso) si el camino directo a NVENC murio en sus primeros
+            # segundos, no volver a intentarlo
+            if self.directo and self.murio() and time.monotonic() - self.inicio < 5:
+                log.warning("el camino directo a NVENC fallo: se usa hwdownload desde ahora")
+                self.directo_falla = True
+            self._detener(restaurar_audio=False)   # reinicio: la salida virtual se queda puesta
             ffmpeg = buscar_ffmpeg()
             if not ffmpeg:
                 raise RuntimeError("no encuentro ffmpeg")
+            if self.salida_previa is None:
+                self.salida_previa = silenciar_laptop()
             tasa, canales, abrir_audio = _abrir_loopback()
+            # Pantalla en la NVIDIA (con un juego abierto, ver bucle_vigia): ddagrab y NVENC estan en la
+            # misma GPU y NVENC toma los cuadros de D3D11 directo -> 60 fps. En la Intel (escritorio) hay
+            # que bajarlos a memoria (hwdownload) y eso lo deja en ~40 fps.
+            self.directo = "NVIDIA" in gpu_de_la_pantalla().upper() and not self.directo_falla
+            captura = f"ddagrab=output_idx=0:framerate={FPS}:draw_mouse=1"
+            if not self.directo:
+                captura += ",hwdownload,format=bgra"
             cmd = [
                 ffmpeg, "-hide_banner", "-loglevel", "warning",
                 # progreso cada 2 s (cuadros, fps, velocidad) para diagnosticar sin ver la pantalla
@@ -88,7 +181,7 @@ class Transmision:
                 # asi que los frames de ddagrab viven en la Intel y NVENC no los puede tomar directo
                 # ("OpenEncodeSessionEx failed: no encode device"): se bajan a memoria (hwdownload) y
                 # NVENC los sube a la RTX. Cuesta unos ms por cuadro; los juegos siguen en la NVIDIA.
-                "-f", "lavfi", "-i", f"ddagrab=output_idx=0:framerate={FPS}:draw_mouse=1,hwdownload,format=bgra",
+                "-f", "lavfi", "-i", captura,
             ]
             if abrir_audio:
                 # -use_wallclock_as_timestamps: sin esto el audio del pipe lleva tiempos por cantidad de
@@ -120,8 +213,8 @@ class Transmision:
                 "-max_interleave_delta", "0", "-pes_payload_size", "0",
                 f"udp://{ip}:{PUERTO_VIDEO}?pkt_size=1316",
             ]
-            log.info("ffmpeg -> %s:%s (%s fps, %s, audio=%s): %s", ip, PUERTO_VIDEO, FPS, BITRATE,
-                     bool(abrir_audio), " ".join(cmd))
+            log.info("ffmpeg -> %s:%s (%s fps, %s, audio=%s, %s): %s", ip, PUERTO_VIDEO, FPS, BITRATE,
+                     bool(abrir_audio), "directo NVIDIA" if self.directo else "hwdownload", " ".join(cmd))
             err = open(os.path.join(CARPETA, "ffmpeg.log"), "ab")
             self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE if abrir_audio else subprocess.DEVNULL,
                                          stdout=subprocess.DEVNULL, stderr=err,
@@ -136,7 +229,7 @@ class Transmision:
         with self.cerrojo:
             self._detener()
 
-    def _detener(self):
+    def _detener(self, restaurar_audio=True):
         if self.proc is not None:
             log.info("deteniendo ffmpeg")
             # PRIMERO matar ffmpeg y DESPUES cerrar su stdin: cerrar el pipe mientras el hilo de audio
@@ -152,6 +245,9 @@ class Transmision:
             except Exception:
                 pass
         self.proc = None
+        if restaurar_audio and self.salida_previa is not None:
+            restaurar_salida(self.salida_previa)
+            self.salida_previa = None
 
 
 def _abrir_loopback():
@@ -470,11 +566,60 @@ def bucle_config(transmision, mando):
         s.sendto(json.dumps(resp).encode(), origen)
 
 
+# ------------------------------------------------------------------------------------------------
+# Vigia: la laptop cambia la pantalla de GPU (Intel <-> NVIDIA) al abrir/cerrar un juego
+# ------------------------------------------------------------------------------------------------
+def gpu_de_la_pantalla():
+    """Nombre del adaptador que maneja la pantalla principal (EnumDisplayDevices, muy barato)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class DISPLAY_DEVICEW(ctypes.Structure):
+        _fields_ = [("cb", wintypes.DWORD), ("DeviceName", wintypes.WCHAR * 32),
+                    ("DeviceString", wintypes.WCHAR * 128), ("StateFlags", wintypes.DWORD),
+                    ("DeviceID", wintypes.WCHAR * 128), ("DeviceKey", wintypes.WCHAR * 128)]
+
+    i = 0
+    while True:
+        d = DISPLAY_DEVICEW(cb=ctypes.sizeof(DISPLAY_DEVICEW))
+        if not ctypes.windll.user32.EnumDisplayDevicesW(None, i, ctypes.byref(d), 0):
+            return ""
+        if d.StateFlags & 0x4:   # DISPLAY_DEVICE_PRIMARY_DEVICE
+            return d.DeviceString
+        i += 1
+
+
+def bucle_vigia(transmision):
+    """Esta laptop (MSI, Advanced Optimus) pasa la pantalla a la NVIDIA al abrir un juego y de vuelta a la
+    Intel al cerrarlo. ddagrab se queda enganchado a la GPU que tenia la pantalla al arrancar y la imagen
+    se CONGELA (reportado 2026-10-05: "prendi el juego y se congelo"). Si la GPU cambia mientras se
+    transmite, se reinicia ffmpeg (corte de 1-2 s); tambien si ffmpeg se murio solo."""
+    gpu = gpu_de_la_pantalla()
+    log.info("pantalla en: %s", gpu)
+    while True:
+        time.sleep(1)
+        try:
+            ahora = gpu_de_la_pantalla()
+            cambio = ahora and ahora != gpu
+            if cambio:
+                log.info("la pantalla cambio de GPU: %s -> %s", gpu, ahora)
+                gpu = ahora
+            destino = transmision.destino
+            if destino and (cambio and transmision.corriendo() or transmision.murio()):
+                log.info("reiniciando la captura hacia %s", destino)
+                time.sleep(0.5)   # dejar que Windows termine de mover la pantalla
+                transmision.iniciar(destino)
+        except Exception as e:
+            log.error("vigia: %s", e)
+
+
 def main():
     log.info("=== servidor de PC iniciando ===")
+    restaurar_salida()   # si la vez anterior se cayo transmitiendo, la laptop se quedo sin sonido
     transmision = Transmision()
     mando = Mando()
     threading.Thread(target=bucle_mando, args=(mando, transmision), daemon=True).start()
+    threading.Thread(target=bucle_vigia, args=(transmision,), daemon=True).start()
     bucle_config(transmision, mando)
 
 

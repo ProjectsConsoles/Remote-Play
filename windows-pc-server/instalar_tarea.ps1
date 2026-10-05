@@ -9,7 +9,7 @@ $carpeta = Split-Path -Parent $MyInvocation.MyCommand.Path
 $python = 'C:\Program Files\Python312\python.exe'
 $pythonw = 'C:\Program Files\Python312\pythonw.exe'
 
-& $python -m pip install --quiet --disable-pip-version-check vgamepad pyaudiowpatch
+& $python -m pip install --quiet --disable-pip-version-check vgamepad pyaudiowpatch pycaw
 if ($LASTEXITCODE -ne 0) { throw 'fallo pip install' }
 
 # Firewall: la tableta le habla por UDP 9200 (config) y 9000 (mando). Solo red local.
