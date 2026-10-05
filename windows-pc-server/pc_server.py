@@ -1,0 +1,413 @@
+#!/usr/bin/env python3
+"""Servidor de PC (2026-10-05): jugar los juegos de ESTA PC en la tableta Android, con el mismo cliente
+que ya se usa para el PS3 (en vez de Moonlight/Sunshine, que al usuario le daban mucho lag).
+
+Tres partes, todas en este proceso:
+
+  1. Puerto UDP 9200: el mismo protocolo que config_listener.ps1 del servidor de la capturadora, para
+     que la app Android (ConsolaActivity -> "PC") lo use igual:
+        {"cmd": "get_config"}                    -> estado
+        {"cmd": "set_config", "ip": ..., ...}    -> transmitir a esa IP (reinicia si ya transmitia)
+        {"cmd": "stop_server"}                   -> dejar de transmitir
+  2. Transmision: ffmpeg captura la pantalla con ddagrab (Desktop Duplication) y la codifica con NVENC
+     con los MISMOS ajustes de baja latencia del servidor del PS3 (start_server_stream.bat): H.264 p1 ull,
+     sin B-frames, GOP 30, Opus lowdelay de 5 ms, MPEG-TS con -pes_payload_size 0 por UDP al puerto 5000.
+     El audio es lo que suena en la PC (loopback de WASAPI con PyAudioWPatch), metido a ffmpeg por stdin:
+     la laptop no tiene "Mezcla estereo".
+  3. Puerto UDP 9000: el JSON del mando que la tableta le manda al ESP32 (GamepadState.toJson) se
+     convierte en un control de Xbox 360 virtual (ViGEmBus + vgamepad). Los juegos lo ven como un
+     control real.
+
+Si la tableta deja de mandar el mando por SIN_MANDO_S, se deja de transmitir (la app no avisa al salir).
+
+TIENE QUE CORRER EN LA SESION DEL USUARIO, no por SSH: ddagrab no puede capturar desde la sesion 0
+(sin escritorio). Lo arranca la tarea programada "PS3RP PC Server" (instalar_tarea.ps1) al iniciar sesion.
+
+Log: pc_server.log junto a este archivo.
+"""
+
+import glob
+import json
+import logging
+import os
+import shutil
+import socket
+import subprocess
+import threading
+import time
+
+CARPETA = os.path.dirname(os.path.abspath(__file__))
+logging.basicConfig(filename=os.path.join(CARPETA, "pc_server.log"), level=logging.INFO,
+                    format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger("pc")
+
+PUERTO_CONFIG = 9200
+PUERTO_MANDO = int(os.environ.get("PS3RP_PC_PUERTO_MANDO", "9000"))
+PUERTO_VIDEO = int(os.environ.get("PS3RP_PC_PUERTO_VIDEO", "5000"))
+FPS = int(os.environ.get("PS3RP_PC_FPS", "60"))
+BITRATE = os.environ.get("PS3RP_PC_BITRATE", "15M")
+SIN_MANDO_S = 60
+
+
+def buscar_ffmpeg():
+    if os.environ.get("PS3RP_FFMPEG") and os.path.isfile(os.environ["PS3RP_FFMPEG"]):
+        return os.environ["PS3RP_FFMPEG"]
+    # winget (Gyan.FFmpeg) lo deja aqui y su alias no siempre esta en el PATH de una tarea programada
+    for f in glob.glob(os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg*\*\bin\ffmpeg.exe")):
+        return f
+    return shutil.which("ffmpeg")
+
+
+# ------------------------------------------------------------------------------------------------
+# Transmision: ffmpeg (pantalla + NVENC) y el audio del sistema por stdin
+# ------------------------------------------------------------------------------------------------
+class Transmision:
+    def __init__(self):
+        self.proc = None
+        self.destino = None
+        self.hilo_audio = None
+        self.cerrojo = threading.Lock()
+        self.inicio = 0.0
+
+    def corriendo(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    def iniciar(self, ip):
+        with self.cerrojo:
+            self._detener()
+            ffmpeg = buscar_ffmpeg()
+            if not ffmpeg:
+                raise RuntimeError("no encuentro ffmpeg")
+            tasa, canales, abrir_audio = _abrir_loopback()
+            cmd = [
+                ffmpeg, "-hide_banner", "-loglevel", "warning",
+                # progreso cada 2 s (cuadros, fps, velocidad) para diagnosticar sin ver la pantalla
+                "-stats_period", "2", "-progress", os.path.join(CARPETA, "ffmpeg_progreso.log"),
+                # video: Desktop Duplication. En esta laptop (Optimus) la pantalla la maneja la GPU Intel,
+                # asi que los frames de ddagrab viven en la Intel y NVENC no los puede tomar directo
+                # ("OpenEncodeSessionEx failed: no encode device"): se bajan a memoria (hwdownload) y
+                # NVENC los sube a la RTX. Cuesta unos ms por cuadro; los juegos siguen en la NVIDIA.
+                "-f", "lavfi", "-i", f"ddagrab=output_idx=0:framerate={FPS}:draw_mouse=0,hwdownload,format=bgra",
+            ]
+            if abrir_audio:
+                # -use_wallclock_as_timestamps: sin esto el audio del pipe lleva tiempos por cantidad de
+                # muestras y el video por reloj, y ffmpeg frenaba el video a ~5 fps esperando al audio
+                # (medido: 50 fps con audio de lavfi, 5 fps con el pipe). Igual que el server del PS3.
+                cmd += ["-use_wallclock_as_timestamps", "1",
+                        "-f", "s16le", "-ar", str(tasa), "-ac", str(canales), "-thread_queue_size", "64",
+                        "-i", "pipe:0"]
+            cmd += [
+                "-map", "0:v",
+                "-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ull", "-zerolatency", "1",
+                "-rc", "cbr", "-b:v", BITRATE, "-maxrate", BITRATE, "-bufsize", "500k",
+                "-g", "30", "-bf", "0", "-rc-lookahead", "0", "-delay", "0",
+            ]
+            if abrir_audio:
+                cmd += ["-map", "1:a", "-af", "aresample=async=1000",
+                        "-c:a", "libopus", "-application", "lowdelay", "-frame_duration", "5",
+                        "-b:a", "96k", "-ar", "48000", "-ac", "2"]
+            cmd += [
+                "-f", "mpegts", "-muxdelay", "0", "-muxpreload", "0", "-flush_packets", "1",
+                "-max_interleave_delta", "0", "-pes_payload_size", "0",
+                f"udp://{ip}:{PUERTO_VIDEO}?pkt_size=1316",
+            ]
+            log.info("ffmpeg -> %s:%s (%s fps, %s, audio=%s): %s", ip, PUERTO_VIDEO, FPS, BITRATE,
+                     bool(abrir_audio), " ".join(cmd))
+            err = open(os.path.join(CARPETA, "ffmpeg.log"), "ab")
+            self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE if abrir_audio else subprocess.DEVNULL,
+                                         stdout=subprocess.DEVNULL, stderr=err,
+                                         creationflags=subprocess.CREATE_NO_WINDOW)
+            self.destino = ip
+            self.inicio = time.monotonic()
+            if abrir_audio:
+                self.hilo_audio = threading.Thread(target=abrir_audio, args=(self.proc,), daemon=True)
+                self.hilo_audio.start()
+
+    def detener(self):
+        with self.cerrojo:
+            self._detener()
+
+    def _detener(self):
+        if self.proc is not None:
+            log.info("deteniendo ffmpeg")
+            # PRIMERO matar ffmpeg y DESPUES cerrar su stdin: cerrar el pipe mientras el hilo de audio
+            # esta escribiendo en el se trababa en Windows (stop_server no contestaba y ffmpeg seguia).
+            try:
+                self.proc.terminate()
+                self.proc.wait(3)
+            except Exception:
+                self.proc.kill()
+            try:
+                if self.proc.stdin:
+                    self.proc.stdin.close()
+            except Exception:
+                pass
+        self.proc = None
+
+
+def _abrir_loopback():
+    """(tasa, canales, funcion_que_copia_el_audio_a_ffmpeg). Siempre hay audio para ffmpeg: si no se
+    puede capturar el del sistema, se le manda silencio (sin eso ffmpeg espera el audio y tampoco saca
+    video: paso en las primeras pruebas)."""
+    tasa, canales, indice, nombre = 48000, 2, None, None
+    try:
+        import pyaudiowpatch as pyaudio
+        pa = pyaudio.PyAudio()
+        try:
+            disp = pa.get_default_wasapi_loopback()
+            tasa, canales = int(disp["defaultSampleRate"]), min(2, int(disp["maxInputChannels"]))
+            indice, nombre = disp["index"], disp["name"]
+        finally:
+            pa.terminate()
+    except Exception as e:
+        pyaudio = None
+        log.warning("sin loopback de audio (%s): va silencio", e)
+    log.info("audio: %s a %s Hz, %s canales", nombre or "silencio", tasa, canales)
+
+    def copiar(proc):
+        # El loopback de WASAPI NO entrega nada mientras la PC esta en silencio, asi que el audio llega
+        # por callback a un buffer y aqui se le da a ffmpeg a ritmo de reloj, cada 5 ms: lo que haya
+        # llegado, o silencio si no llego nada. PyAudio se crea EN ESTE HILO: creado en otro, WASAPI
+        # fallaba al abrir ("[Errno -9999] Unanticipated host error").
+        import collections
+        bloque = tasa // 200                      # 5 ms, como el frame de Opus
+        bytes_bloque = bloque * canales * 2
+        pendiente = collections.deque()
+        silencio = bytes(bytes_bloque)
+        pa = flujo = None
+
+        def llega(datos, _n, _info, _estado):
+            pendiente.append(datos)
+            if len(pendiente) > 40:               # muy atrasado: tirar lo viejo, no acumular delay
+                pendiente.popleft()
+            return (None, pyaudio.paContinue)
+
+        if pyaudio is not None and indice is not None:
+            try:
+                pa = pyaudio.PyAudio()
+                flujo = pa.open(format=pyaudio.paInt16, channels=canales, rate=tasa, input=True,
+                                input_device_index=indice, stream_callback=llega)
+            except Exception as e:
+                log.error("no se pudo abrir el loopback (%s): va silencio", e)
+                flujo = None
+        buf = bytearray()
+        t0 = time.perf_counter()
+        enviados = 0
+        try:
+            while proc.poll() is None:
+                debidos = int((time.perf_counter() - t0) * 200)   # bloques que ya deberian haber salido
+                while enviados < debidos:
+                    while len(buf) < bytes_bloque and pendiente:
+                        buf += pendiente.popleft()
+                    if len(buf) >= bytes_bloque:
+                        trozo, buf = bytes(buf[:bytes_bloque]), buf[bytes_bloque:]
+                    else:
+                        trozo = silencio
+                    proc.stdin.write(trozo)
+                    enviados += 1
+                proc.stdin.flush()
+                time.sleep(0.002)
+        except Exception:
+            pass  # ffmpeg se cerro
+        finally:
+            if flujo is not None:
+                flujo.close()
+            if pa is not None:
+                pa.terminate()
+
+    return tasa, canales, copiar
+
+
+# ------------------------------------------------------------------------------------------------
+# Mando: JSON de la tableta -> control de Xbox 360 virtual
+# ------------------------------------------------------------------------------------------------
+class Mando:
+    BOTONES = {
+        "A": "XUSB_GAMEPAD_A", "B": "XUSB_GAMEPAD_B", "X": "XUSB_GAMEPAD_X", "Y": "XUSB_GAMEPAD_Y",
+        "L1": "XUSB_GAMEPAD_LEFT_SHOULDER", "R1": "XUSB_GAMEPAD_RIGHT_SHOULDER",
+        "SELECT": "XUSB_GAMEPAD_BACK", "START": "XUSB_GAMEPAD_START", "STEAM": "XUSB_GAMEPAD_GUIDE",
+        "L3_CLICK": "XUSB_GAMEPAD_LEFT_THUMB", "R3_CLICK": "XUSB_GAMEPAD_RIGHT_THUMB",
+    }
+
+    def __init__(self):
+        self.pad = None
+        self.ultimo = 0.0
+        self.paquetes = 0
+        self._intento = 0.0
+
+    def _crear(self):
+        """Un solo control para toda la vida del servidor. Si ViGEmBus no lo acepta (XInput solo tiene 4
+        lugares: con otros controles conectados -o duplicados por Steam Input- no hay lugar), se
+        reintenta cada 5 s en vez de en cada paquete (antes fallaba 120 veces por segundo)."""
+        if time.monotonic() - self._intento < 5:
+            return False
+        self._intento = time.monotonic()
+        try:
+            import vgamepad as vg
+            self.vg = vg
+            self.pad = _pad_paciente(vg)
+            log.info("control de Xbox 360 virtual creado")
+            return True
+        except Exception as e:
+            log.error("no se pudo crear el control virtual (%s); se reintenta en 5 s. "
+                      "¿Hay 4 controles de Xbox conectados? (XInput solo admite 4)", e)
+            return False
+
+    def aplicar(self, d):
+        if self.pad is None and not self._crear():
+            return
+        vg = self.vg
+        b = d.get("buttons", {})
+        ejes = d.get("axes", {})
+        dpad = d.get("dpad", {})
+        p = self.pad
+        p.reset()
+        for nombre, boton in self.BOTONES.items():
+            if b.get(nombre):
+                p.press_button(button=getattr(vg.XUSB_BUTTON, boton))
+        x, y = dpad.get("x", 0), dpad.get("y", 0)
+        if x > 0:
+            p.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT)
+        elif x < 0:
+            p.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT)
+        if y > 0:
+            p.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP)
+        elif y < 0:
+            p.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_DOWN)
+
+        def lim(v):
+            return max(-1.0, min(1.0, float(v)))
+
+        # La tableta manda el eje Y de Android (abajo = +1); XInput es arriba = +1.
+        p.left_joystick_float(x_value_float=lim(ejes.get("LSTICK_X", 0)), y_value_float=-lim(ejes.get("LSTICK_Y", 0)))
+        p.right_joystick_float(x_value_float=lim(ejes.get("RSTICK_X", 0)), y_value_float=-lim(ejes.get("RSTICK_Y", 0)))
+        # Gatillos: -1 suelto .. +1 a fondo; el click digital cuenta como a fondo.
+        lt = 1.0 if b.get("L2_CLICK") else (lim(ejes.get("L2_ANALOG", -1)) + 1) / 2
+        rt = 1.0 if b.get("R2_CLICK") else (lim(ejes.get("R2_ANALOG", -1)) + 1) / 2
+        p.left_trigger_float(value_float=lt)
+        p.right_trigger_float(value_float=rt)
+        p.update()
+
+    def soltar(self):
+        if self.pad is not None:
+            self.pad.reset()
+            self.pad.update()
+
+
+def _pad_paciente(vg):
+    """VX360Gamepad que ESPERA a que el driver lo conecte. El de vgamepad revisa vigem_target_is_attached
+    una sola vez, al instante, e ignora el error de vigem_target_add: si ViGEmBus tardaba, fallaba con
+    "could not connect" pero el control SI terminaba de conectarse y quedaba huerfano ocupando un lugar de
+    XInput (solo hay 4). Con los reintentos se llenaron los 4 y ya no habia lugar (2026-10-05). Aqui se
+    espera hasta 5 s y, si no conecta, se quita del driver explicitamente."""
+    from ctypes import CFUNCTYPE, c_ubyte, c_void_p
+    from vgamepad.win.virtual_gamepad import VBUS, vcli
+
+    class Pad(vg.VX360Gamepad):
+        def __init__(self):
+            self._vivo = False
+            self.vbus = VBUS
+            self._busp = VBUS.get_busp()
+            self._devicep = self.target_alloc()
+            self.CMPFUNC = CFUNCTYPE(None, c_void_p, c_void_p, c_ubyte, c_ubyte, c_ubyte, c_void_p)
+            self.cmp_func = None
+            err = vcli.vigem_target_add(self._busp, self._devicep)
+            limite = time.monotonic() + 5
+            while not vcli.vigem_target_is_attached(self._devicep) and time.monotonic() < limite:
+                time.sleep(0.1)
+            if not vcli.vigem_target_is_attached(self._devicep):
+                vcli.vigem_target_remove(self._busp, self._devicep)
+                vcli.vigem_target_free(self._devicep)
+                raise RuntimeError(f"ViGEmBus no conecto el control (vigem_target_add = 0x{err & 0xffffffff:08x})")
+            self._vivo = True
+            self.report = self.get_default_report()
+            self.update()
+
+        def __del__(self):
+            if getattr(self, "_vivo", False):
+                self._vivo = False
+                super().__del__()
+
+    return Pad()
+
+
+def bucle_mando(mando, transmision):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(("0.0.0.0", PUERTO_MANDO))
+    s.settimeout(0.5)
+    log.info("mando: escuchando UDP %s", PUERTO_MANDO)
+    suelto = True
+    while True:
+        try:
+            datos, _ = s.recvfrom(4096)
+        except socket.timeout:
+            ahora = time.monotonic()
+            # sin paquetes medio segundo: soltar todo (que no se quede un boton apretado)
+            if not suelto and ahora - mando.ultimo > 0.5:
+                mando.soltar()
+                suelto = True
+            # la tableta se fue (la app no avisa al salir): dejar de transmitir
+            if transmision.corriendo() and ahora - max(mando.ultimo, transmision.inicio) > SIN_MANDO_S:
+                log.info("sin mando %s s: se deja de transmitir", SIN_MANDO_S)
+                transmision.detener()
+            continue
+        try:
+            d = json.loads(datos)
+        except ValueError:
+            continue
+        if "set_modo" in d:
+            continue  # comando del ESP32, aqui no aplica
+        try:
+            mando.aplicar(d)
+            mando.ultimo = time.monotonic()
+            mando.paquetes += 1
+            suelto = False
+        except Exception as e:
+            log.exception("error aplicando el mando: %s", e)
+            time.sleep(1)
+
+
+# ------------------------------------------------------------------------------------------------
+# Puerto 9200: mismo protocolo que config_listener.ps1
+# ------------------------------------------------------------------------------------------------
+def bucle_config(transmision, mando):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(("0.0.0.0", PUERTO_CONFIG))
+    log.info("config: escuchando UDP %s", PUERTO_CONFIG)
+    while True:
+        datos, origen = s.recvfrom(4096)
+        try:
+            cmd = json.loads(datos)
+        except ValueError:
+            continue
+        c = cmd.get("cmd")
+        resp = {"ok": True}
+        try:
+            if c == "set_config":
+                ip = cmd.get("ip") or origen[0]
+                transmision.iniciar(ip)
+                resp["aplicado"] = "reiniciado"
+            elif c == "stop_server":
+                transmision.detener()
+                resp["aplicado"] = "detenido"
+            elif c != "get_config":
+                resp = {"ok": False, "error": f"comando desconocido: {c}"}
+        except Exception as e:
+            log.exception("fallo %s", c)
+            resp = {"ok": False, "error": str(e)}
+        corriendo = transmision.corriendo()
+        resp.update({"corriendo": corriendo, "transmitiendo": corriendo, "ip": transmision.destino or "",
+                     "modo": "pc", "modos": ["pc"], "mando_paquetes": mando.paquetes})
+        s.sendto(json.dumps(resp).encode(), origen)
+
+
+def main():
+    log.info("=== servidor de PC iniciando ===")
+    transmision = Transmision()
+    mando = Mando()
+    threading.Thread(target=bucle_mando, args=(mando, transmision), daemon=True).start()
+    bucle_config(transmision, mando)
+
+
+if __name__ == "__main__":
+    main()
