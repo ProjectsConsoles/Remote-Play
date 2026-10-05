@@ -147,15 +147,17 @@ def _degradado(w, h, r, color):
     chica = tk.PhotoImage(width=w2, height=h2)
     chica.put(" ".join("{" + " ".join(paleta[y:y + w2]) + "}" for y in range(h2)))
     img = chica.zoom(2, 2)
-    # esquinas: fuera del cuarto de circulo, transparente
-    for cy0, sy in ((r, -1), (h - 1 - r, 1)):
-        for cx0, sx in ((r, -1), (w - 1 - r, 1)):
-            for dy in range(r + 1):
-                for dx in range(r + 1):
-                    if dx * dx + dy * dy > r * r:
-                        x, y = cx0 + sx * dx, cy0 + sy * dy
-                        if 0 <= x < img.width() and 0 <= y < img.height():
-                            img.transparency_set(x, y, True)
+    # Esquinas transparentes con la MISMA curva que la forma de atras: el poligono con smooth=True de
+    # _rect_redondeado hace en cada esquina una Bezier cuadratica (control en la punta), o sea la
+    # parabola sqrt(x) + sqrt(y) = sqrt(r) medida desde la punta - no un cuarto de circulo (con circulo
+    # el marco y la tarjeta de adentro no quedaban paralelos en las esquinas).
+    raiz_r = r ** 0.5
+    iw, ih = img.width(), img.height()
+    for y in range(r):
+        for x in range(r):
+            if (x + 0.5) ** 0.5 + (y + 0.5) ** 0.5 < raiz_r:
+                for px, py in ((x, y), (iw - 1 - x, y), (x, ih - 1 - y), (iw - 1 - x, ih - 1 - y)):
+                    img.transparency_set(px, py, True)
     if len(_degradados) > 200:
         _degradados.clear()
     _degradados[clave] = img
