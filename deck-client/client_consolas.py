@@ -40,15 +40,15 @@ class PantallaConsola(ui.Pantalla):
         self.tira = ui.TiraEstado(marco, esc)
         self.tira.pack(fill="x", pady=(esc.px(6), esc.px(4)))
 
-        # Una fila por marca, en orden de generacion (2026-10-04, pedido del usuario: "lo de play con
-        # lo de play y xbox con lo de xbox"). Numeros = indice en ui.LEDS (0 PS3, 1 PS2, 2 Xbox 360,
+        # Una fila por marca, de la consola mas nueva a la mas vieja (2026-10-04, pedido del usuario:
+        # "lo de play con lo de play y xbox con lo de xbox", "iniciando desde la consola mas actual"). Numeros = indice en ui.LEDS (0 PS3, 1 PS2, 2 Xbox 360,
         # 3 Xbox clasico), que es tambien el modo que se le manda al ESP32. Solo control no lleva las
         # apps externas. Las filas se crean antes porque cada Mosaico nace dentro de la suya.
         if modo == "streaming":
-            orden = [1, 0, "chiaki", 3, 2, "xbplay"]
+            orden = ["chiaki", 0, 1, "xbplay", 2, 3]
             por_fila = 3
         else:
-            orden = [1, 0, 3, 2]
+            orden = [0, 1, 2, 3]
             por_fila = 2
         marcos = [ui.fila(marco, esc) for _ in range((len(orden) + por_fila - 1) // por_fila)]
         todos = []
