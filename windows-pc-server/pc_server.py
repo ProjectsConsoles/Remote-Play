@@ -47,6 +47,7 @@ PUERTO_VIDEO = int(os.environ.get("PS3RP_PC_PUERTO_VIDEO", "5000"))
 FPS = int(os.environ.get("PS3RP_PC_FPS", "60"))
 BITRATE = os.environ.get("PS3RP_PC_BITRATE", "15M")
 SIN_MANDO_S = 60
+INTRA_REFRESH = os.environ.get("PS3RP_PC_INTRA_REFRESH", "1") == "1"
 
 
 def buscar_ffmpeg():
@@ -100,8 +101,16 @@ class Transmision:
                 "-map", "0:v",
                 "-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ull", "-zerolatency", "1",
                 "-rc", "cbr", "-b:v", BITRATE, "-maxrate", BITRATE, "-bufsize", "500k",
-                "-g", "30", "-bf", "0", "-rc-lookahead", "0", "-delay", "0",
+                "-bf", "0", "-rc-lookahead", "0", "-delay", "0",
             ]
+            if INTRA_REFRESH:
+                # En vez de un cuadro clave entero cada 30 cuadros (con un buffer tan chico cada uno sale
+                # con otra calidad/color y se ve un "parpadeo" 2 veces por segundo, reportado 2026-10-05),
+                # NVENC refresca la imagen por franjas a lo largo de 60 cuadros: sin pulso y se sigue
+                # recuperando de paquetes perdidos.
+                cmd += ["-g", "60", "-intra-refresh", "1"]
+            else:
+                cmd += ["-g", "30"]
             if abrir_audio:
                 cmd += ["-map", "1:a", "-af", "aresample=async=1000",
                         "-c:a", "libopus", "-application", "lowdelay", "-frame_duration", "5",
