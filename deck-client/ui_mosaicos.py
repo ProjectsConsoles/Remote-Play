@@ -120,9 +120,14 @@ def _tarjeta_suave(w, h, d, r, color, t, grosor):
     blanco del foco se veia dentado y menos redondeado que la tarjeta (reportado 2026-10-05 en la ventana del
     servidor de PC). Devuelve None si no hay Pillow (la Deck no lo tiene: sigue el dibujo de siempre)."""
     try:
-        from PIL import Image, ImageDraw, ImageTk
-    except ImportError:
+        return _tarjeta_suave_pil(w, h, d, r, color, t, grosor)
+    except Exception:
+        # sin Pillow (la Deck) o si falla dentro de un .exe: el dibujo de siempre, nunca una tarjeta vacia
         return None
+
+
+def _tarjeta_suave_pil(w, h, d, r, color, t, grosor):
+    from PIL import Image, ImageDraw, ImageTk
     tq = round(t * 12) / 12
     clave = (w, h, d, r, color, tq, grosor)
     img = _tarjetas_suaves.get(clave)

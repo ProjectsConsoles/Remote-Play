@@ -158,6 +158,12 @@ def _elegir_mosaicos(d_pc, f_cons, f_pc, actual, hay_consolas):
         dpi = 1.0
     eleccion = {"tipo": None}
     root = tk.Tk()
+
+    def error_de_tk(tipo, valor, tb):
+        # dentro del .exe (sin consola) tkinter se tragaba los errores al pintar: mosaicos vacios sin pista
+        import traceback
+        log("error en la ventana de eleccion:\n" + "".join(traceback.format_exception(tipo, valor, tb)))
+    root.report_callback_exception = error_de_tk
     root.title(TITULO)
     root.configure(bg=ui.FONDO)
     ancho, alto = round(860 * dpi), round(470 * dpi)
