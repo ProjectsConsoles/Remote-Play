@@ -84,6 +84,12 @@ def buscar_ffmpeg():
     # winget (Gyan.FFmpeg) lo deja aqui y su alias no siempre esta en el PATH de una tarea programada
     for f in glob.glob(os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg*\*\bin\ffmpeg.exe")):
         return f
+    # el del servidor de consolas, si esta en el mismo paquete (lanzador unico, 2026-10-05): en la carpeta de
+    # arriba del servidor de PC o en consolas\
+    arriba = os.path.dirname(CARPETA)
+    for d in (CARPETA, arriba, os.path.join(arriba, "consolas")):
+        for f in glob.glob(os.path.join(d, "ffmpeg-*", "bin", "ffmpeg.exe")):
+            return f
     return shutil.which("ffmpeg")
 
 
