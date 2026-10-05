@@ -180,6 +180,13 @@ CONTROL_UI="$SCRIPT_DIR/client_control_ui.py"
 INPUT_PID=""
 CONTROL_UI_PID=""
 
+# Apps externas (2026-10-04): chiaki-ng (antes chiaki4deck), Remote Play de Sony
+# para PS4/PS5. Se usa el AppImage (no el Flatpak) para que viva junto al
+# proyecto; no va en el repo (170 MB), se baja de
+# https://github.com/streetpea/chiaki-ng/releases (chiaki-ng.AppImage_x86_64).
+CHIAKI_APPIMAGE="${PS3RP_CHIAKI_APPIMAGE:-$SCRIPT_DIR/apps/chiaki-ng.AppImage}"
+CHIAKI_PID=""
+
 # Al salir (cierre normal, Ctrl+C, o "Cerrar aplicacion" desde Modo Juego)
 # matar el cliente de input para no dejarlo colgado mandando UDP. Sin esto,
 # instancias viejas se acumulan y varias mandan estados contradictorios al
@@ -207,6 +214,11 @@ cleanup() {
         kill -TERM "$CONTROL_UI_PID" 2>/dev/null
     fi
     pkill -f "client_control_ui.py" 2>/dev/null
+
+    # chiaki-ng, si Steam cerro el "juego" con la app todavia abierta.
+    if [ -n "$CHIAKI_PID" ] && kill -0 "$CHIAKI_PID" 2>/dev/null; then
+        kill -TERM "$CHIAKI_PID" 2>/dev/null
+    fi
 
     # Matar tambien ffplay. Parece redundante (normalmente el script solo
     # termina PORQUE ffplay se cerro), pero no lo es: si ffplay se queda
@@ -422,7 +434,7 @@ if [ -z "$MODO" ]; then
         MENU_RC=$?
         MODO=$(printf '%s\n' "$MENU_SALIDA" \
                | tr -d '\r' \
-               | grep -E '^(streaming|control)$' \
+               | grep -E '^(streaming|control|chiaki)$' \
                | tail -n 1)
         case "$MENU_RC" in
             0)
@@ -442,6 +454,38 @@ if [ -z "$MODO" ]; then
     fi
 fi
 [ -n "$MODO" ] || MODO="streaming"
+
+# APPS EXTERNAS (2026-10-04): se lanza la app y, al cerrarla, se regresa al
+# menu, igual que el modo control. No arranca el cliente de input ni ffplay:
+# chiaki-ng trae su propio video, audio y lectura del mando (Steam Input le
+# entrega el mismo gamepad virtual que al menu).
+if [ "$MODO" = "chiaki" ]; then
+    echo "--- $(date) --- app externa: chiaki-ng ($CHIAKI_APPIMAGE)" >> "$LOG"
+    if [ ! -x "$CHIAKI_APPIMAGE" ]; then
+        echo "AVISO: no encontre chiaki-ng en $CHIAKI_APPIMAGE." | tee -a "$LOG"
+    else
+        # Primera vez: el AppImage guarda su config en ~/.config/Chiaki y el
+        # Flatpak dentro de su sandbox. Si solo existe la del Flatpak, se copia
+        # para que las consolas ya registradas (PS4/PS5) no pidan el PIN otra
+        # vez. Nunca se pisa una config del AppImage que ya exista.
+        CHIAKI_CONF_FLATPAK="$HOME/.var/app/io.github.streetpea.Chiaki4deck/config/Chiaki"
+        if [ ! -e "$HOME/.config/Chiaki/Chiaki.conf" ] && [ -f "$CHIAKI_CONF_FLATPAK/Chiaki.conf" ]; then
+            mkdir -p "$HOME/.config/Chiaki"
+            cp -n "$CHIAKI_CONF_FLATPAK"/*.conf "$HOME/.config/Chiaki/" \
+                && echo "Config de chiaki-ng copiada del Flatpak (consolas ya registradas)." | tee -a "$LOG"
+        fi
+        "$CHIAKI_APPIMAGE" >> "$LOG" 2>&1 &
+        CHIAKI_PID=$!
+        wait "$CHIAKI_PID"
+        echo "chiaki-ng termino (codigo $?)." >> "$LOG"
+        CHIAKI_PID=""
+    fi
+    # Con el modo fijado por variable no hay menu al que volver.
+    if [ -n "${PS3RP_MODO:-}" ]; then
+        exit 0
+    fi
+    continue
+fi
 
 if [ "$MODO" = "control" ]; then
     echo "--- $(date) --- modo SOLO CONTROL" >> "$LOG"

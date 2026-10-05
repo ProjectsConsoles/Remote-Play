@@ -6,6 +6,7 @@ start_client_stream.sh:
 
     streaming -> video + audio + control (lo de siempre)
     control   -> SOLO el control, con la pantalla de la Deck apagada
+    chiaki    -> abrir chiaki-ng (PS4/PS5), desde la pantalla "Apps externas" (client_apps.py)
 
 Ademas hay tres pantallas que NO salen del menu: "Configurar servidor" (modo de captura
 del PC Windows, en remoto: client_server_config.py, habla con config_listener.ps1 por UDP),
@@ -34,7 +35,7 @@ con la pantalla tactil. Por eso aca se lee el mando directo con pygame y se
 traduce a mover el foco / confirmar. El tactil y el raton siguen funcionando.
 
 Codigos de salida:
-    0 = eligio streaming o control, esta impreso en stdout
+    0 = eligio streaming, control o chiaki, esta impreso en stdout
     1 = cancelo (B, Escape, "Salir", o cerro la ventana)
     2 = no se pudo abrir ninguna ventana (sin DISPLAY, por ejemplo)
 
@@ -86,6 +87,7 @@ class PantallaMenu(ui.Pantalla):
         import tkinter as tk
         import client_server_config
         import client_settings
+        import client_apps
         esc, iconos = app.esc, app.iconos
         self.ip_local = obtener_ip_local()
         self._consulta = 0
@@ -122,15 +124,18 @@ class PantallaMenu(ui.Pantalla):
         ui.disponer(f2, [t_servidor, t_cliente], esc)
 
         f3 = ui.fila(marco, esc, expandir=False)
-        t_info = ui.Mosaico(f3, esc, iconos, "info", "Info: colores del ESP32-S3", "Y", ui.GRIS,
+        t_info = ui.Mosaico(f3, esc, iconos, "info", "Info del ESP32-S3", "Y", ui.GRIS,
                             on_a=self.abrir_info, tam_titulo=20, tam_detalle=13, tam_icono=40,
                             horizontal=True, alto=esc.px(84))
+        t_apps = ui.Mosaico(f3, esc, iconos, "apps", "Apps externas", "PS4 / PS5 con chiaki-ng", ui.GRIS,
+                            on_a=lambda: app.abrir(client_apps.PantallaApps(app)), tam_titulo=20,
+                            tam_detalle=13, tam_icono=40, horizontal=True, alto=esc.px(84))
         t_salir = ui.Mosaico(f3, esc, iconos, "exit", "Salir", "B o Escape", ui.ROJO_OSCURO,
                              on_a=lambda: app.terminar(None), tam_titulo=20, tam_detalle=13,
                              tam_icono=40, horizontal=True, alto=esc.px(84))
-        ui.disponer(f3, [t_info, t_salir], esc)
+        ui.disponer(f3, [t_info, t_apps, t_salir], esc)
 
-        self.nav = ui.Navegador([[t_stream, t_control], [t_servidor, t_cliente], [t_info, t_salir]])
+        self.nav = ui.Navegador([[t_stream, t_control], [t_servidor, t_cliente], [t_info, t_apps, t_salir]])
 
         tk.Label(marco, font=esc.fuente(13), bg=ui.FONDO, fg=ui.TENUE,
                  text=("Cruceta/stick para moverte, confirma con A, cancela con B, info con Y."
@@ -256,7 +261,7 @@ def verificar_servidor_listo():
 
 
 def main():
-    # Una sola ventana y un solo Mando para toda la sesion (ver la nota arriba). Streaming/control
+    # Una sola ventana y un solo Mando para toda la sesion (ver la nota arriba). Streaming/control/chiaki
     # terminan el programa imprimiendo la eleccion para que la lea start_client_stream.sh.
     app = ui.App("Remote Play", Mando())
     app.abrir_inicial(PantallaMenu(app))

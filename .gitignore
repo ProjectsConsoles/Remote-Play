@@ -25,6 +25,10 @@ windows-server/logs/
 **/ffmpeg.exe
 **/ffprobe.exe
 
+# Apps externas de la Deck (chiaki-ng AppImage, ~170 MB): se bajan aparte de
+# https://github.com/streetpea/chiaki-ng/releases a deck-client/apps/.
+deck-client/apps/
+
 # Software de terceros con licencia propia (Remote Play oficial parcheado):
 # nunca se redistribuye en este repo. Nombre especifico (no un patron ancho
 # tipo RemotePlay*.exe) porque eso chocaria con los .exe legitimos del

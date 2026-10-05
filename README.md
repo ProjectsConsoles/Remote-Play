@@ -127,6 +127,22 @@ de cada tarjeta también es suave (0.14 s: crece y el borde se ilumina):
   como mosaicos de 3 en 3 que se desplazan solos. A cambia el valor (en los
   textos y números abre un cuadro para escribirlo) y L1 / R1 lo bajan / suben.
 
+## Apps externas (Deck): PS4 / PS5 con chiaki-ng
+
+En el menú de la Deck, **Apps externas** (fila de abajo) abre programas de
+terceros sin salir de la app: al cerrarlos se regresa al menú. Por ahora trae
+[chiaki-ng](https://github.com/streetpea/chiaki-ng) (antes *chiaki4deck*), el
+cliente libre del Remote Play de Sony para **PS4 y PS5**. No usa el servidor
+Windows ni el ESP32-S3: trae su propio video, audio y control.
+
+- Se usa el **AppImage** (`chiaki-ng.AppImage_x86_64` de la página de
+  releases), guardado como `deck-client/apps/chiaki-ng.AppImage` y con permiso
+  de ejecución. No va en el repo (170 MB). Otra ruta: `PS3RP_CHIAKI_APPIMAGE`.
+- Si ya tenías el **Flatpak** con consolas registradas, la primera vez se copia
+  su config (`~/.var/app/io.github.streetpea.Chiaki4deck/config/Chiaki`) a
+  `~/.config/Chiaki`, así no hay que volver a meter el PIN. Nunca se pisa una
+  config del AppImage que ya exista.
+
 ## Reproductor de video: GStreamer (menos delay)
 
 Los dos clientes usan **GStreamer** por defecto: cada cuadro y el audio se
@@ -259,6 +275,7 @@ conectarla/resetear), mantén **BOOT** ~1.5s — el LED cicla de color cada
 - Una **capturadora HDMI** compatible con DirectShow, con audio digital.
 - Un **ESP32-S3** flasheado con `deck-client/esp32_firmware/` (ver abajo).
 - **GStreamer** en cada cliente (ver *Reproductor de video* arriba).
+- Opcional: el **AppImage de chiaki-ng** para PS4/PS5 (ver *Apps externas*).
 
 ## Instalar ffmpeg (para que arranque el servidor)
 
