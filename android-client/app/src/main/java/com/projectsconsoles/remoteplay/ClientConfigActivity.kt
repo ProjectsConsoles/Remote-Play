@@ -41,6 +41,10 @@ class ClientConfigActivity : PantallaActivity() {
             this, R.drawable.ic_port, "Puerto del ESP32", prefs.esp32Puerto.toString(), azul, compacto, esIp = false,
         ) { v -> puerto(v)?.let { prefs.esp32Puerto = it; true } ?: false }
 
+        val ipPc = Ui.mosaicoTexto(
+            this, R.drawable.ic_computer, "IP de la PC (juegos)", prefs.pcIp, azul, compacto, esIp = true,
+        ) { v -> Ui.ipValida(v).also { if (it) prefs.pcIp = v } }
+
         val puertoVideo = Ui.mosaicoTexto(
             this, R.drawable.ic_play, "Puerto de video", prefs.puertoVideo.toString(), azul, compacto, esIp = false,
         ) { v -> puerto(v)?.let { prefs.puertoVideo = it; true } ?: false }
@@ -89,7 +93,8 @@ class ClientConfigActivity : PantallaActivity() {
             Ui.cuadricula(
                 this, compacto,
                 listOf(
-                    listOf(ip, puertoEsp, puertoVideo),
+                    // primera fila: a donde se conecta (ESP32, video y la PC de juegos)
+                    listOf(ip, puertoEsp, puertoVideo, ipPc),
                     listOf(imagen, hz, botonPs),
                     listOf(zona, sinVideo, volver),
                 ),

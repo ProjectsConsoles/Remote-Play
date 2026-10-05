@@ -21,6 +21,11 @@ class Prefs(ctx: Context) {
         get() = s("servidor_ip", "192.168.0.90")
         set(v) = sp.edit().putString("servidor_ip", v.trim()).apply()
 
+    /** PC con juegos (2026-10-04): transmite su propia pantalla y recibe el mando como control de Xbox virtual. */
+    var pcIp: String
+        get() = s("pc_ip", "192.168.0.171")
+        set(v) = sp.edit().putString("pc_ip", v.trim()).apply()
+
     var puertoVideo: Int
         get() = i("puerto_video", 5000)
         set(v) = sp.edit().putInt("puerto_video", v).apply()

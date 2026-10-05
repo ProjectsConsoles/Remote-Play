@@ -77,10 +77,19 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
     private var tasaMando = 0.0
     private var tasaCuadros = 0.0
 
+    private var controlIp = ""
+    private var controlPuerto = 0
+    private var fuente = ""
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         soloControl = intent.getBooleanExtra(EXTRA_SOLO_CONTROL, false)
+        // PC con juegos (2026-10-04): el mando va a la PC (control de Xbox virtual) en vez del ESP32,
+        // y el video viene de la PC, no del servidor de la capturadora.
+        controlIp = intent.getStringExtra(EXTRA_CONTROL_IP) ?: prefs.esp32Ip
+        controlPuerto = intent.getIntExtra(EXTRA_CONTROL_PUERTO, prefs.esp32Puerto)
+        fuente = intent.getStringExtra(EXTRA_FUENTE) ?: prefs.servidorIp
         estado.zonaMuerta = prefs.zonaMuertaValor()
         mando = GamepadInput(estado)
 
@@ -240,7 +249,7 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
         }
 
         envio = InputSender(
-            estado, prefs.esp32Ip, prefs.esp32Puerto, prefs.frecuenciaMando, prefs.acordePs,
+            estado, controlIp, controlPuerto, prefs.frecuenciaMando, prefs.acordePs,
         ).also { it.start() }
 
         ui.post(tic)
@@ -320,7 +329,7 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
         val mensaje: String? = when {
             errorDeInicio != null -> errorDeInicio
             e?.ultimoError != null && e.enviados == 0L -> "No se puede mandar el mando: ${e.ultimoError}"
-            soloControl -> "Solo control\nMandando el mando a ${prefs.esp32Ip}:${prefs.esp32Puerto}\n" +
+            soloControl -> "Solo control\nMandando el mando a $controlIp:$controlPuerto\n" +
                 "Para salir: L1 + R1 + SELECT + START"
             r?.error != null -> r.error
             r == null || v == null -> null
@@ -332,10 +341,10 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
                 }
                 when {
                     silencio >= prefs.segundosSinVideo -> {
-                        salirConAviso("Sin video del servidor (${prefs.servidorIp}). Se cerro el streaming.")
+                        salirConAviso("Sin video del servidor ($fuente). Se cerro el streaming.")
                         null
                     }
-                    r.paquetes == 0L -> "Esperando video de ${prefs.servidorIp}...\n" +
+                    r.paquetes == 0L -> "Esperando video de $fuente...\n" +
                         "${silencio.toInt()} s (se cierra a los ${prefs.segundosSinVideo} s)\n\n" +
                         "Si no llega: Configurar servidor -> Aplicar."
                     silencio > 1.0 -> "Sin video desde hace ${silencio.toInt()} s...\n" +
@@ -436,5 +445,8 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
 
     companion object {
         const val EXTRA_SOLO_CONTROL = "solo_control"
+        const val EXTRA_CONTROL_IP = "control_ip"
+        const val EXTRA_CONTROL_PUERTO = "control_puerto"
+        const val EXTRA_FUENTE = "fuente"
     }
 }
