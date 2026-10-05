@@ -104,7 +104,10 @@ class Ventana:
                 pass
         self.root.configure(bg=ui.FONDO)
         ancho, alto = round(1000 * dpi), round(640 * dpi)
-        self.root.geometry(f"{ancho}x{alto}")
+        # centrada en la pantalla (pedido 2026-10-05)
+        x = max(0, (self.root.winfo_screenwidth() - ancho) // 2)
+        y = max(0, (self.root.winfo_screenheight() - alto) // 2 - round(30 * dpi))
+        self.root.geometry(f"{ancho}x{alto}+{x}+{y}")
         self.root.minsize(round(760 * dpi), round(520 * dpi))
         self.root.protocol("WM_DELETE_WINDOW", self.ocultar)
         esc = ui.Escala(alto * 1.25)   # la escala de ui_mosaicos piensa en la pantalla de la Deck
