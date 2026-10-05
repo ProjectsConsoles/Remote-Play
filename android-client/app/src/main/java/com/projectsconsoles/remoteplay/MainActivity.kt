@@ -53,14 +53,15 @@ class MainActivity : PantallaActivity() {
         )
 
         val streaming = Ui.mosaico(
-            this, R.drawable.ic_play, "Streaming", "Video y audio de la consola + el mando",
+            this, R.drawable.ic_play, "Streaming", "Elige la consola y el ESP32 se configura solo",
             0xFF2D6CDF.toInt(), compacto,
-        ) { startActivity(Intent(this, StreamActivity::class.java)) }
+        ) { startActivity(Intent(this, ConsolaActivity::class.java)) }
         val soloControl = Ui.mosaico(
             this, R.drawable.ic_gamepad, "Solo control", "La tableta es solo el mando",
             0xFF3F8F4A.toInt(), compacto,
         ) {
-            startActivity(Intent(this, StreamActivity::class.java).putExtra(StreamActivity.EXTRA_SOLO_CONTROL, true))
+            // Streaming y Solo control preguntan primero la consola (2026-10-04, ConsolaActivity).
+            startActivity(Intent(this, ConsolaActivity::class.java).putExtra(ConsolaActivity.EXTRA_SOLO_CONTROL, true))
         }
         val servidor = Ui.mosaico(
             this, R.drawable.ic_server, "Configurar servidor", "Modo de captura y estado de la PC",
@@ -78,7 +79,7 @@ class MainActivity : PantallaActivity() {
 
         val pie = LinearLayout(this)
         pie.orientation = LinearLayout.HORIZONTAL
-        pie.addView(Ui.botonIcono(this, R.drawable.ic_info, "Info: colores del ESP32", 0xFF2A3441.toInt()) {
+        pie.addView(Ui.botonIcono(this, R.drawable.ic_info, "Info del ESP32-S3", 0xFF2A3441.toInt()) {
             startActivity(Intent(this, InfoActivity::class.java))
         })
         pie.addView(Ui.botonIcono(this, R.drawable.ic_exit, "Salir", 0xFF7A2E2E.toInt()) { finishAffinity() })

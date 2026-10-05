@@ -28,7 +28,20 @@ retraso.
    nueva.
 2. **Configurar cliente**: IP del ESP32 (por defecto `192.168.0.40`, puerto 9000).
 3. **Streaming** (video + audio + mando) o **Solo control** (la tableta es solo
-   el mando, con el brillo al mínimo).
+   el mando, con el brillo al mínimo). Los dos preguntan primero **¿Qué
+   consola?**: elegir PS3, PS2, Xbox 360 o Xbox clásico le manda su modo al
+   ESP32 en ese momento (se reinicia ~2-4 s); en Streaming antes se verifica
+   que el servidor esté transmitiendo a esta tableta.
+4. Solo en Streaming, **PS4 / PS5** y **Xbox One / Series** abren otra app
+   (sin servidor ni ESP32), la primera que esté instalada:
+   - PS4 / PS5: *PS Remote Play* (Sony, gratis) o *Chiaki*.
+   - Xbox One / Series: la app de *Xbox* (gratis, trae juego remoto) o *xbPlay*.
+
+   Si no hay ninguna, el mosaico dice **"No está instalado"** y qué instalar.
+   Al salir de esa app se regresa a nuestra pantalla. Nuevos paquetes se
+   agregan en `Consolas.kt` y en `<queries>` del `AndroidManifest.xml`.
+
+**Info del ESP32-S3** ahora también elige el modo (toque o A), como respaldo.
 
 En el menú principal, una línea de estado avisa si el servidor está apagado, sin
 transmitir o transmitiendo a otra IP.

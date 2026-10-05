@@ -10,6 +10,15 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
 
+    <!-- Apps externas de "¿Qué consola?" (Consolas.PS / Consolas.XBOX): desde Android 11 una app
+         solo ve las otras que declara aqui. -->
+    <queries>
+        <package android:name="com.playstation.remoteplay" />
+        <package android:name="com.metallic.chiaki" />
+        <package android:name="com.microsoft.xboxone.smartglass" />
+        <package android:name="com.studio08.xbgamestream" />
+    </queries>
+
     <application
         android:allowBackup="false"
         android:label="Remote Play"
@@ -42,6 +51,12 @@
 
         <activity
             android:name=".ClientConfigActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize|keyboard|keyboardHidden|navigation" />
+
+        <activity
+            android:name=".ConsolaActivity"
             android:exported="false"
             android:screenOrientation="sensorLandscape"
             android:configChanges="orientation|screenSize|keyboard|keyboardHidden|navigation" />

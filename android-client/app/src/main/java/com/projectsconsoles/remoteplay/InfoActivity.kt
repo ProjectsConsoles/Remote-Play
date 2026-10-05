@@ -6,11 +6,16 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
 
-/** Colores del LED del ESP32-S3 (selector de modo): cuatro mosaicos, cada uno del color real del LED. */
+/**
+ * Colores del LED del ESP32-S3 (selector de modo): cuatro mosaicos, cada uno del color del LED. Desde
+ * 2026-10-04 tambien ELIGEN el modo (A o toque manda {"set_modo": n} al ESP32, como en la Deck y la
+ * Ally); sigue siendo el respaldo de "¿Qué consola?" si el comando no llego.
+ */
 class InfoActivity : PantallaActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val prefs = Prefs(this)
 
         val compacto = resources.configuration.screenHeightDp < 500
         val margen = Ui.dp(this, if (compacto) 10 else 20)
@@ -24,32 +29,36 @@ class InfoActivity : PantallaActivity() {
         raiz.addView(
             Ui.texto(
                 this,
-                "Con la placa ya encendida (nunca al conectarla o resetearla), mantén BOOT ~1.5 s. " +
-                    "El LED cicla de color cada ~0.7 s; suelta el botón en el color que corresponda.",
+                "Toca o elige con A el modo (el control se reinicia ~2 s). O en la placa ya encendida mantén BOOT " +
+                    "~1.5 s: el LED cicla de color cada ~0.7 s; suelta el botón en el color que corresponda.",
                 Ui.TENUE, if (compacto) 12f else 16f,
             ),
         )
+        val tira = Ui.TiraEstado(this, compacto)
+        tira.pintar(Ui.TENUE, "ESP32 en ${prefs.esp32Ip}:${prefs.esp32Puerto}")
+        raiz.addView(
+            tira.vista,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                .also { it.topMargin = Ui.dp(this, if (compacto) 4 else 8) },
+        )
 
-        val oscuro = 0xFF1B1B1B.toInt()
         val tam = if (compacto) 20f else 30f
         // Los logos de consola son wordmarks anchos y bajitos (no un icono cuadrado):
         // con el icono() cuadrado de siempre (52dp) se veian minusculos, igual que nos
         // paso primero en la Deck con el mismo problema.
-        fun led(icono: Int, color: Int, nombre: String, consola: String, texto: Int = Color.WHITE) =
-            Ui.mosaico(this, icono, nombre, consola, color, compacto, texto, interactivo = false, tamTitulo = tam,
-                anchoIconoDp = if (compacto) 100 else 150)
+        fun led(l: Consolas.Led) =
+            Ui.mosaico(this, l.icono, l.nombreColor, l.consola, l.color, compacto, Color.WHITE, tamTitulo = tam,
+                anchoIconoDp = if (compacto) 100 else 150) {
+                Consolas.enviarModo(this, prefs, l.modo) { ok ->
+                    if (ok) tira.pintar(Consolas.AMARILLO_AVISO, "Modo ${l.consola} enviado — el control se reinicia (~2 s)...")
+                    else tira.pintar(Ui.ERROR, "No se pudo mandar al ESP32 (revisa la IP en Configurar cliente).")
+                }
+            }
 
         raiz.addView(
             Ui.cuadricula(
                 this, compacto,
-                listOf(
-                    listOf(
-                        led(R.drawable.ic_console_ps3, 0xFFD4B106.toInt(), "Amarillo", "PS3", oscuro),
-                        led(R.drawable.ic_console_ps2, 0xFF2D6CDF.toInt(), "Azul", "PS2 / OPL"),
-                        led(R.drawable.ic_console_xbox360, 0xFF8E5FD6.toInt(), "Morado", "Xbox 360"),
-                        led(R.drawable.ic_console_xboxclasico, 0xFF2FA84F.toInt(), "Verde", "Xbox clásico"),
-                    ),
-                ),
+                listOf(Consolas.LEDS.map { led(it) }),
             ),
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
         )
