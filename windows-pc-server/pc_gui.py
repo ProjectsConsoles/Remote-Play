@@ -131,12 +131,12 @@ class Ventana:
         ui.disponer(f2, [self.t_mando, self.t_tableta], esc)
 
         pie = ui.fila(marco, esc, expandir=False)
-        bkw = dict(marco=False, tam_titulo=18, tam_detalle=12, tam_icono=40, horizontal=True, alto=esc.px(84))
-        self.b_detener = ui.Mosaico(pie, esc, iconos, "power", "Detener transmisión", "La tableta se queda sin video",
+        bkw = dict(marco=False, tam_titulo=16, tam_detalle=11, tam_icono=40, horizontal=True, alto=esc.px(84))
+        self.b_detener = ui.Mosaico(pie, esc, iconos, "power", "Detener", "Corta el video a la tableta",
                                     ui.ROJO, on_a=self.detener, **bkw)
-        b_ocultar = ui.Mosaico(pie, esc, iconos, "back", "Ocultar", "Sigue corriendo junto al reloj",
+        b_ocultar = ui.Mosaico(pie, esc, iconos, "back", "Ocultar", "Sigue junto al reloj",
                                ui.GRIS, on_a=self.ocultar, **bkw)
-        b_cambiar = ui.Mosaico(pie, esc, iconos, "settings", "Cambiar tipo de servidor", "Consolas o juegos de PC",
+        b_cambiar = ui.Mosaico(pie, esc, iconos, "settings", "Cambiar tipo", "Consolas o juegos de PC",
                                ui.MORADO, on_a=self.cambiar_tipo, **bkw)
         b_salir = ui.Mosaico(pie, esc, iconos, "exit", "Salir", "Apaga el servidor", ui.ROJO_OSCURO,
                              on_a=self.salir, **bkw)
