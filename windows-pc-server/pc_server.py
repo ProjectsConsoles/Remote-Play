@@ -61,6 +61,11 @@ INTRA_REFRESH = os.environ.get("PS3RP_PC_INTRA_REFRESH", "1") == "1"
 # el juego no suene en la laptop y se capture de ahi; al terminar se regresa la que estaba. Vacio = no tocar.
 SALIDA_VIRTUAL = os.environ.get("PS3RP_PC_SALIDA_VIRTUAL", "Steam Streaming Speakers")
 ARCHIVO_SALIDA_PREVIA = os.path.join(CARPETA, "salida_previa.txt")
+# Mientras se transmite la pantalla de la laptop se pone NEGRA (brillo 0) y al detener vuelve el brillo que tenia
+# (pedido 2026-10-05). Apagarla de verdad no sirve: con el monitor apagado Windows deja de entregar cuadros a la
+# captura (Desktop Duplication) y la tableta se quedaria sin video.
+APAGAR_PANTALLA = os.environ.get("PS3RP_PC_APAGAR_PANTALLA", "1") == "1"
+ARCHIVO_BRILLO_PREVIO = os.path.join(CARPETA, "brillo_previo.txt")
 
 
 def buscar_ffmpeg():
@@ -141,6 +146,74 @@ def restaurar_salida(previa=None):
 
 
 # ------------------------------------------------------------------------------------------------
+# Brillo de la pantalla de la laptop (WMI): negra mientras se transmite
+# ------------------------------------------------------------------------------------------------
+_cerrojo_brillo = threading.Lock()
+
+
+def _powershell(cmd):
+    r = subprocess.run(["powershell", "-NoProfile", "-Command", cmd], capture_output=True, text=True,
+                       timeout=20, creationflags=subprocess.CREATE_NO_WINDOW)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.strip()[-300:])
+    return r.stdout.strip()
+
+
+def _leer_brillo():
+    return int(_powershell("(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness | "
+                           "Select-Object -First 1).CurrentBrightness"))
+
+
+def _poner_brillo(valor):
+    _powershell("Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods | "
+                f"Invoke-CimMethod -MethodName WmiSetBrightness -Arguments @{{Timeout=0; Brightness={int(valor)}}} | "
+                "Out-Null")
+
+
+def _oscurecer():
+    with _cerrojo_brillo:
+        if os.path.exists(ARCHIVO_BRILLO_PREVIO):
+            return      # ya esta oscura (reinicio de la captura): no pisar el brillo guardado con el 0
+        try:
+            previo = _leer_brillo()
+            with open(ARCHIVO_BRILLO_PREVIO, "w") as f:
+                f.write(str(previo))    # por si el servidor se cae: al volver a arrancar se restaura
+            _poner_brillo(0)
+            log.info("pantalla de la laptop a negro (brillo estaba en %s)", previo)
+        except Exception as e:
+            log.error("no se pudo bajar el brillo: %s", e)
+
+
+def _restaurar_brillo():
+    with _cerrojo_brillo:
+        try:
+            with open(ARCHIVO_BRILLO_PREVIO) as f:
+                previo = int(f.read().strip())
+        except (OSError, ValueError):
+            return
+        try:
+            _poner_brillo(previo)
+            log.info("brillo de la laptop restaurado (%s)", previo)
+        except Exception as e:
+            log.error("no se pudo restaurar el brillo: %s", e)
+            return      # se deja el archivo para reintentar la proxima vez
+        try:
+            os.remove(ARCHIVO_BRILLO_PREVIO)
+        except OSError:
+            pass
+
+
+def oscurecer_pantalla():
+    """En otro hilo: powershell tarda ~1 s y no debe retrasar el arranque del video."""
+    if APAGAR_PANTALLA:
+        threading.Thread(target=_oscurecer, daemon=True).start()
+
+
+def restaurar_brillo():
+    threading.Thread(target=_restaurar_brillo, daemon=True).start()
+
+
+# ------------------------------------------------------------------------------------------------
 # Transmision: ffmpeg (pantalla + NVENC) y el audio del sistema por stdin
 # ------------------------------------------------------------------------------------------------
 class Transmision:
@@ -174,6 +247,7 @@ class Transmision:
                 raise RuntimeError("no encuentro ffmpeg")
             if self.salida_previa is None:
                 self.salida_previa = silenciar_laptop()
+            oscurecer_pantalla()
             tasa, canales, abrir_audio = _abrir_loopback()
             # Pantalla en la NVIDIA (con un juego abierto, ver bucle_vigia): ddagrab y NVENC estan en la
             # misma GPU y NVENC toma los cuadros de D3D11 directo -> 60 fps. En la Intel (escritorio) hay
@@ -265,6 +339,8 @@ class Transmision:
         if restaurar_audio and self.salida_previa is not None:
             restaurar_salida(self.salida_previa)
             self.salida_previa = None
+        if restaurar_audio:     # (False = reinicio de la captura: la pantalla se queda negra)
+            restaurar_brillo()
 
 
 def _abrir_loopback():
@@ -659,6 +735,7 @@ def main():
     log.info("=== servidor de PC iniciando ===")
     matar_ffmpeg_huerfanos()
     restaurar_salida()   # si la vez anterior se cayo transmitiendo, la laptop se quedo sin sonido
+    restaurar_brillo()   # ... y con la pantalla negra
     TRANSMISION = transmision = Transmision()
     MANDO = mando = Mando()
     threading.Thread(target=bucle_mando, args=(mando, transmision), daemon=True).start()

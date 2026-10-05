@@ -170,7 +170,7 @@ class Mosaico(tk.Canvas):
 
     def __init__(self, parent, esc, iconos, icono, titulo, detalle="", color=AZUL, on_a=None,
                  tam_titulo=24, tam_detalle=13, tam_icono=72, color_texto=BLANCO,
-                 interactivo=True, horizontal=False, alto=None, on_click=None, borde_foco=True):
+                 interactivo=True, horizontal=False, alto=None, on_click=None, marco=True):
         super().__init__(parent, bg=FONDO, highlightthickness=0, bd=0, takefocus=0,
                          height=alto if alto else esc.px(150), width=esc.px(200))
         self.esc = esc
@@ -186,7 +186,10 @@ class Mosaico(tk.Canvas):
         self.on_a = on_a
         self.on_click = on_click  # si se da, el dedo hace esto en vez de on_a (solo enfoca/elige)
         self.interactivo = interactivo
-        self.borde_foco = borde_foco   # False: al enfocar solo crece, sin aclarar el borde (ventanas de servidor)
+        # False: sin el marco de color solido alrededor del degradado (el "stroke" de Android): el degradado
+        # llena toda la tarjeta y crece con ella, y el borde blanco del foco va encima (ventanas de servidor,
+        # como la del server del PS3)
+        self.marco = marco
         self.horizontal = horizontal
         self.habilitado = True
         self.foco = False
@@ -255,7 +258,25 @@ class Mosaico(tk.Canvas):
             return
         color = self.color if self.habilitado else mezclar(self.color, FONDO, 0.55)
         self.coords("forma", *self._puntos_forma(w, h))
-        self.itemconfigure("forma", outline=mezclar(color, BLANCO, self._t if self.borde_foco else 0))
+        if self.marco:
+            self.itemconfigure("forma", outline=mezclar(color, BLANCO, self._t))
+        else:
+            self._sin_marco(w, h, color)
+
+    def _inset(self):
+        esc = self.esc
+        return round(esc.px(7) + (esc.px(1) - esc.px(7)) * self._t)
+
+    def _sin_marco(self, w, h, color):
+        """Degradado del tamano actual de la forma y, encima, el borde blanco que aparece con el foco."""
+        d = self._inset()
+        gw, gh = (w - 2 * d) // 2 * 2, (h - 2 * d) // 2 * 2
+        if gw > 20 and gh > 20:
+            self._img_fondo = _degradado(gw, gh, self.esc.px(20), color)
+            self.coords("fondo", d, d)
+            self.itemconfigure("fondo", image=self._img_fondo)
+        self.coords("borde", *self._puntos_forma(w, h))
+        self.itemconfigure("borde", outline=mezclar(color, BLANCO, self._t) if self._t > 0.02 else "")
 
     def poner_titulo(self, texto):
         self.titulo = texto
@@ -302,15 +323,22 @@ class Mosaico(tk.Canvas):
         grosor = esc.px(4)
         self.create_polygon(
             self._puntos_forma(w, h), smooth=True, fill=color,
-            outline=mezclar(color, BLANCO, self._t if self.borde_foco else 0), width=grosor, tags="forma")
+            outline=mezclar(color, BLANCO, self._t), width=grosor, tags="forma")
         # Encima, el degradado de Android (2026-10-04), metido un borde mas adentro que la forma sin
         # foco: queda un marco del color solido alrededor (el "stroke" de las tarjetas de Android) y
         # la forma de atras sigue creciendo y aclarando su borde al enfocar, sin rehacer la imagen.
-        dentro = esc.px(7) + grosor
-        gw, gh = (w - 2 * dentro) // 2 * 2, (h - 2 * dentro) // 2 * 2
-        if gw > 20 and gh > 20:
-            self._img_fondo = _degradado(gw, gh, max(2, esc.px(20) - grosor), color)
-            self.create_image(dentro, dentro, image=self._img_fondo, anchor="nw")
+        if self.marco:
+            dentro = esc.px(7) + grosor
+            gw, gh = (w - 2 * dentro) // 2 * 2, (h - 2 * dentro) // 2 * 2
+            if gw > 20 and gh > 20:
+                self._img_fondo = _degradado(gw, gh, max(2, esc.px(20) - grosor), color)
+                self.create_image(dentro, dentro, image=self._img_fondo, anchor="nw")
+        else:
+            self.itemconfigure("forma", outline="")
+            self.create_image(0, 0, anchor="nw", tags="fondo")
+            self.create_polygon(self._puntos_forma(w, h), smooth=True, fill="", outline="",
+                                width=grosor, tags="borde")
+            self._sin_marco(w, h, color)
 
         pad = esc.px(24)   # fijo: el texto ya no se corre al enfocar (solo crece la forma)
         ancho_txt = max(40, w - 2 * pad)

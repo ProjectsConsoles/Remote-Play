@@ -117,7 +117,7 @@ class Ventana:
         self.tira.pack(fill="x", pady=(esc.px(6), esc.px(4)))
 
         f = ui.fila(marco, esc)
-        kw = dict(interactivo=False, tam_titulo=24, tam_detalle=14)
+        kw = dict(marco=False, interactivo=False, tam_titulo=24, tam_detalle=14)
         self.t_video = ui.Mosaico(f, esc, iconos, "image", "Video", "", AZUL_PC, **kw)
         self.t_audio = ui.Mosaico(f, esc, iconos, "tune", "Audio", "", ui.MORADO, **kw)
         ui.disponer(f, [self.t_video, self.t_audio], esc)
@@ -127,7 +127,7 @@ class Ventana:
         ui.disponer(f2, [self.t_mando, self.t_tableta], esc)
 
         pie = ui.fila(marco, esc, expandir=False)
-        bkw = dict(borde_foco=False, tam_titulo=18, tam_detalle=12, tam_icono=40, horizontal=True, alto=esc.px(84))
+        bkw = dict(marco=False, tam_titulo=18, tam_detalle=12, tam_icono=40, horizontal=True, alto=esc.px(84))
         self.b_detener = ui.Mosaico(pie, esc, iconos, "power", "Detener transmisión", "La tableta se queda sin video",
                                     ui.ROJO, on_a=self.detener, **bkw)
         b_ocultar = ui.Mosaico(pie, esc, iconos, "back", "Ocultar", "Sigue corriendo junto al reloj",
