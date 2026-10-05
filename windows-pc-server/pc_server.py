@@ -184,11 +184,10 @@ class Transmision:
                 "-f", "lavfi", "-i", captura,
             ]
             if abrir_audio:
-                # -use_wallclock_as_timestamps: sin esto el audio del pipe lleva tiempos por cantidad de
-                # muestras y el video por reloj, y ffmpeg frenaba el video a ~5 fps esperando al audio
-                # (medido: 50 fps con audio de lavfi, 5 fps con el pipe). Igual que el server del PS3.
-                cmd += ["-use_wallclock_as_timestamps", "1",
-                        "-f", "s16le", "-ar", str(tasa), "-ac", str(canales), "-thread_queue_size", "64",
+                # SIN -use_wallclock_as_timestamps: con esa opcion ffmpeg deja de leer el audio del pipe a
+                # los ~48 bloques y el .ts sale SIN un solo paquete de audio (medido 2026-10-05 con
+                # prueba_pipe.py: 0 paquetes con wallclock, 801 sin el; video 60 fps en los dos casos).
+                cmd += ["-f", "s16le", "-ar", str(tasa), "-ac", str(canales), "-thread_queue_size", "64",
                         "-i", "pipe:0"]
             cmd += [
                 "-map", "0:v",
@@ -211,7 +210,9 @@ class Transmision:
             cmd += [
                 "-f", "mpegts", "-muxdelay", "0", "-muxpreload", "0", "-flush_packets", "1",
                 "-max_interleave_delta", "0", "-pes_payload_size", "0",
-                f"udp://{ip}:{PUERTO_VIDEO}?pkt_size=1316",
+                # buffer_size: con el de Windows por defecto, en escenas pesadas ffmpeg se caia con
+                # "Error number -10055" (WSAENOBUFS: se lleno el buffer de envio UDP).
+                f"udp://{ip}:{PUERTO_VIDEO}?pkt_size=1316&buffer_size=4194304",
             ]
             log.info("ffmpeg -> %s:%s (%s fps, %s, audio=%s, %s): %s", ip, PUERTO_VIDEO, FPS, BITRATE,
                      bool(abrir_audio), "directo NVIDIA" if self.directo else "hwdownload", " ".join(cmd))
@@ -270,6 +271,7 @@ def _abrir_loopback():
     log.info("audio: %s a %s Hz, %s canales", nombre or "silencio", tasa, canales)
 
     def copiar(proc):
+        log.info("hilo de audio arrancando")
         # El loopback de WASAPI NO entrega nada mientras la PC esta en silencio, asi que el audio llega
         # por callback a un buffer y aqui se le da a ffmpeg a ritmo de reloj, cada 5 ms: lo que haya
         # llegado, o silencio si no llego nada. PyAudio se crea EN ESTE HILO: creado en otro, WASAPI
@@ -312,8 +314,9 @@ def _abrir_loopback():
                     enviados += 1
                 proc.stdin.flush()
                 time.sleep(0.002)
-        except Exception:
-            pass  # ffmpeg se cerro
+        except Exception as e:
+            if proc.poll() is None:   # si ffmpeg sigue vivo no es un cierre normal: que quede en el log
+                log.exception("el hilo de audio se cayo: %s", e)
         finally:
             if flujo is not None:
                 flujo.close()
