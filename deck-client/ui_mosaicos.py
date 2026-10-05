@@ -710,7 +710,7 @@ class DialogoTexto:
 
 
 LEDS = [
-    ("#d4b106", "Amarillo", "PS3", "#1b1b1b", "ps3"),
+    ("#b88a00", "Amarillo", "PS3", BLANCO, "ps3"),   # mas oscuro que el LED real para que el blanco se lea (contraste 3.2)
     ("#2d6cdf", "Azul", "PS2 / OPL", BLANCO, "ps2"),
     ("#8e5fd6", "Morado", "Xbox 360", BLANCO, "xbox360"),
     ("#2fa84f", "Verde", "Xbox clásico", BLANCO, "xboxclasico"),
