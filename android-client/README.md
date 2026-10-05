@@ -17,8 +17,11 @@ Samsung + GameSir G8+). Hace lo mismo que los clientes de la Deck y la Ally:
 Sin bibliotecas externas: el demultiplexor MPEG-TS (`TsDemuxer.kt`) es propio.
 Los cuadros y el audio se entregan al decodificador apenas llegan, sin reloj de
 sincronía (igual que el modo GStreamer de la Deck): si el decodificador no tiene
-sitio para un cuadro, se tira y se espera al siguiente IDR en vez de acumular
-retraso.
+sitio para un cuadro, se tira y se espera al siguiente que traiga la configuración
+del video (SPS/PPS; con intra-refresh el servidor la repite en cada cuadro) en
+vez de acumular retraso. Con **Ritmo parejo** (*Configurar cliente*, +50 ms por
+defecto) cada cuadro se muestra según la hora en que se capturó, más un colchón,
+en vez de en cuanto llega: quita los tirones que mete el WiFi.
 
 ## Uso
 
@@ -38,6 +41,10 @@ retraso.
    - Xbox One / Series: la app de *Xbox* (gratis, trae juego remoto) o *xbPlay*.
 
    Si no hay ninguna, el mosaico dice **"No está instalado"** y qué instalar.
+5. Solo en Streaming, **PC (juegos de Windows)** juega la pantalla de una PC con
+   el [servidor de PC](../windows-pc-server/README.md): el mando llega como un
+   control de Xbox 360 y el táctil como mouse. La IP de la PC se pone en
+   *Configurar cliente*.
    Al salir de esa app se regresa a nuestra pantalla. Nuevos paquetes se
    agregan en `Consolas.kt` y en `<queries>` del `AndroidManifest.xml`.
 

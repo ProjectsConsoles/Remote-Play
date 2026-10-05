@@ -11,7 +11,8 @@ Tres partes, todas en este proceso:
         {"cmd": "stop_server"}                   -> dejar de transmitir
   2. Transmision: ffmpeg captura la pantalla con ddagrab (Desktop Duplication) y la codifica con NVENC
      con los MISMOS ajustes de baja latencia del servidor del PS3 (start_server_stream.bat): H.264 p1 ull,
-     sin B-frames, GOP 30, Opus lowdelay de 5 ms, MPEG-TS con -pes_payload_size 0 por UDP al puerto 5000.
+     sin B-frames, intra-refresh, Opus lowdelay de 5 ms, MPEG-TS con -pes_payload_size 0 por UDP al puerto
+     5000 (a traves del relevo local, ver bucle_relevo). Detalles y ajustes en README.md.
      El audio es lo que suena en la PC (loopback de WASAPI con PyAudioWPatch), metido a ffmpeg por stdin:
      la laptop no tiene "Mezcla estereo".
   3. Puerto UDP 9000: el JSON del mando que la tableta le manda al ESP32 (GamepadState.toJson) se
