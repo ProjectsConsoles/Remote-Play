@@ -47,12 +47,16 @@ PUERTO_VIDEO = int(os.environ.get("PS3RP_PC_PUERTO_VIDEO", "5000"))
 # Captura a FPS cuadros por segundo. Con muestreo fijo a 60 contra una pantalla de 144 Hz se repetian/saltaban
 # cuadros: 51 distintos por segundo de un juego a 60 (medido 2026-10-05, "se ve con pocos fps"); a 90 cada
 # cuadro de un juego a 60 dura mas que el intervalo de muestreo y ninguno se pierde.
-# DUP_FRAMES=1 (default): manda cuadro aunque la pantalla no cambie. Con 0 ("solo cuadros nuevos", probado la
-# noche del 2026-10-05) el escritorio quieto no producia NADA: ni video ni audio (el muxer espera al video), la
-# tableta se quedaba sin datos y con la imagen congelada (el cursor solo no cuenta como cambio).
+# DUP_FRAMES=0 (default, "solo cuadros nuevos"): sale un cuadro solo cuando la pantalla cambia. Con 1 se repiten
+# cuadros hasta FPS: medido 2026-10-05 con el juego a 60, la tableta recibia ~70/s con repetidos a destiempo y su
+# pantalla de 60 Hz tiraba algunos de los buenos (tirones, "no veo 60"); con 0 salen ~59 distintos.
+# Con la pantalla quieta no sale video: para que el AUDIO siga, el muxer espera al video a lo mucho
+# MAX_INTERLEAVE_US (con 0 esperaba para siempre y se callaba todo), y la tableta conserva la ultima imagen y
+# retoma sola con el siguiente cuadro (VideoPlayer.puedeArrancar).
 # NVENC reparte el bitrate segun FPS, asi que se escala para que a 60 fps reales salgan ~BITRATE_MBPS.
 FPS = int(os.environ.get("PS3RP_PC_FPS", "90"))
-DUP_FRAMES = os.environ.get("PS3RP_PC_DUP_FRAMES", "1") == "1"
+DUP_FRAMES = os.environ.get("PS3RP_PC_DUP_FRAMES", "0") == "1"
+MAX_INTERLEAVE_US = os.environ.get("PS3RP_PC_MAX_INTERLEAVE_US", "50000")
 BITRATE_MBPS = float(os.environ.get("PS3RP_PC_BITRATE_MBPS", "15"))
 BITRATE = f"{BITRATE_MBPS * FPS / 60:.1f}M"
 SIN_MANDO_S = 60
@@ -299,7 +303,7 @@ class Transmision:
                         "-b:a", "96k", "-ar", "48000", "-ac", "2"]
             cmd += [
                 "-f", "mpegts", "-muxdelay", "0", "-muxpreload", "0", "-flush_packets", "1",
-                "-max_interleave_delta", "0", "-pes_payload_size", "0",
+                "-max_interleave_delta", MAX_INTERLEAVE_US, "-pes_payload_size", "0",
                 # buffer_size: con el de Windows por defecto, en escenas pesadas ffmpeg se caia con
                 # "Error number -10055" (WSAENOBUFS: se lleno el buffer de envio UDP).
                 f"udp://{ip}:{PUERTO_VIDEO}?pkt_size=1316&buffer_size=4194304",

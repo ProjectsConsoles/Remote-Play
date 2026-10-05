@@ -334,7 +334,9 @@ class Mosaico(tk.Canvas):
                 self._img_fondo = _degradado(gw, gh, max(2, esc.px(20) - grosor), color)
                 self.create_image(dentro, dentro, image=self._img_fondo, anchor="nw")
         else:
-            self.itemconfigure("forma", outline="")
+            # la forma solida de atras se oculta: si no, se asoma como un filo de otro color en la orilla y
+            # las esquinas del degradado (reportado 2026-10-05)
+            self.itemconfigure("forma", outline="", state="hidden")
             self.create_image(0, 0, anchor="nw", tags="fondo")
             self.create_polygon(self._puntos_forma(w, h), smooth=True, fill="", outline="",
                                 width=grosor, tags="borde")
