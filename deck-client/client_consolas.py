@@ -34,8 +34,9 @@ class PantallaConsola(ui.Pantalla):
         esc, iconos = app.esc, app.iconos
         marco = tk.Frame(self.frame, bg=ui.FONDO, padx=esc.px(24), pady=esc.px(16))
         marco.pack(fill="both", expand=True)
-        titulo = "Streaming: ¿qué consola?" if modo == "streaming" else "Solo control: ¿qué consola?"
-        cab, _ = ui.cabecera(marco, esc, titulo)
+        # La pregunta sola como titulo (con mayuscula) y el modo a la derecha, donde el menu pone la IP.
+        cab, _ = ui.cabecera(marco, esc, "¿Qué consola?",
+                             "Streaming" if modo == "streaming" else "Solo control")
         cab.pack(fill="x")
         self.tira = ui.TiraEstado(marco, esc)
         self.tira.pack(fill="x", pady=(esc.px(6), esc.px(4)))
