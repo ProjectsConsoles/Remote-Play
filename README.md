@@ -127,11 +127,25 @@ de cada tarjeta también es suave (0.14 s: crece y el borde se ilumina):
   como mosaicos de 3 en 3 que se desplazan solos. A cambia el valor (en los
   textos y números abre un cuadro para escribirlo) y L1 / R1 lo bajan / suben.
 
+## Elegir la consola al entrar (Deck)
+
+**Streaming** y **Solo control** preguntan primero **qué consola** vas a jugar:
+
+- **PS3, PS2, Xbox 360 o Xbox clásico** (las del ESP32-S3): al elegirla se le
+  manda al ESP32 su modo en ese momento (el mismo comando de *Info*). El ESP32
+  siempre se reinicia al recibirlo, así que el control tarda ~2-4 s en
+  responder en la consola. En streaming primero se verifica que el servidor
+  esté transmitiendo. Si el comando no llega (ESP32 apagado o fuera de la red),
+  *Info del ESP32-S3* sigue en el menú para cambiarlo a mano, igual que
+  sosteniendo BOOT en la placa.
+- **PS4 / PS5** y **Xbox One / Series** (solo en Streaming): abren las apps
+  externas de abajo.
+
 ## Apps externas (Deck): PS4 / PS5 y Xbox
 
-En el menú de la Deck, **Apps externas** (fila de abajo) abre programas de
-terceros sin salir de la app: al cerrarlos se regresa al menú. No usan el
-servidor Windows ni el ESP32-S3: traen su propio video, audio y control.
+Desde **Streaming → ¿qué consola?** se abren programas de terceros sin salir
+de la app: al cerrarlos se regresa al menú. No usan el servidor Windows ni el
+ESP32-S3: traen su propio video, audio y control.
 Mientras una está abierta, **nada le manda controles al ESP32** (se detiene
 cualquier `input_client_v3.py`, incluso de otra instancia, y se vigila cada
 2 s). Si una app no está instalada, su mosaico se ve apagado y dice **"No está

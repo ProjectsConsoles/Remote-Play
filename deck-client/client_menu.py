@@ -6,8 +6,12 @@ start_client_stream.sh:
 
     streaming -> video + audio + control (lo de siempre)
     control   -> SOLO el control, con la pantalla de la Deck apagada
-    chiaki    -> abrir chiaki-ng (PS4/PS5), desde la pantalla "Apps externas" (client_apps.py)
-    xbplay    -> abrir xbPlay (Xbox), desde la misma pantalla
+    chiaki    -> abrir chiaki-ng (PS4/PS5)
+    xbplay    -> abrir xbPlay (Xbox One / Series)
+
+Streaming y Solo control (2026-10-04) abren antes "¿Que consola?" (client_consolas.py): elegir
+una consola del ESP32 le manda su modo en ese momento; ahi mismo estan las apps externas
+(chiaki/xbplay, client_apps.py), solo en Streaming.
 
 Ademas hay tres pantallas que NO salen del menu: "Configurar servidor" (modo de captura
 del PC Windows, en remoto: client_server_config.py, habla con config_listener.ps1 por UDP),
@@ -88,7 +92,7 @@ class PantallaMenu(ui.Pantalla):
         import tkinter as tk
         import client_server_config
         import client_settings
-        import client_apps
+        import client_consolas
         esc, iconos = app.esc, app.iconos
         self.ip_local = obtener_ip_local()
         self._consulta = 0
@@ -104,11 +108,14 @@ class PantallaMenu(ui.Pantalla):
 
         f1 = ui.fila(marco, esc)
         t_stream = ui.Mosaico(f1, esc, iconos, "play", "Streaming",
-                              "Video y audio de la consola, mas el control.", ui.AZUL,
-                              on_a=self.elegir_streaming, tam_titulo=32, tam_detalle=16)
+                              "Elige la consola y el ESP32 se configura solo.",
+                              ui.AZUL, tam_titulo=32, tam_detalle=16,
+                              on_a=lambda: app.abrir(client_consolas.PantallaConsola(
+                                  app, "streaming", verificar_servidor_listo)))
         t_control = ui.Mosaico(f1, esc, iconos, "gamepad", "Solo control",
                                "La Deck es nada mas el mando, con la pantalla apagada.", ui.VERDE,
-                               on_a=lambda: app.terminar("control"), tam_titulo=32, tam_detalle=16)
+                               on_a=lambda: app.abrir(client_consolas.PantallaConsola(app, "control")),
+                               tam_titulo=32, tam_detalle=16)
         ui.disponer(f1, [t_stream, t_control], esc)
 
         f2 = ui.fila(marco, esc)
@@ -128,15 +135,12 @@ class PantallaMenu(ui.Pantalla):
         t_info = ui.Mosaico(f3, esc, iconos, "info", "Info del ESP32-S3", "Y", ui.GRIS,
                             on_a=self.abrir_info, tam_titulo=20, tam_detalle=13, tam_icono=40,
                             horizontal=True, alto=esc.px(84))
-        t_apps = ui.Mosaico(f3, esc, iconos, "apps", "Apps externas", "PS4 / PS5 y Xbox", ui.GRIS,
-                            on_a=lambda: app.abrir(client_apps.PantallaApps(app)), tam_titulo=20,
-                            tam_detalle=13, tam_icono=40, horizontal=True, alto=esc.px(84))
         t_salir = ui.Mosaico(f3, esc, iconos, "exit", "Salir", "B o Escape", ui.ROJO_OSCURO,
                              on_a=lambda: app.terminar(None), tam_titulo=20, tam_detalle=13,
                              tam_icono=40, horizontal=True, alto=esc.px(84))
-        ui.disponer(f3, [t_info, t_apps, t_salir], esc)
+        ui.disponer(f3, [t_info, t_salir], esc)
 
-        self.nav = ui.Navegador([[t_stream, t_control], [t_servidor, t_cliente], [t_info, t_apps, t_salir]])
+        self.nav = ui.Navegador([[t_stream, t_control], [t_servidor, t_cliente], [t_info, t_salir]])
 
         tk.Label(marco, font=esc.fuente(13), bg=ui.FONDO, fg=ui.TENUE,
                  text=("Cruceta/stick para moverte, confirma con A, cancela con B, info con Y."
@@ -146,16 +150,6 @@ class PantallaMenu(ui.Pantalla):
     def abrir_info(self):
         self.app.abrir(ui.PantallaInfo(self.app))
 
-    def elegir_streaming(self):
-        # Antes de streaming (2026-09-11): confirma con el servidor que esta listo. Si no, el mensaje
-        # sale en la tira de arriba (ya no en una ventana emergente) y se queda en el menu.
-        self.tira.pintar(ui.TENUE, "Verificando el servidor...")
-        self.app.root.update_idletasks()
-        ok, mensaje = verificar_servidor_listo()
-        if not ok:
-            self.tira.pintar(ui.AVISO, "No se puede iniciar streaming: " + mensaje.replace("\n\n", "  "))
-            return
-        self.app.terminar("streaming")
 
     def al_mostrar(self):
         self.consultar_estado()
