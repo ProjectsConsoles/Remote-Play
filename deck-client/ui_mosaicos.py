@@ -111,6 +111,47 @@ class Iconos:
         return self._cache[clave]
 
 
+_tarjetas_suaves = {}
+
+
+def _tarjeta_suave(w, h, d, r, color, t, grosor):
+    """Tarjeta entera (degradado + esquinas + borde blanco del foco) dibujada con Pillow al triple de tamano y
+    reducida: todo sale suavizado. El canvas de tkinter dibuja las lineas SIN suavizado en Windows y el borde
+    blanco del foco se veia dentado y menos redondeado que la tarjeta (reportado 2026-10-05 en la ventana del
+    servidor de PC). Devuelve None si no hay Pillow (la Deck no lo tiene: sigue el dibujo de siempre)."""
+    try:
+        from PIL import Image, ImageDraw, ImageTk
+    except ImportError:
+        return None
+    tq = round(t * 12) / 12
+    clave = (w, h, d, r, color, tq, grosor)
+    img = _tarjetas_suaves.get(clave)
+    if img is not None:
+        return img
+    S = 3
+    W, H = w * S, h * S
+    x1, y1, x2, y2 = d * S, d * S, W - d * S - 1, H - d * S - 1
+    # degradado diagonal como el de Android: 18 % mas claro arriba a la izquierda hasta el color abajo a la derecha
+    a, b = _rgb(mezclar(color, BLANCO, 0.18)), _rgb(color)
+    n = max(1, (x2 - x1) + (y2 - y1))
+    rampa = Image.new("RGB", (n + 1, 1))
+    rampa.putdata([tuple(round(a[k] + (b[k] - a[k]) * i / n) for k in range(3)) for i in range(n + 1)])
+    deg = rampa.transform((x2 - x1 + 1, y2 - y1 + 1), Image.AFFINE, (1, 1, 0, 0, 0, 0))
+    lienzo = Image.new("RGB", (W, H), _rgb(FONDO))
+    mascara = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mascara).rounded_rectangle((x1, y1, x2, y2), radius=r * S, fill=255)
+    lienzo.paste(deg, (x1, y1), mascara.crop((x1, y1, x2 + 1, y2 + 1)))
+    if tq > 0.02:
+        borde = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(borde).rounded_rectangle((x1, y1, x2, y2), radius=r * S, outline=255, width=grosor * S)
+        lienzo.paste(Image.new("RGB", (W, H), _rgb(mezclar(color, BLANCO, tq))), (0, 0), borde)
+    img = ImageTk.PhotoImage(lienzo.resize((w, h), Image.LANCZOS))
+    if len(_tarjetas_suaves) > 400:
+        _tarjetas_suaves.clear()
+    _tarjetas_suaves[clave] = img
+    return img
+
+
 def _rect_redondeado(x1, y1, x2, y2, r):
     # Poligono con esquinas repetidas + smooth=True = rectangulo con esquinas redondas.
     return [x1 + r, y1, x1 + r, y1, x2 - r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y1 + r,
@@ -270,6 +311,13 @@ class Mosaico(tk.Canvas):
     def _sin_marco(self, w, h, color):
         """Degradado del tamano actual de la forma y, encima, el borde blanco que aparece con el foco."""
         d = self._inset()
+        suave = _tarjeta_suave(w, h, d, self.esc.px(20), color, self._t, self.esc.px(3))
+        if suave is not None:
+            self._img_fondo = suave
+            self.coords("fondo", 0, 0)
+            self.itemconfigure("fondo", image=suave)
+            self.itemconfigure("borde", outline="")
+            return
         gw, gh = (w - 2 * d) // 2 * 2, (h - 2 * d) // 2 * 2
         if gw > 20 and gh > 20:
             self._img_fondo = _degradado(gw, gh, self.esc.px(20), color)
