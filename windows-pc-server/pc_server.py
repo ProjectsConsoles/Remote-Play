@@ -628,14 +628,31 @@ def bucle_vigia(transmision):
             log.error("vigia: %s", e)
 
 
+TRANSMISION = None
+MANDO = None
+
+
 def main():
+    global TRANSMISION, MANDO
     log.info("=== servidor de PC iniciando ===")
     restaurar_salida()   # si la vez anterior se cayo transmitiendo, la laptop se quedo sin sonido
-    transmision = Transmision()
-    mando = Mando()
+    TRANSMISION = transmision = Transmision()
+    MANDO = mando = Mando()
     threading.Thread(target=bucle_mando, args=(mando, transmision), daemon=True).start()
     threading.Thread(target=bucle_vigia, args=(transmision,), daemon=True).start()
-    bucle_config(transmision, mando)
+    threading.Thread(target=bucle_config, args=(transmision, mando), daemon=True).start()
+    # La ventana (pc_gui.py) va en el hilo principal (tkinter lo exige). Sin ella (PS3RP_PC_SIN_VENTANA=1 o si
+    # falla), el servidor sigue igual de invisible que antes.
+    if os.environ.get("PS3RP_PC_SIN_VENTANA") != "1":
+        try:
+            import sys
+            import pc_gui
+            pc_gui.correr(sys.modules[__name__])
+            return
+        except Exception:
+            log.exception("no se pudo abrir la ventana; sigue sin ella")
+    while True:
+        time.sleep(3600)
 
 
 if __name__ == "__main__":
