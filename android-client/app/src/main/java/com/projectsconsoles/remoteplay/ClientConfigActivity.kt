@@ -55,6 +55,12 @@ class ClientConfigActivity : PantallaActivity() {
             { prefs.ajusteImagen }, naranja, compacto,
         ) { prefs.ajusteImagen = it }
 
+        val ritmo = Ui.mosaicoCiclo(
+            this, R.drawable.ic_timer, "Ritmo parejo (menos tirones)",
+            listOf("0" to "Apagado", "20" to "+20 ms", "33" to "+33 ms", "50" to "+50 ms"),
+            { prefs.ritmoParejoMs.toString() }, naranja, compacto,
+        ) { prefs.ritmoParejoMs = it.toInt() }
+
         val hz = Ui.mosaicoCiclo(
             this, R.drawable.ic_speed, "Frecuencia del mando",
             listOf(60, 90, 120, 180, 250).map { it.toString() to "$it Hz" },
@@ -95,7 +101,7 @@ class ClientConfigActivity : PantallaActivity() {
                 listOf(
                     // primera fila: a donde se conecta (ESP32, video y la PC de juegos)
                     listOf(ip, puertoEsp, puertoVideo, ipPc),
-                    listOf(imagen, hz, botonPs),
+                    listOf(imagen, ritmo, hz, botonPs),
                     listOf(zona, sinVideo, volver),
                 ),
             ),

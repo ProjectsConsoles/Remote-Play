@@ -52,6 +52,15 @@ class Prefs(ctx: Context) {
         get() = i("segundos_sin_video", 25)
         set(v) = sp.edit().putInt("segundos_sin_video", v.coerceIn(5, 120)).apply()
 
+    /**
+     * Ritmo parejo (2026-10-05): cada cuadro se muestra a su hora de captura + el retraso mas corto reciente
+     * + este colchon, en vez de apenas llega. Quita los tirones que mete la red (medido: ~19 ms de desfase
+     * normal, 30 ms el 90 % de las veces) a cambio de ese retraso extra. 0 = apagado (como antes).
+     */
+    var ritmoParejoMs: Int
+        get() = i("ritmo_parejo_ms", 33)
+        set(v) = sp.edit().putInt("ritmo_parejo_ms", v.coerceIn(0, 100)).apply()
+
     fun zonaMuertaValor(): Float = when (zonaMuerta) {
         "medio" -> 0.06f
         "alta" -> 0.12f

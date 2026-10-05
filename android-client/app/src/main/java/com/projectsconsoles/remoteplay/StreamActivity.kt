@@ -83,6 +83,8 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
     private var fpsMinimo = -1.0
     private var ultPerdidos = 0L
     private var perdidosVentana = 0L
+    private var ptsHuecoMs = 0.0
+    private var jitterMs = 0.0
 
     private var tactil: TactilPc? = null
     private var controlIp = ""
@@ -228,7 +230,7 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
         tomarBloqueoWifi()
 
         if (!soloControl && superficieVideo != null) {
-            val v = VideoPlayer(superficieVideo) { w, h ->
+            val v = VideoPlayer(superficieVideo, prefs.ritmoParejoMs * 1000L) { w, h ->
                 runOnUiThread {
                     anchoVideo = w
                     altoVideo = h
@@ -340,6 +342,14 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
                 huecoSalidaMs = v.huecoSalidaMaxNs / 1e6
                 v.huecoEntradaMaxNs = 0L
                 v.huecoSalidaMaxNs = 0L
+                ptsHuecoMs = v.ptsHuecoMaxUs / 1000.0
+                val dmin = v.desfaseMinUs
+                val dmax = v.desfaseMaxUs
+                // si el pts salto (reinicio del servidor) el desfase cambia de golpe: no es jitter
+                jitterMs = if (dmax >= dmin && dmax - dmin < 1_000_000) (dmax - dmin) / 1000.0 else -1.0
+                v.ptsHuecoMaxUs = 0L
+                v.desfaseMinUs = Long.MAX_VALUE
+                v.desfaseMaxUs = Long.MIN_VALUE
                 // el minimo cuenta desde 3 s despues de arrancar, para no medir la espera inicial
                 if (v.primerCuadro && (ahora - inicioNs) > 3_000_000_000L && (fpsMinimo < 0 || tasaCuadros < fpsMinimo)) {
                     fpsMinimo = tasaCuadros
@@ -355,8 +365,9 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
                 Log.i(
                     "PS3RP-STATS",
                     String.format(
-                        Locale.US, "fps %.1f entrada_max %.0f ms salida_max %.0f ms perdidos %d kbps %.0f tirados %d tirones %d",
+                        Locale.US, "fps %.1f entrada_max %.0f ms salida_max %.0f ms perdidos %d kbps %.0f tirados %d tirones %d pts_max %.0f ms jitter %.0f ms ritmo %d",
                         tasaCuadros, huecoEntradaMs, huecoSalidaMs, perdidosVentana, tasaKbps, v.descartados, v.tirones,
+                        ptsHuecoMs, jitterMs, prefs.ritmoParejoMs,
                     ),
                 )
             }
@@ -426,9 +437,10 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
             )
             sb.append(
                 String.format(
-                    l, "caidas fps min %s  hueco red %.0f ms  hueco pantalla %.0f ms  tirones %d\n",
+                    l, "caidas fps min %s  hueco red %.0f ms  hueco pantalla %.0f ms  tirones %d  ritmo %s\n",
                     if (fpsMinimo < 0) "-" else String.format(l, "%.0f", fpsMinimo),
                     huecoEntradaMs, huecoSalidaMs, v.tirones,
+                    if (prefs.ritmoParejoMs > 0) "+${prefs.ritmoParejoMs} ms" else "apagado",
                 ),
             )
             v.ultimoError?.let { sb.append("       ultimo error: ").append(it).append('\n') }

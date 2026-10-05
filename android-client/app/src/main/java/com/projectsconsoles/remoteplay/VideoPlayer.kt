@@ -15,6 +15,8 @@ import android.view.Surface
  */
 class VideoPlayer(
     private val superficie: Surface,
+    /** Ritmo parejo: colchon en microsegundos (0 = cada cuadro se dibuja apenas sale, como antes). */
+    private val colchonUs: Long,
     private val alCambiarTamano: (ancho: Int, alto: Int) -> Unit,
 ) {
     private var codec: MediaCodec? = null
@@ -37,6 +39,47 @@ class VideoPlayer(
     /** Cuadros dibujados mas de [TIRON_NS] despues del anterior (se ven como un tiron). */
     @Volatile var tirones = 0L
     private var ultEntradaNs = 0L
+    // Para separar captura de red: el pts de cada cuadro es la hora en que la PC lo capturo.
+    // ptsHuecoMaxUs = mayor hueco entre cuadros SEGUN LA CAPTURA (si ya es dispareja, es el juego o la
+    // captura). desfaseMin/Max = (llegada - pts): su diferencia es lo que la red y el envio desparejan.
+    @Volatile var ptsHuecoMaxUs = 0L
+    @Volatile var desfaseMinUs = Long.MAX_VALUE
+    @Volatile var desfaseMaxUs = Long.MIN_VALUE
+    private var ultPtsUs = -1L
+
+    // Ritmo parejo: base = el desfase (llegada - pts) mas chico de los ultimos 1-2 s, o sea el camino mas
+    // rapido que ha tenido un cuadro. Cada cuadro se dibuja en pts + base + colchon. Se mide por ventanas de
+    // 1 s y se usa el minimo de la actual y la anterior, para que siga los relojes si se van separando.
+    @Volatile private var baseUs = Long.MIN_VALUE
+    private var minActualUs = Long.MAX_VALUE
+    private var minAnteriorUs = Long.MAX_VALUE
+    private var inicioVentanaNs = 0L
+
+    private fun anotarDesfase(desfase: Long, ahoraNs: Long) {
+        val b = baseUs
+        if (b != Long.MIN_VALUE && desfase - b > 500_000) {
+            // salto grande (el servidor se reinicio y el pts volvio a empezar): olvidar la base vieja
+            minActualUs = Long.MAX_VALUE
+            minAnteriorUs = Long.MAX_VALUE
+        }
+        if (ahoraNs - inicioVentanaNs > 1_000_000_000L) {
+            minAnteriorUs = minActualUs
+            minActualUs = Long.MAX_VALUE
+            inicioVentanaNs = ahoraNs
+        }
+        if (desfase < minActualUs) minActualUs = desfase
+        baseUs = minOf(minActualUs, minAnteriorUs)
+    }
+
+    /** Hora (System.nanoTime) en que conviene dibujar el cuadro con este pts, o la de ahora si ya va tarde. */
+    private fun horaDeDibujo(ptsUs: Long): Long {
+        val ahora = System.nanoTime()
+        val b = baseUs
+        if (colchonUs <= 0 || ptsUs < 0 || b == Long.MIN_VALUE) return ahora
+        val objetivo = (ptsUs + b + colchonUs) * 1000
+        // tarde -> ya; demasiado adelante (algo raro en los relojes) -> ya, para no congelar la imagen
+        return if (objetivo <= ahora || objetivo - ahora > 200_000_000L) ahora else objetivo
+    }
     private var ultSalidaNs = 0L
 
     fun iniciar() {
@@ -86,6 +129,16 @@ class VideoPlayer(
             val t = System.nanoTime()
             if (ultEntradaNs != 0L && t - ultEntradaNs > huecoEntradaMaxNs) huecoEntradaMaxNs = t - ultEntradaNs
             ultEntradaNs = t
+            if (ptsUs >= 0) {
+                val d = ptsUs - ultPtsUs
+                // un salto de mas de 1 s (o hacia atras) es un reinicio del servidor: no cuenta
+                if (ultPtsUs >= 0 && d in 0..1_000_000 && d > ptsHuecoMaxUs) ptsHuecoMaxUs = d
+                ultPtsUs = ptsUs
+                val desfase = t / 1000 - ptsUs
+                if (desfase < desfaseMinUs) desfaseMinUs = desfase
+                if (desfase > desfaseMaxUs) desfaseMaxUs = desfase
+                anotarDesfase(desfase, t)
+            }
         } catch (e: Exception) {
             errores++
             ultimoError = e.message
@@ -106,7 +159,11 @@ class VideoPlayer(
                 val i = c.dequeueOutputBuffer(info, 10_000)
                 when {
                     i >= 0 -> {
-                        c.releaseOutputBuffer(i, true) // dibujar de inmediato
+                        if (colchonUs > 0) {
+                            c.releaseOutputBuffer(i, horaDeDibujo(info.presentationTimeUs))
+                        } else {
+                            c.releaseOutputBuffer(i, true) // dibujar de inmediato
+                        }
                         cuadrosSalida++
                         primerCuadro = true
                         val t = System.nanoTime()
