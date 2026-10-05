@@ -390,9 +390,6 @@ REM    sin lag extra, y se sigue recuperando de paquetes perdidos (en hasta 1 s)
 REM    OJO: con intra-refresh solo el PRIMER cuadro trae la configuracion (SPS/PPS):
 REM    un cliente que se une tarde no decodificaba NADA (medido: 0 cuadros). Por eso
 REM    -flags +global_header -bsf:v dump_extra=freq=all la repite en cada cuadro.
-REM    Y un IDR cada 2 s (-forced-idr + -force_key_frames, 2026-10-05): los decodificadores
-REM    de hardware de GStreamer (vah264dec en la Deck, d3d11h264dec en la Ally) no empiezan
-REM    sin un IDR: con solo el del arranque, al unirse tarde habia audio pero NADA de imagen.
 "%FFMPEG%" ^
   -stats_period 2 -progress progreso-%STAMP%.log ^
   -f dshow %CAPTURA% ^
@@ -401,7 +398,7 @@ REM    sin un IDR: con solo el del arranque, al unirse tarde habia audio pero NA
   -i video="%VIDEO_DEV%":audio="%AUDIO_DEV%" ^
   -vf format=nv12 %ASPECTO% ^
   -c:v h264_nvenc -preset p1 -tune ull -zerolatency 1 -rc cbr -b:v %VBITRATE% -maxrate %VBITRATE% -bufsize %VBUF% ^
-  -g 60 -intra-refresh 1 -forced-idr 1 -force_key_frames "expr:gte(t,n_forced*2)" -flags +global_header -bsf:v dump_extra=freq=all -bf 0 -rc-lookahead 0 -delay 0 ^
+  -g 60 -intra-refresh 1 -flags +global_header -bsf:v dump_extra=freq=all -bf 0 -rc-lookahead 0 -delay 0 ^
   -af aresample=async=1000 ^
   -c:a libopus -application lowdelay -frame_duration 5 -b:a 96k -ar 48000 -ac 2 ^
   -f mpegts -muxdelay 0 -muxpreload 0 -flush_packets 1 -max_interleave_delta 0 -pes_payload_size 0 ^

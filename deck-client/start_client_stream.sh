@@ -1232,6 +1232,19 @@ if [ "$PLAYER" = "gstreamer_lsfg" ] \
     echo "AVISO: gstreamer_lsfg necesita lsfg-vk y su conf.toml (no estan); uso gstreamer normal." | tee -a "$LOG"
     PLAYER=gstreamer
 fi
+# Decodificador H.264 de GStreamer (2026-10-05). El server ahora usa intra-refresh (sin
+# "parpadeo"): solo el PRIMER cuadro es IDR. vah264dec (GPU) no arranca sin un IDR, asi que
+# al entrar con la transmision andando habia audio pero NINGUNA imagen (medido en la Deck:
+# 0 cuadros en 10 s). avdec_h264 (el de ffmpeg) arranca en cualquier cuadro: 583 en 10 s.
+# thread-type=slice: los hilos por cuadro meterian varios cuadros de retraso.
+# PS3RP_GST_DEC=va vuelve al de la GPU (sirve si el server manda cuadros clave).
+if [ "${PS3RP_GST_DEC:-avdec}" = "va" ]; then
+    GST_DEC=(vah264dec)
+    GST_DEC_NV12=(vah264dec ! vapostproc ! video/x-raw,format=NV12)
+else
+    GST_DEC=(avdec_h264 thread-type=slice)
+    GST_DEC_NV12=(avdec_h264 thread-type=slice ! videoconvert ! video/x-raw,format=NV12)
+fi
 if [ "$PLAYER" = "gstreamer" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1; then
     # GStreamer (2026-09-18, PRUEBA). El de SteamOS no trae decodificador H.264; el del
     # runtime Freedesktop 25.08 si (vah264dec = GPU), y se usa a traves del sandbox del
@@ -1260,7 +1273,7 @@ if [ "$PLAYER" = "gstreamer" ] && flatpak info --user io.mpv.Mpv >/dev/null 2>&1
         udpsrc port="$PORT" caps=video/mpegts timeout="$((SIN_VIDEO_S * 1000000000))" \
            ! tsdemux latency=0 name=d \
         d. ! queue max-size-buffers=3 max-size-time=0 max-size-bytes=0 leaky=downstream \
-           ! h264parse ! vah264dec ! queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream \
+           ! h264parse ! "${GST_DEC[@]}" ! queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream \
            "${GST_IMAGEN[@]}" \
         d. ! queue max-size-buffers=8 max-size-time=0 max-size-bytes=0 leaky=downstream \
            ! opusdec ! audioconvert ! audioresample \
@@ -1319,7 +1332,7 @@ elif [ "$PLAYER" = "gstreamer_lsfg" ] && flatpak info --user io.mpv.Mpv >/dev/nu
         udpsrc port="$PORT" caps=video/mpegts timeout="$((SIN_VIDEO_S * 1000000000))" \
            ! tsdemux latency=0 name=d \
         d. ! queue max-size-buffers=3 max-size-time=0 max-size-bytes=0 leaky=downstream \
-           ! h264parse ! vah264dec ! vapostproc ! video/x-raw,format=NV12 \
+           ! h264parse ! "${GST_DEC_NV12[@]}" \
            ! vulkanupload ! vulkancolorconvert \
            ! queue max-size-buffers=1 max-size-time=0 max-size-bytes=0 leaky=downstream \
            ! vulkansink sync=false force-aspect-ratio="$GST_FAR" \

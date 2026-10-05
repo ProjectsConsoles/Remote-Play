@@ -216,7 +216,7 @@ Push-Location $LogDir
   -i ("video={0}:audio={1}" -f $VideoDev, $AudioDev) `
   -vf format=nv12 `
   -c:v h264_nvenc -preset p1 -tune ull -zerolatency 1 -rc cbr -b:v 5M -maxrate 5M -bufsize 250k `
-  -g 60 -intra-refresh 1 -forced-idr 1 -force_key_frames 'expr:gte(t,n_forced*2)' -flags +global_header -bsf:v dump_extra=freq=all -bf 0 -rc-lookahead 0 -delay 0 `
+  -g 60 -intra-refresh 1 -flags +global_header -bsf:v dump_extra=freq=all -bf 0 -rc-lookahead 0 -delay 0 `
   -af aresample=async=1000 `
   -c:a aac -b:a 96k -ar 48000 -ac 2 `
   -f mpegts -muxdelay 0 -muxpreload 0 -flush_packets 1 -max_interleave_delta 0 `
