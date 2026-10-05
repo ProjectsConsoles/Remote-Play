@@ -185,7 +185,62 @@ CONTROL_UI_PID=""
 # proyecto; no va en el repo (170 MB), se baja de
 # https://github.com/streetpea/chiaki-ng/releases (chiaki-ng.AppImage_x86_64).
 CHIAKI_APPIMAGE="${PS3RP_CHIAKI_APPIMAGE:-$SCRIPT_DIR/apps/chiaki-ng.AppImage}"
-CHIAKI_PID=""
+APP_EXT_PID=""
+
+# xbPlay (Remote Play de Xbox, de pago: Studio08, comprado en Steam). NUNCA se
+# baja ni va en el repo; se usa el que el usuario instalo. Se busca, en orden:
+# PS3RP_XBPLAY, apps/xbplay.AppImage, Studio08/linux/xbplay/net.studio08.xbplay
+# dentro de CADA biblioteca de Steam (libraryfolders.vdf: interna o microSD), y
+# un AppImage con "xbplay" en el nombre en Descargas / Applications / Escritorio.
+# client_apps.py busca igual (mantener las dos listas iguales).
+buscar_xbplay() {
+    local c lib
+    for c in "${PS3RP_XBPLAY:-}" "$SCRIPT_DIR/apps/xbplay.AppImage"; do
+        [ -n "$c" ] && [ -x "$c" ] && { echo "$c"; return; }
+    done
+    while IFS= read -r lib; do
+        c="$lib/steamapps/common/Studio08/linux/xbplay/net.studio08.xbplay"
+        [ -x "$c" ] && { echo "$c"; return; }
+    done < <(echo "$HOME/.local/share/Steam"
+             sed -n 's/^[[:space:]]*"path"[[:space:]]*"\(.*\)"/\1/p' \
+                 "$HOME/.local/share/Steam/steamapps/libraryfolders.vdf" 2>/dev/null)
+    find "$HOME/Downloads" "$HOME/Applications" "$HOME/Desktop" -maxdepth 2 -type f \
+        -iname "*xbplay*.appimage" -perm -u+x 2>/dev/null | sort | head -n 1
+}
+
+# Corre una app externa y espera a que se cierre. NADIE MANDA AL ESP32
+# MIENTRAS ESTA ABIERTA (2026-10-04, pedido del usuario): el mismo mando que
+# usa la app lo lee input_client_v3.py, y si quedo uno vivo (de este script o
+# de OTRA instancia en streaming o control) cada boton tambien le llega a la
+# consola del ESP32. Se baja antes de abrir la app y se vigila cada 2 s
+# mientras siga abierta, por si otra instancia arranca uno. Solo el control:
+# el video de otra instancia no se toca.
+correr_app_externa() {
+    local nombre="$1" ruta="$2" vigia
+    shift 2
+    echo "--- $(date) --- app externa: $nombre (${ruta:-sin ruta})" >> "$LOG"
+    if [ -z "$ruta" ] || [ ! -x "$ruta" ]; then
+        echo "AVISO: no encontre $nombre (${ruta:-no esta instalado})." | tee -a "$LOG"
+        return
+    fi
+    detener_control
+    pkill -f "client_control_ui.py" 2>/dev/null
+    "$ruta" "$@" >> "$LOG" 2>&1 &
+    APP_EXT_PID=$!
+    (
+        while kill -0 "$APP_EXT_PID" 2>/dev/null; do
+            if pkill -f "input_client_v3.py" 2>/dev/null; then
+                echo "$nombre abierto: detuve un cliente de input que mandaba al ESP32." >> "$LOG"
+            fi
+            sleep 2
+        done
+    ) &
+    vigia=$!
+    wait "$APP_EXT_PID"
+    echo "$nombre termino (codigo $?)." >> "$LOG"
+    kill "$vigia" 2>/dev/null
+    APP_EXT_PID=""
+}
 
 # Al salir (cierre normal, Ctrl+C, o "Cerrar aplicacion" desde Modo Juego)
 # matar el cliente de input para no dejarlo colgado mandando UDP. Sin esto,
@@ -215,9 +270,9 @@ cleanup() {
     fi
     pkill -f "client_control_ui.py" 2>/dev/null
 
-    # chiaki-ng, si Steam cerro el "juego" con la app todavia abierta.
-    if [ -n "$CHIAKI_PID" ] && kill -0 "$CHIAKI_PID" 2>/dev/null; then
-        kill -TERM "$CHIAKI_PID" 2>/dev/null
+    # La app externa (chiaki-ng, xbPlay), si Steam cerro el "juego" con ella abierta.
+    if [ -n "$APP_EXT_PID" ] && kill -0 "$APP_EXT_PID" 2>/dev/null; then
+        kill -TERM "$APP_EXT_PID" 2>/dev/null
     fi
 
     # Matar tambien ffplay. Parece redundante (normalmente el script solo
@@ -434,7 +489,7 @@ if [ -z "$MODO" ]; then
         MENU_RC=$?
         MODO=$(printf '%s\n' "$MENU_SALIDA" \
                | tr -d '\r' \
-               | grep -E '^(streaming|control|chiaki)$' \
+               | grep -E '^(streaming|control|chiaki|xbplay)$' \
                | tail -n 1)
         case "$MENU_RC" in
             0)
@@ -457,48 +512,34 @@ fi
 
 # APPS EXTERNAS (2026-10-04): se lanza la app y, al cerrarla, se regresa al
 # menu, igual que el modo control. No arranca el cliente de input ni ffplay:
-# chiaki-ng trae su propio video, audio y lectura del mando (Steam Input le
+# cada app trae su propio video, audio y lectura del mando (Steam Input le
 # entrega el mismo gamepad virtual que al menu).
 if [ "$MODO" = "chiaki" ]; then
-    echo "--- $(date) --- app externa: chiaki-ng ($CHIAKI_APPIMAGE)" >> "$LOG"
-    if [ ! -x "$CHIAKI_APPIMAGE" ]; then
-        echo "AVISO: no encontre chiaki-ng en $CHIAKI_APPIMAGE." | tee -a "$LOG"
-    else
-        # Primera vez: el AppImage guarda su config en ~/.config/Chiaki y el
-        # Flatpak dentro de su sandbox. Si solo existe la del Flatpak, se copia
-        # para que las consolas ya registradas (PS4/PS5) no pidan el PIN otra
-        # vez. Nunca se pisa una config del AppImage que ya exista.
-        CHIAKI_CONF_FLATPAK="$HOME/.var/app/io.github.streetpea.Chiaki4deck/config/Chiaki"
-        if [ ! -e "$HOME/.config/Chiaki/Chiaki.conf" ] && [ -f "$CHIAKI_CONF_FLATPAK/Chiaki.conf" ]; then
-            mkdir -p "$HOME/.config/Chiaki"
-            cp -n "$CHIAKI_CONF_FLATPAK"/*.conf "$HOME/.config/Chiaki/" \
-                && echo "Config de chiaki-ng copiada del Flatpak (consolas ya registradas)." | tee -a "$LOG"
-        fi
-        # NADIE MANDA AL ESP32 MIENTRAS CHIAKI ESTA ABIERTO (2026-10-04, pedido
-        # del usuario). El mismo mando que usa chiaki-ng lo lee input_client_v3.py:
-        # si quedo uno vivo (de este script o de OTRA instancia en streaming o
-        # control), cada boton para la PS4/PS5 tambien le llega a la consola del
-        # ESP32. Se baja antes de abrir la app y se vigila cada 2 s mientras siga
-        # abierta, por si otra instancia arranca uno. Solo el control: el video
-        # de otra instancia no se toca.
-        detener_control
-        pkill -f "client_control_ui.py" 2>/dev/null
-        "$CHIAKI_APPIMAGE" >> "$LOG" 2>&1 &
-        CHIAKI_PID=$!
-        (
-            while kill -0 "$CHIAKI_PID" 2>/dev/null; do
-                if pkill -f "input_client_v3.py" 2>/dev/null; then
-                    echo "chiaki-ng abierto: detuve un cliente de input que mandaba al ESP32." >> "$LOG"
-                fi
-                sleep 2
-            done
-        ) &
-        CHIAKI_VIGIA=$!
-        wait "$CHIAKI_PID"
-        echo "chiaki-ng termino (codigo $?)." >> "$LOG"
-        kill "$CHIAKI_VIGIA" 2>/dev/null
-        CHIAKI_PID=""
+    # Primera vez: el AppImage guarda su config en ~/.config/Chiaki y el
+    # Flatpak dentro de su sandbox. Si solo existe la del Flatpak, se copia
+    # para que las consolas ya registradas (PS4/PS5) no pidan el PIN otra
+    # vez. Nunca se pisa una config del AppImage que ya exista.
+    CHIAKI_CONF_FLATPAK="$HOME/.var/app/io.github.streetpea.Chiaki4deck/config/Chiaki"
+    if [ -x "$CHIAKI_APPIMAGE" ] && [ ! -e "$HOME/.config/Chiaki/Chiaki.conf" ] \
+            && [ -f "$CHIAKI_CONF_FLATPAK/Chiaki.conf" ]; then
+        mkdir -p "$HOME/.config/Chiaki"
+        cp -n "$CHIAKI_CONF_FLATPAK"/*.conf "$HOME/.config/Chiaki/" \
+            && echo "Config de chiaki-ng copiada del Flatpak (consolas ya registradas)." | tee -a "$LOG"
     fi
+    correr_app_externa "chiaki-ng" "$CHIAKI_APPIMAGE"
+fi
+if [ "$MODO" = "xbplay" ]; then
+    # Electron: sin --no-sandbox no abre en SteamOS (igual que el acceso
+    # directo de Steam que tenia el usuario). SteamAppId/SteamGameId: xbPlay
+    # valida la compra con steamworks (libsteam_api) y no trae steam_appid.txt;
+    # ademas este script corre como acceso directo de Steam y heredaria el
+    # SteamAppId de NUESTRA app. Con el suyo (2693120) SteamAPI_Init carga bien
+    # sin que Steam lo relance (probado 2026-10-04). Las asignaciones delante de
+    # una funcion de bash llegan al entorno de lo que la funcion ejecuta.
+    SteamAppId=2693120 SteamGameId=2693120 \
+        correr_app_externa "xbPlay" "$(buscar_xbplay)" --no-sandbox
+fi
+if [ "$MODO" = "chiaki" ] || [ "$MODO" = "xbplay" ]; then
     # Con el modo fijado por variable no hay menu al que volver.
     if [ -n "${PS3RP_MODO:-}" ]; then
         exit 0

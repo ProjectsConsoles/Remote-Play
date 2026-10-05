@@ -7,6 +7,7 @@ start_client_stream.sh:
     streaming -> video + audio + control (lo de siempre)
     control   -> SOLO el control, con la pantalla de la Deck apagada
     chiaki    -> abrir chiaki-ng (PS4/PS5), desde la pantalla "Apps externas" (client_apps.py)
+    xbplay    -> abrir xbPlay (Xbox), desde la misma pantalla
 
 Ademas hay tres pantallas que NO salen del menu: "Configurar servidor" (modo de captura
 del PC Windows, en remoto: client_server_config.py, habla con config_listener.ps1 por UDP),
@@ -35,7 +36,7 @@ con la pantalla tactil. Por eso aca se lee el mando directo con pygame y se
 traduce a mover el foco / confirmar. El tactil y el raton siguen funcionando.
 
 Codigos de salida:
-    0 = eligio streaming, control o chiaki, esta impreso en stdout
+    0 = eligio streaming, control, chiaki o xbplay, esta impreso en stdout
     1 = cancelo (B, Escape, "Salir", o cerro la ventana)
     2 = no se pudo abrir ninguna ventana (sin DISPLAY, por ejemplo)
 
@@ -127,7 +128,7 @@ class PantallaMenu(ui.Pantalla):
         t_info = ui.Mosaico(f3, esc, iconos, "info", "Info del ESP32-S3", "Y", ui.GRIS,
                             on_a=self.abrir_info, tam_titulo=20, tam_detalle=13, tam_icono=40,
                             horizontal=True, alto=esc.px(84))
-        t_apps = ui.Mosaico(f3, esc, iconos, "apps", "Apps externas", "PS4 / PS5 con chiaki-ng", ui.GRIS,
+        t_apps = ui.Mosaico(f3, esc, iconos, "apps", "Apps externas", "PS4 / PS5 y Xbox", ui.GRIS,
                             on_a=lambda: app.abrir(client_apps.PantallaApps(app)), tam_titulo=20,
                             tam_detalle=13, tam_icono=40, horizontal=True, alto=esc.px(84))
         t_salir = ui.Mosaico(f3, esc, iconos, "exit", "Salir", "B o Escape", ui.ROJO_OSCURO,

@@ -127,21 +127,42 @@ de cada tarjeta también es suave (0.14 s: crece y el borde se ilumina):
   como mosaicos de 3 en 3 que se desplazan solos. A cambia el valor (en los
   textos y números abre un cuadro para escribirlo) y L1 / R1 lo bajan / suben.
 
-## Apps externas (Deck): PS4 / PS5 con chiaki-ng
+## Apps externas (Deck): PS4 / PS5 y Xbox
 
 En el menú de la Deck, **Apps externas** (fila de abajo) abre programas de
-terceros sin salir de la app: al cerrarlos se regresa al menú. Por ahora trae
-[chiaki-ng](https://github.com/streetpea/chiaki-ng) (antes *chiaki4deck*), el
-cliente libre del Remote Play de Sony para **PS4 y PS5**. No usa el servidor
-Windows ni el ESP32-S3: trae su propio video, audio y control.
+terceros sin salir de la app: al cerrarlos se regresa al menú. No usan el
+servidor Windows ni el ESP32-S3: traen su propio video, audio y control.
+Mientras una está abierta, **nada le manda controles al ESP32** (se detiene
+cualquier `input_client_v3.py`, incluso de otra instancia, y se vigila cada
+2 s). Si una app no está instalada, su mosaico se ve apagado y dice **"No está
+instalado"**; A solo lo avisa.
 
-- Se usa el **AppImage** (`chiaki-ng.AppImage_x86_64` de la página de
-  releases), guardado como `deck-client/apps/chiaki-ng.AppImage` y con permiso
-  de ejecución. No va en el repo (170 MB). Otra ruta: `PS3RP_CHIAKI_APPIMAGE`.
+**PS4 / PS5 — [chiaki-ng](https://github.com/streetpea/chiaki-ng)** (antes
+*chiaki4deck*), cliente libre del Remote Play de Sony.
+
+- Se usa el **AppImage**: bajar `chiaki-ng.AppImage_x86_64` de la página de
+  releases y dejarlo **exactamente** como `deck-client/apps/chiaki-ng.AppImage`
+  (en la Deck: `<carpeta del proyecto>/apps/chiaki-ng.AppImage`), con permiso
+  de ejecución (`chmod +x`). No va en el repo (170 MB). Para otra ruta:
+  `PS3RP_CHIAKI_APPIMAGE=/ruta/al/AppImage`.
 - Si ya tenías el **Flatpak** con consolas registradas, la primera vez se copia
   su config (`~/.var/app/io.github.streetpea.Chiaki4deck/config/Chiaki`) a
   `~/.config/Chiaki`, así no hay que volver a meter el PIN. Nunca se pisa una
   config del AppImage que ya exista.
+
+**Xbox One / Series — [xbPlay](https://store.steampowered.com/app/2693120/)**
+(Studio08, **de pago**: nunca se incluye ni se descarga). Se usa el que tengas
+instalado; se busca, en orden:
+
+1. `PS3RP_XBPLAY=/ruta/al/ejecutable`
+2. `deck-client/apps/xbplay.AppImage`
+3. La versión de **Steam**, en cualquier biblioteca (interna o microSD):
+   `steamapps/common/Studio08/linux/xbplay/net.studio08.xbplay`
+4. Un AppImage ejecutable con `xbplay` en el nombre en `~/Downloads`,
+   `~/Applications` o `~/Desktop`
+
+La de Steam se abre con `--no-sandbox` y con `SteamAppId=2693120` (si no,
+heredaría el de nuestro acceso directo y Steam no validaría la compra).
 
 ## Reproductor de video: GStreamer (menos delay)
 
@@ -275,7 +296,7 @@ conectarla/resetear), mantén **BOOT** ~1.5s — el LED cicla de color cada
 - Una **capturadora HDMI** compatible con DirectShow, con audio digital.
 - Un **ESP32-S3** flasheado con `deck-client/esp32_firmware/` (ver abajo).
 - **GStreamer** en cada cliente (ver *Reproductor de video* arriba).
-- Opcional: el **AppImage de chiaki-ng** para PS4/PS5 (ver *Apps externas*).
+- Opcional: **chiaki-ng** (PS4/PS5) y **xbPlay** (Xbox) en la Deck (ver *Apps externas*).
 
 ## Instalar ffmpeg (para que arranque el servidor)
 
