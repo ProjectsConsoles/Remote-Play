@@ -128,15 +128,38 @@ def _forma(w, h, r, grosor=0):
     return _formas[clave]
 
 
+def _degradado_diagonal(w, h, color):
+    """Degradado como el de Android (Ui.fondoMosaico): 18% mas claro arriba a la izquierda hasta el
+    color normal abajo a la derecha. Una superficie de 2x2 ampliada con smoothscale (bilineal) da
+    exactamente ese degradado lineal en diagonal."""
+    claro = mezclar(color, BLANCO, 0.18)
+    medio = mezclar(claro, color, 0.5)
+    chica = pygame.Surface((2, 2))
+    chica.set_at((0, 0), claro)
+    chica.set_at((1, 0), medio)
+    chica.set_at((0, 1), medio)
+    chica.set_at((1, 1), color)
+    return pygame.transform.smoothscale(chica, (w, h)).convert_alpha()
+
+
 def _relleno(w, h, r, color, foco, grosor):
-    """Mosaico: degradado vertical (un poco mas claro arriba) recortado a esquinas redondas; con foco, anillo blanco."""
+    """Mosaico como las tarjetas de Android (2026-10-04): marco de `grosor` px del color solido (su
+    "stroke") y adentro el degradado diagonal, todo con esquinas redondas; con foco, anillo blanco.
+    Antes era un degradado vertical sin marco."""
     clave = ("relleno", w, h, r, color, foco, grosor)
     if clave not in _formas:
-        s = pygame.Surface((w, h), pygame.SRCALPHA)
-        arriba = mezclar(color, BLANCO, 0.16)
-        for y in range(h):
-            s.fill(mezclar(arriba, color, y / max(1, h - 1)) + (255,), (0, y, w, 1))
+        if grosor and w > 2 * grosor and h > 2 * grosor:
+            s = pygame.Surface((w, h), pygame.SRCALPHA)
+            s.fill(tuple(color) + (255,))
+        else:
+            # sin marco (paneles y botones del cuadro de texto): todo el fondo es el degradado
+            s = _degradado_diagonal(w, h, color)
         s.blit(_forma(w, h, r), (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        if grosor and w > 2 * grosor and h > 2 * grosor:
+            iw, ih = w - 2 * grosor, h - 2 * grosor
+            dentro = _degradado_diagonal(iw, ih, color)
+            dentro.blit(_forma(iw, ih, max(1, r - grosor)), (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            s.blit(dentro, (grosor, grosor))
         if foco:
             s.blit(_forma(w, h, r, grosor), (0, 0))
         _formas[clave] = s
@@ -257,7 +280,7 @@ class Mosaico:
             sombra = _sombra(r.w, r.h, esc.px(18), m)
             sombra.set_alpha(int(190 * t))
             surf.blit(sombra, (r.x - m, r.y - m + esc.px(3)))
-        surf.blit(_relleno(r.w, r.h, esc.px(18), color, False, 0), r.topleft)
+        surf.blit(_relleno(r.w, r.h, esc.px(18), color, False, esc.px(4)), r.topleft)
         if t > 0.02:
             anillo = _anillo(r.w, r.h, esc.px(18), esc.px(4))
             anillo.set_alpha(int(255 * t))     # el borde blanco se desvanece hacia adentro/afuera

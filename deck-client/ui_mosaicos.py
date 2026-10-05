@@ -118,6 +118,50 @@ def _rect_redondeado(x1, y1, x2, y2, r):
             x1, y2, x1, y2 - r, x1, y2 - r, x1, y1 + r, x1, y1 + r, x1, y1]
 
 
+_degradados = {}
+
+
+def _hex(c):
+    return "#%02x%02x%02x" % c
+
+
+def _rgb(color):
+    return int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+
+
+def _degradado(w, h, r, color):
+    """Relleno del mosaico como el de Android (Ui.fondoMosaico): degradado diagonal, 18% mas claro
+    arriba a la izquierda hasta el color normal abajo a la derecha, con esquinas redondas
+    (transparentes). Sin Pillow (la Deck no lo tiene): se arma a media resolucion con put() y se
+    amplia x2 (el degradado es suave, no se nota) y se guarda por tamano y color, porque cada pantalla
+    nueva vuelve a crear sus mosaicos."""
+    clave = (w, h, r, color)
+    img = _degradados.get(clave)
+    if img is not None:
+        return img
+    a = _rgb(mezclar(color, BLANCO, 0.18))
+    b = _rgb(color)
+    w2, h2 = max(1, (w + 1) // 2), max(1, (h + 1) // 2)
+    n = max(1, w2 + h2 - 2)
+    paleta = [_hex(tuple(round(a[k] + (b[k] - a[k]) * i / n) for k in range(3))) for i in range(w2 + h2)]
+    chica = tk.PhotoImage(width=w2, height=h2)
+    chica.put(" ".join("{" + " ".join(paleta[y:y + w2]) + "}" for y in range(h2)))
+    img = chica.zoom(2, 2)
+    # esquinas: fuera del cuarto de circulo, transparente
+    for cy0, sy in ((r, -1), (h - 1 - r, 1)):
+        for cx0, sx in ((r, -1), (w - 1 - r, 1)):
+            for dy in range(r + 1):
+                for dx in range(r + 1):
+                    if dx * dx + dy * dy > r * r:
+                        x, y = cx0 + sx * dx, cy0 + sy * dy
+                        if 0 <= x < img.width() and 0 <= y < img.height():
+                            img.transparency_set(x, y, True)
+    if len(_degradados) > 200:
+        _degradados.clear()
+    _degradados[clave] = img
+    return img
+
+
 class Mosaico(tk.Canvas):
     """Tarjeta con icono, titulo y descripcion. `horizontal=True` = icono a la izquierda y texto a
     la derecha (botones de abajo: Volver, Guardar...)."""
@@ -256,6 +300,14 @@ class Mosaico(tk.Canvas):
         self.create_polygon(
             self._puntos_forma(w, h), smooth=True, fill=color,
             outline=mezclar(color, BLANCO, self._t), width=grosor, tags="forma")
+        # Encima, el degradado de Android (2026-10-04), metido un borde mas adentro que la forma sin
+        # foco: queda un marco del color solido alrededor (el "stroke" de las tarjetas de Android) y
+        # la forma de atras sigue creciendo y aclarando su borde al enfocar, sin rehacer la imagen.
+        dentro = esc.px(7) + grosor
+        gw, gh = (w - 2 * dentro) // 2 * 2, (h - 2 * dentro) // 2 * 2
+        if gw > 20 and gh > 20:
+            self._img_fondo = _degradado(gw, gh, max(2, esc.px(20) - grosor), color)
+            self.create_image(dentro, dentro, image=self._img_fondo, anchor="nw")
 
         pad = esc.px(24)   # fijo: el texto ya no se corre al enfocar (solo crece la forma)
         ancho_txt = max(40, w - 2 * pad)
