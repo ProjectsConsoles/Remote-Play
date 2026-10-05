@@ -40,43 +40,49 @@ class PantallaConsola(ui.Pantalla):
         self.tira = ui.TiraEstado(marco, esc)
         self.tira.pack(fill="x", pady=(esc.px(6), esc.px(4)))
 
-        # Streaming: 3 + 3 (PS3 PS2 360 / Xbox PS4-5 XboxOne). Solo control: 2 + 2. Las filas se
-        # crean antes porque cada Mosaico nace dentro de la suya.
-        total = len(ui.LEDS) + (2 if modo == "streaming" else 0)
-        por_fila = 3 if modo == "streaming" else 2
-        marcos = [ui.fila(marco, esc) for _ in range((total + por_fila - 1) // por_fila)]
+        # Una fila por marca, en orden de generacion (2026-10-04, pedido del usuario: "lo de play con
+        # lo de play y xbox con lo de xbox"). Numeros = indice en ui.LEDS (0 PS3, 1 PS2, 2 Xbox 360,
+        # 3 Xbox clasico), que es tambien el modo que se le manda al ESP32. Solo control no lleva las
+        # apps externas. Las filas se crean antes porque cada Mosaico nace dentro de la suya.
+        if modo == "streaming":
+            orden = [1, 0, "chiaki", 3, 2, "xbplay"]
+            por_fila = 3
+        else:
+            orden = [1, 0, 3, 2]
+            por_fila = 2
+        marcos = [ui.fila(marco, esc) for _ in range((len(orden) + por_fila - 1) // por_fila)]
         todos = []
+        self.estados = {}
 
         def padre():
             return marcos[len(todos) // por_fila]
 
-        # Las 4 consolas del ESP32: mismos colores/logos que el LED y que Info (ui.LEDS).
-        self.estados = {}
-        for i, (color, nombre_color, consola, color_texto, icono) in enumerate(ui.LEDS):
+        def mosaico_esp32(i):
+            # Mismos colores/logos que el LED y que Info (ui.LEDS).
+            color, nombre_color, consola, color_texto, icono = ui.LEDS[i]
             t = ui.Mosaico(padre(), esc, iconos, icono, consola, f"Capturadora + ESP32 (LED {nombre_color.lower()})",
                            color, color_texto=color_texto, tam_titulo=30, tam_detalle=15,
-                           on_a=lambda i=i, c=consola: self.elegir_esp32(i, c))
+                           on_a=lambda: self.elegir_esp32(i, consola))
             self.estados[t] = (ui.TENUE, f"{consola}: el ESP32 se configura solo al elegirla "
                                          "(se reinicia ~2 s).")
-            todos.append(t)
+            return t
 
-        if modo == "streaming":
-            ok_c, col_c, txt_c = client_apps.estado_chiaki()
-            ok_x, col_x, txt_x = client_apps.estado_xbplay()
-            t_chiaki = ui.Mosaico(padre(), esc, iconos, "ps", "PS4 / PS5",
-                                  "chiaki-ng (Remote Play de Sony)." if ok_c else "No está instalado.",
-                                  client_apps.AZUL_PS if ok_c else ui.mezclar(client_apps.AZUL_PS, ui.FONDO, 0.6),
-                                  tam_titulo=30, tam_detalle=15,
-                                  on_a=lambda: self.elegir_app("chiaki", client_apps.estado_chiaki))
-            todos.append(t_chiaki)
-            t_xbplay = ui.Mosaico(padre(), esc, iconos, "xbox", "Xbox One / Series",
-                                  "xbPlay (Remote Play de Xbox)." if ok_x else "No está instalado.",
-                                  client_apps.VERDE_XBOX if ok_x else ui.mezclar(client_apps.VERDE_XBOX, ui.FONDO, 0.6),
-                                  tam_titulo=30, tam_detalle=15,
-                                  on_a=lambda: self.elegir_app("xbplay", client_apps.estado_xbplay))
-            self.estados[t_chiaki] = (col_c, txt_c)
-            self.estados[t_xbplay] = (col_x, txt_x)
-            todos.append(t_xbplay)
+        def mosaico_app(clave):
+            if clave == "chiaki":
+                estado, icono, titulo, detalle, color = (client_apps.estado_chiaki, "ps", "PS4 / PS5",
+                                                         "chiaki-ng (Remote Play de Sony).", client_apps.AZUL_PS)
+            else:
+                estado, icono, titulo, detalle, color = (client_apps.estado_xbplay, "xbox", "Xbox One / Series",
+                                                         "xbPlay (Remote Play de Xbox).", client_apps.VERDE_XBOX)
+            ok, col, txt = estado()
+            t = ui.Mosaico(padre(), esc, iconos, icono, titulo, detalle if ok else "No está instalado.",
+                           color if ok else ui.mezclar(color, ui.FONDO, 0.6), tam_titulo=30, tam_detalle=15,
+                           on_a=lambda: self.elegir_app(clave, estado))
+            self.estados[t] = (col, txt)
+            return t
+
+        for clave in orden:
+            todos.append(mosaico_esp32(clave) if isinstance(clave, int) else mosaico_app(clave))
 
         filas = [todos[k:k + por_fila] for k in range(0, len(todos), por_fila)]
         for f, fila_ in zip(marcos, filas):
