@@ -382,6 +382,11 @@ REM    ('casi identico a la tele'). El 20 se probo 3 veces (agosto y dos hoy) y
 REM    las tres se sintio con mas retraso: NO volver a bajarlo. Ojo: cada
 REM    arranque del cliente cae en un nivel de cola distinto (vq 0-90 KB en la
 REM    Deck), asi que una sola corrida no alcanza para juzgar un cambio.
+REM  INTRA-REFRESH (2026-10-05, CONFIRMADO por el usuario en el servidor de PC): con
+REM    -g 30 y un -bufsize tan chico, cada cuadro clave (2 por segundo) salia con otra
+REM    calidad/color y se veia un "parpadeo" seguido en todos los clientes. Con
+REM    -intra-refresh 1 NVENC refresca por franjas a lo largo de 60 cuadros: sin pulso,
+REM    sin lag extra, y se sigue recuperando de paquetes perdidos (en hasta 1 s).
 "%FFMPEG%" ^
   -stats_period 2 -progress progreso-%STAMP%.log ^
   -f dshow %CAPTURA% ^
@@ -390,7 +395,7 @@ REM    Deck), asi que una sola corrida no alcanza para juzgar un cambio.
   -i video="%VIDEO_DEV%":audio="%AUDIO_DEV%" ^
   -vf format=nv12 %ASPECTO% ^
   -c:v h264_nvenc -preset p1 -tune ull -zerolatency 1 -rc cbr -b:v %VBITRATE% -maxrate %VBITRATE% -bufsize %VBUF% ^
-  -g 30 -bf 0 -rc-lookahead 0 -delay 0 ^
+  -g 60 -intra-refresh 1 -bf 0 -rc-lookahead 0 -delay 0 ^
   -af aresample=async=1000 ^
   -c:a libopus -application lowdelay -frame_duration 5 -b:a 96k -ar 48000 -ac 2 ^
   -f mpegts -muxdelay 0 -muxpreload 0 -flush_packets 1 -max_interleave_delta 0 -pes_payload_size 0 ^
