@@ -539,6 +539,10 @@ try {
         # Sin cuadro de confirmacion (el usuario: "me muestra un dialogo feo"): directo a la eleccion.
         # Si el lanzador sigue vivo esperando a este servidor (arrancado por una tarea programada, donde
         # Windows no lo deja soltarlo), se le deja elegir.flag y el muestra la eleccion; si no, se abre.
+        # Variables que dejo PyInstaller al lanzar esta ventana (apuntan a una carpeta temporal ya borrada):
+        # con ellas el .exe nuevo se moria al arrancar ("no encontro una libreria", 2026-10-05).
+        Get-ChildItem Env: | Where-Object { $_.Name -like '_PYI*' -or $_.Name -like '_MEI*' -or $_.Name -eq 'TCL_LIBRARY' -or $_.Name -eq 'TK_LIBRARY' } |
+            ForEach-Object { Remove-Item ("Env:" + $_.Name) -ErrorAction SilentlyContinue }
         if (Get-Process -Name "Iniciar Servidor Remote Play" -ErrorAction SilentlyContinue) {
             Set-Content -Path (Join-Path (Split-Path -Parent $exe) "elegir.flag") -Value "1" -Encoding ASCII
         } else {

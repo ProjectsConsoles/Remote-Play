@@ -130,7 +130,7 @@ def elegir(aqui, actual=None):
         args = [sys.executable, "--solo-elegir"] + (["--actual=" + actual] if actual else [])
         try:
             r = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL).returncode
+                               stderr=subprocess.DEVNULL, env=entorno_limpio()).returncode
         except OSError as e:
             log(f"no se pudo abrir la ventana de eleccion en otro proceso ({e}): la abro aqui")
             return elegir_aqui(aqui, actual)
@@ -258,7 +258,7 @@ def lanzar(cmd, carpeta, flags=0):
     servidor no arrancaba). En ese caso se lanza sin soltarlo y este proceso se queda esperando a que
     el hijo termine (ver main): si saliera, el Job del .exe se llevaria al servidor con el."""
     base = dict(cwd=carpeta, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                close_fds=True)
+                close_fds=True, env=entorno_limpio())
     try:
         return subprocess.Popen(cmd, creationflags=flags | CREATE_BREAKAWAY_FROM_JOB, **base)
     except OSError as e:
@@ -266,6 +266,23 @@ def lanzar(cmd, carpeta, flags=0):
         p = subprocess.Popen(cmd, creationflags=flags, **base)
         HIJOS_A_ESPERAR.append(p)
         return p
+
+
+def entorno_limpio():
+    """El entorno de este .exe SIN lo que pone PyInstaller (2026-10-05). El .exe deja variables que apuntan a
+    su carpeta temporal (_PYI_*, _MEIPASS2) y, por tkinter, TCL_LIBRARY/TK_LIBRARY. Los servidores las heredaban;
+    cuando la ventana del de consolas volvia a abrir este .exe ("Cambiar tipo"), el .exe nuevo se creia hijo del
+    viejo y buscaba python312.dll en esa carpeta, ya borrada: se moria al arrancar ("no encontro una libreria").
+    Y un server de PC con TCL_LIBRARY apuntando a una carpeta borrada no podria abrir su ventana."""
+    temporal = os.path.normcase(getattr(sys, "_MEIPASS", "") or "\0")
+    limpio = {}
+    for k, v in os.environ.items():
+        if k.upper().startswith(("_PYI", "_MEI")):
+            continue
+        if k.upper() in ("TCL_LIBRARY", "TK_LIBRARY") and os.path.normcase(v).startswith(temporal):
+            continue
+        limpio[k] = v
+    return limpio
 
 
 def log(texto):
