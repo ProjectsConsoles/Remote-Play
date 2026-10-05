@@ -152,6 +152,9 @@ CAMPOS_CLIENTE = [
     ("PS3RP_STREAM_PORT", "Puerto UDP del video", "numero", "5000", None),
     ("PS3RP_FULLSCREEN", "Video en pantalla completa", "bool", "1", None),
     ("PS3RP_PLAYER", "Reproductor de video", "enum", "gstreamer", ["gstreamer", "ffplay"]),
+    # 2026-10-05: con intra-refresh en el server solo el primer cuadro es IDR y d3d11h264dec no
+    # arranca sin uno (audio sin imagen); avdec_h264 (ffmpeg, CPU) arranca en cualquier cuadro.
+    ("PS3RP_GST_DEC", "Decodificador (gstreamer)", "enum", "avdec", ["avdec", "d3d11"]),
     ("PS3RP_BRILLO", "Brillo en modo control (0-100, vacio = no tocar)", "numero", "", None),
     ("PS3RP_WIFI_SIN_AHORRO", "WiFi sin ahorro de energia (menos delay)", "bool", "1", None),
     ("PS3RP_MODO", "Modo fijo al abrir (vacio = preguntar cada vez)", "enum", "",
@@ -985,6 +988,7 @@ ESTILO_CAMPOS = {
     "PS3RP_INPUT": ("gamepad", ui.VERDE), "PS3RP_INPUT_RATE": ("speed", ui.VERDE),
     "PS3RP_PS_COMBO": ("gamepad", ui.VERDE), "PS3RP_ZONA_MUERTA": ("tune", ui.VERDE),
     "PS3RP_FULLSCREEN": ("image", ui.NARANJA), "PS3RP_PLAYER": ("play", ui.NARANJA),
+    "PS3RP_GST_DEC": ("play", ui.NARANJA),
     "PS3RP_BRILLO": ("tune", ui.NARANJA),
     "PS3RP_WIFI_SIN_AHORRO": ("wifi", ui.MORADO), "PS3RP_MODO": ("info", ui.MORADO),
 }
@@ -1675,6 +1679,14 @@ def _vigilar_salida_gst(proc, estado):
 def _streaming_gstreamer(gst):
     """Mismo contrato que ejecutar_modo_streaming: (ok, mensaje)."""
     fs = "true" if FULLSCREEN_VIDEO else "false"
+    # avdec_h264 (por defecto, 2026-10-05): el server usa intra-refresh (sin parpadeo) y solo
+    # el primer cuadro es IDR; d3d11h264dec (GPU) no arranca sin un IDR y al entrar con la
+    # transmision andando habia audio pero ninguna imagen. thread-type=slice: los hilos por
+    # cuadro meterian varios cuadros de retraso. d3d11videosink acepta cuadros de la CPU.
+    if os.environ.get("PS3RP_GST_DEC", "avdec").strip().lower() == "d3d11":
+        decodificador = ["d3d11h264dec"]
+    else:
+        decodificador = ["avdec_h264", "thread-type=slice"]
     args = [
         # -m: imprime los mensajes del bus, de ahi se lee el aviso de udpsrc
         # cuando pasan SIN_VIDEO_S segundos sin recibir nada (ver abajo). SIN
@@ -1686,7 +1698,7 @@ def _streaming_gstreamer(gst):
         # Video: GPU (Direct3D 11), colas chicas que TIRAN lo atrasado, sin reloj.
         "d.", "!", "queue", "max-size-buffers=3", "max-size-time=0", "max-size-bytes=0",
         "leaky=downstream",
-        "!", "h264parse", "!", "d3d11h264dec",
+        "!", "h264parse", "!", *decodificador,
         "!", "queue", "max-size-buffers=1", "max-size-time=0", "max-size-bytes=0",
         "leaky=downstream",
         "!", "d3d11videosink", "sync=false", "force-aspect-ratio=true",
