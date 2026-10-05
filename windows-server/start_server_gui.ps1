@@ -199,10 +199,17 @@ namespace PS3RP
                 g.FillPath(br, path);
                 if (t > 0.02f)
                 {
-                    using (Pen p = new Pen(Color.FromArgb((int)(255 * Math.Min(1f, t)), Color.White), 4 * esc))
+                    // El borde va completo POR DENTRO de la orilla (2026-10-05): centrado sobre ella, la mitad
+                    // de afuera se cortaba en los lados al crecer la tarjeta (no en las esquinas) y se veia
+                    // disparejo. Mismo centro de curva: rect y radio se achican medio grosor.
+                    float grosor = 3 * esc;
+                    int medio = (int)Math.Ceiling(grosor / 2);
+                    Rectangle rb = new Rectangle(r.X + medio, r.Y + medio, r.Width - 2 * medio, r.Height - 2 * medio);
+                    using (GraphicsPath pathBorde = Ui.Redondeado(rb, Math.Max(2, radio - medio)))
+                    using (Pen p = new Pen(Color.FromArgb((int)(255 * Math.Min(1f, t)), Color.White), grosor))
                     {
                         p.LineJoin = LineJoin.Round;
-                        g.DrawPath(p, path);
+                        g.DrawPath(p, pathBorde);
                     }
                 }
             }
@@ -529,10 +536,7 @@ try {
                 "Remote Play", "OK", "Warning") | Out-Null
             return
         }
-        $r = [System.Windows.Forms.MessageBox]::Show(
-            "Se apaga este servidor y se abre la eleccion: Consolas o Juegos de esta PC.",
-            "Remote Play", "OKCancel", "Question")
-        if ($r -ne "OK") { return }
+        # Sin cuadro de confirmacion (el usuario: "me muestra un dialogo feo"): directo a la eleccion.
         # Si el lanzador sigue vivo esperando a este servidor (arrancado por una tarea programada, donde
         # Windows no lo deja soltarlo), se le deja elegir.flag y el muestra la eleccion; si no, se abre.
         if (Get-Process -Name "Iniciar Servidor Remote Play" -ErrorAction SilentlyContinue) {

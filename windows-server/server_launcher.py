@@ -125,7 +125,8 @@ def elegir(aqui, actual=None):
     try:
         return _elegir_mosaicos(d_pc, f_cons, f_pc, actual, d_cons is not None)
     except Exception:
-        pass
+        import traceback
+        log("la ventana de mosaicos fallo, uso el cuadro de Si/No:\n" + traceback.format_exc())
     r = _messagebox_si_no(
         "Que tipo de servidor es esta PC?\n\n"
         f"Si = Consolas (capturadora HDMI){'  - falta: ' + ', '.join(f_cons) if f_cons else ''}\n"
