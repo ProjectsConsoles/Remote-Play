@@ -56,7 +56,10 @@ PUERTO_RELEVO = int(os.environ.get("PS3RP_PC_PUERTO_RELEVO", "5099"))
 # MAX_INTERLEAVE_US (con 0 esperaba para siempre y se callaba todo), y la tableta conserva la ultima imagen y
 # retoma sola con el siguiente cuadro (VideoPlayer.puedeArrancar).
 # NVENC reparte el bitrate segun FPS, asi que se escala para que a 60 fps reales salgan ~BITRATE_MBPS.
-FPS = int(os.environ.get("PS3RP_PC_FPS", "90"))
+# 240 (2026-10-05): con "solo cuadros nuevos" FPS es cuantas veces se REVISA la pantalla, y cada cuadro sale con
+# la hora de la revision. A 90 los cuadros de un juego a 60 salian con horas de 11/22 ms (0 % a 16.7 +-3 ms) y el
+# ritmo parejo de la tableta los mostraba disparejos; a 240: 98 % parejos, mismos fps (59.6) y mismos Mbps reales.
+FPS = int(os.environ.get("PS3RP_PC_FPS", "240"))
 DUP_FRAMES = os.environ.get("PS3RP_PC_DUP_FRAMES", "0") == "1"
 MAX_INTERLEAVE_US = os.environ.get("PS3RP_PC_MAX_INTERLEAVE_US", "50000")
 BITRATE_MBPS = float(os.environ.get("PS3RP_PC_BITRATE_MBPS", "15"))

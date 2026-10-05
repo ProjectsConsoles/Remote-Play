@@ -249,7 +249,7 @@ class Ventana:
             if not transmite:
                 self.b_detener.poner_foco(False)
         self._poner(self.t_video, titulo="Video: " + ("transmitiendo" if transmite else "en espera"))
-        self._poner(self.t_video, detalle=f"Pantalla en {gpu}. Captura a {self.sv.FPS} fps, "
+        self._poner(self.t_video, detalle=f"Pantalla en {gpu}. Solo cuadros nuevos (revisa {self.sv.FPS} veces/s), "
                                    f"{'directo a NVENC' if t.directo else 'copiada a NVENC'}.")
         if transmite and t.salida_previa is not None:
             self._poner(self.t_audio, detalle=f"Suena solo en la tableta (salida: {self.sv.SALIDA_VIRTUAL}).")
