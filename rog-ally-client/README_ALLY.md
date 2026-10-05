@@ -55,6 +55,38 @@ lanzar el .exe (ej. un acceso directo de Windows con
 A diferencia de la Deck, **el brillo se pasa directo en 0-100** (WMI ya
 trabaja en porcentaje), no en unidades crudas del backlight.
 
+## Elegir la consola al entrar y apps externas (2026-10-04)
+
+Igual que en la Deck: **Streaming** y **Solo control** preguntan primero
+**¿Qué consola?** (una fila por marca, de la más nueva a la más vieja).
+
+- **PS3, PS2, Xbox 360, Xbox clásico**: le manda su modo al ESP32 en ese
+  momento (se reinicia ~2-4 s) y sigue. En streaming primero verifica el
+  servidor, en la tira de arriba (ya no con ventana emergente). *Info del
+  ESP32-S3* sigue como respaldo.
+- **PS4 / PS5** (chiaki-ng) y **Xbox One / Series** (xbPlay), solo en
+  Streaming: cierran nuestra ventana, abren la app y al cerrarla regresa el
+  menú. Mientras tanto este programa no lee el mando ni manda nada al ESP32.
+  Si falta una, su mosaico dice **"No está instalado"**.
+
+**chiaki-ng (portátil):** bajar `chiaki-ng-win_x64-MSYS2-Release-portable.zip`
+de https://github.com/streetpea/chiaki-ng/releases, que trae OTRO zip adentro;
+descomprimir ese y dejar la carpeta `chiaki-ng-Win` dentro de `apps\` junto al
+.exe, o sea `apps\chiaki-ng-Win\chiaki.exe`. También sirve
+`apps\chiaki-ng\chiaki.exe`, la instalación normal en
+`C:\Program Files\chiaki-ng`, o `PS3RP_CHIAKI_EXE`. En Windows chiaki-ng guarda
+su config en el **registro** (`HKCU\Software\Chiaki\Chiaki`), no en archivo:
+para traer las consolas ya registradas en la Deck, copiar su
+`~/.config/Chiaki/Chiaki.conf` y en chiaki-ng usar **Settings → Import
+settings** una vez (lee ese mismo formato .ini). Ese archivo trae las claves
+de registro de las consolas: no va al repo.
+
+**xbPlay:** es de pago (Studio08). Comprado en Steam, la misma compra trae la
+versión de Windows: instalarlo desde Steam en la Ally y listo. Se busca en
+todas las bibliotecas de Steam (`steamapps\common\Studio08`, el .exe con
+"xbplay" en el nombre) o en `PS3RP_XBPLAY`. Se abre con `SteamAppId=2693120`
+para que Steam valide la compra.
+
 ## Configurar servidor y cliente desde el menu (2026-09-11)
 
 El menu tiene ahora 4 tarjetas (2x2), no 2: ademas de Streaming/Solo control,
@@ -203,7 +235,7 @@ reinstalar nada):
 ```powershell
 cd C:\ps3rp-build\src
 # copiar aca los .py actualizados (main_client.py, ui_pygame.py, gamepad_common.py,
-# server_udp.py, brightness_win.py, wifi_power.py) y la carpeta iconos\ de este repo
+# server_udp.py, brightness_win.py, wifi_power.py, apps_externas.py) y la carpeta iconos\ de este repo
 # (rog-ally-client\iconos), despues:
 C:\ps3rp-build\python\python.exe -m PyInstaller --noconfirm --onefile --windowed `
     --name "RemotePlay_Ally" `

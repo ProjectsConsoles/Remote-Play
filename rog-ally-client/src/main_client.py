@@ -74,6 +74,7 @@ from brightness_win import Brillo, PCT_MIN   # noqa: E402
 import server_udp                  # noqa: E402
 import wifi_power                  # noqa: E402
 import ui_pygame as ui            # noqa: E402
+import apps_externas               # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Rutas y logging
@@ -416,11 +417,12 @@ class PantallaMenu(ui.Pantalla):
         self._fondo = None
         self._consulta = 0
 
-        self.t_stream = ui.Mosaico(esc, ic, "play", "Streaming", "Video y audio del PS3, mas el control.",
-                                   ui.AZUL, on_a=lambda: app.terminar("streaming"),
+        # Streaming y Solo control preguntan primero la consola (2026-10-04, ver PantallaConsola).
+        self.t_stream = ui.Mosaico(esc, ic, "play", "Streaming", "Elige la consola y el ESP32 se configura solo.",
+                                   ui.AZUL, on_a=lambda: app.abrir(PantallaConsola(app, "streaming")),
                                    tam_titulo=32, tam_detalle=16)
         self.t_control = ui.Mosaico(esc, ic, "gamepad", "Solo control", "La Ally funciona solo como mando.",
-                                    ui.VERDE, on_a=lambda: app.terminar("control"),
+                                    ui.VERDE, on_a=lambda: app.abrir(PantallaConsola(app, "control")),
                                     tam_titulo=32, tam_detalle=16)
         self.t_servidor = ui.Mosaico(esc, ic, "server", "Configurar servidor",
                                      "Elige el modo de captura de la PC sin ir a tocarla.", ui.MORADO,
@@ -430,7 +432,7 @@ class PantallaMenu(ui.Pantalla):
                                     "Variables PS3RP_* de este lado (ESP32, input, video).", ui.NARANJA,
                                     on_a=lambda: app.abrir(PantallaCliente(app)),
                                     tam_titulo=32, tam_detalle=16)
-        self.t_info = ui.Mosaico(esc, ic, "info", "Info: colores del ESP32-S3", "Y", ui.GRIS,
+        self.t_info = ui.Mosaico(esc, ic, "info", "Info del ESP32-S3", "Y", ui.GRIS,
                                  on_a=lambda: app.abrir(PantallaInfo(app)), tam_titulo=20,
                                  tam_detalle=13, tam_icono=40, horizontal=True)
         self.t_salir = ui.Mosaico(esc, ic, "exit", "Salir", "B o Escape", ui.ROJO_OSCURO,
@@ -514,10 +516,12 @@ def pygame_rect(x, y, w, h):
 
 
 LEDS = [
-    ((212, 177, 6), "Amarillo", "PS3", (27, 27, 27), "ps3"),
+    # PS3: mas oscuro que el LED real y texto blanco como su logo (2026-10-04, igual que la Deck:
+    # el blanco sobre el amarillo de antes no se leia; contraste 2.1 -> 3.2).
+    ((184, 138, 0), "Amarillo", "PS3", ui.BLANCO, "ps3"),
     (ui.AZUL, "Azul", "PS2 / OPL", ui.BLANCO, "ps2"),
     (ui.MORADO, "Morado", "Xbox 360", ui.BLANCO, "xbox360"),
-    ((47, 168, 79), "Verde", "Xbox clasico", ui.BLANCO, "xboxclasico"),
+    ((47, 168, 79), "Verde", "Xbox clásico", ui.BLANCO, "xboxclasico"),
 ]
 
 
@@ -591,6 +595,142 @@ class PantallaInfo(ui.Pantalla):
         self.t_volver.dibujar(surf, pygame_rect(x, y_pie, ancho, alto_pie), self.nav.es_foco(self.t_volver))
 
     def boton(self, nombre):
+        if nombre == "DPAD_LEFT":
+            self.nav.mover(-1, 0)
+        elif nombre == "DPAD_RIGHT":
+            self.nav.mover(1, 0)
+        elif nombre == "DPAD_UP":
+            self.nav.mover(0, -1)
+        elif nombre == "DPAD_DOWN":
+            self.nav.mover(0, 1)
+        elif nombre == "A":
+            self.nav.activar()
+        elif nombre == "B":
+            self.app.volver()
+
+
+class PantallaConsola(ui.Pantalla):
+    """"¿Qué consola?" (2026-10-04, porteo de deck-client/client_consolas.py): la abren Streaming y
+    Solo control. Elegir PS3/PS2/Xbox 360/Xbox clasico le manda su modo al ESP32 en ese momento (el
+    firmware SIEMPRE se reinicia, ~2-4 s sin control en la consola) y sigue al modo; en streaming
+    primero se verifica el servidor (antes era una ventana emergente de Windows despues del menu).
+    Solo en Streaming: PS4/PS5 (chiaki-ng) y Xbox One/Series (xbPlay), ver apps_externas.py.
+    Una fila por marca, de la mas nueva a la mas vieja; el foco arranca en la mas actual."""
+
+    ESPERA_SALIDA = 0.9   # lo justo para leer "ESP32 en modo X" antes de que se cierre el menu
+
+    def __init__(self, app, modo):
+        super().__init__(app)
+        esc, ic = self.esc, self.iconos
+        self.modo = modo
+        self.salir_en = None
+        self.estados = {}
+        # Numeros = indice en LEDS (0 PS3, 1 PS2, 2 Xbox 360, 3 Xbox clasico) = modo del ESP32.
+        orden = (["chiaki", 0, 1], ["xbplay", 2, 3]) if modo == "streaming" else ([0, 1], [2, 3])
+        self.filas = [[self._mosaico(clave) for clave in fila] for fila in orden]
+        self.t_volver = ui.Mosaico(esc, ic, "back", "Volver", "B", ui.GRIS, on_a=app.volver,
+                                   tam_titulo=22, tam_detalle=13, tam_icono=40, horizontal=True)
+        self.estados[self.t_volver] = (ui.TENUE, "Volver al menú.")
+        self.msg = (ui.TENUE, "")
+        self.nav = ui.Navegador(self.filas + [[self.t_volver]], al_cambiar=self._foco)
+
+    def _mosaico(self, clave):
+        esc, ic = self.esc, self.iconos
+        if isinstance(clave, int):
+            color, nombre_color, consola, color_texto, icono = LEDS[clave]
+            # Los logos de PS3/PS2/360/XBOX son palabras anchas: se escalan por ancho (Iconos.get).
+            t = ui.Mosaico(esc, ic, icono, consola, f"Capturadora + ESP32 (LED {nombre_color.lower()})",
+                           color, color_texto=color_texto, tam_titulo=30, tam_detalle=15, tam_icono=170,
+                           on_a=lambda: self.elegir_esp32(clave, consola))
+            self.estados[t] = (ui.TENUE, f"{consola}: el ESP32 se configura solo al elegirla (se reinicia ~2 s).")
+            return t
+        if clave == "chiaki":
+            estado, icono, titulo, detalle, color = (apps_externas.estado_chiaki, "ps", "PS4 / PS5",
+                                                     "chiaki-ng (Remote Play de Sony).", apps_externas.AZUL_PS)
+        else:
+            estado, icono, titulo, detalle, color = (apps_externas.estado_xbplay, "xbox", "Xbox One / Series",
+                                                     "xbPlay (Remote Play de Xbox).", apps_externas.VERDE_XBOX)
+        ok, col, txt = estado(ui)
+        # Si falta, el mosaico se ve apagado y dice "No está instalado", pero sigue respondiendo a A
+        # (que lo repite en la tira) en vez de no hacer nada.
+        t = ui.Mosaico(esc, ic, icono, titulo, detalle if ok else "No está instalado.",
+                       color if ok else ui.mezclar(color, ui.FONDO, 0.6), tam_titulo=30, tam_detalle=15,
+                       tam_icono=110, on_a=lambda: self.elegir_app(clave, estado))
+        self.estados[t] = (col, txt)
+        return t
+
+    def _foco(self, mosaico):
+        if self.salir_en is None:
+            self.msg = self.estados.get(mosaico, (ui.TENUE, ""))
+
+    def _salir(self, resultado):
+        self.resultado = resultado
+        self.salir_en = time.monotonic() + self.ESPERA_SALIDA
+
+    def elegir_esp32(self, indice, consola):
+        if self.salir_en is not None:
+            return
+        if self.modo == "streaming":
+            # Primero el servidor: si no esta listo no tiene caso reiniciar el ESP32.
+            self.msg = (ui.TENUE, "Verificando el servidor...")
+            self.app.redibujar()
+            try:
+                ok, mensaje = verificar_servidor_listo()
+            except Exception as e:
+                # Un error de red al chequear no debe tirar el programa (igual que antes en main()).
+                log.error("verificar_servidor_listo fallo, sigo sin chequear: %s", e)
+                ok, mensaje = True, ""
+            if not ok:
+                self.msg = (ui.AVISO, "No se puede iniciar streaming: " + mensaje.replace("\n\n", "  "))
+                return
+        if enviar_modo_esp32(indice):
+            self.msg = ((212, 177, 6), f"ESP32 en modo {consola}: se reinicia (~2 s) y arranca "
+                                       f"{'el streaming' if self.modo == 'streaming' else 'solo control'}...")
+        else:
+            self.msg = (ui.AVISO, f"No pude mandar el modo {consola} al ESP32; sigo igual "
+                                  "(revisa Info si el control no responde).")
+        self._salir(self.modo)
+
+    def elegir_app(self, clave, estado):
+        if self.salir_en is not None:
+            return
+        instalado, _, texto = estado(ui)   # otra vez: pudo instalarse con el menu abierto
+        if not instalado:
+            self.msg = (ui.ERROR, "No se puede abrir: " + texto)
+            return
+        self.msg = (ui.OK, "Abriendo " + ("chiaki-ng" if clave == "chiaki" else "xbPlay") + "...")
+        self._salir(clave)
+
+    def animando(self):
+        return self.salir_en is not None or super().animando()
+
+    def dibujar(self, surf):
+        if self.salir_en is not None and time.monotonic() >= self.salir_en:
+            self.app.terminar(self.resultado)
+        esc = self.esc
+        surf.fill(ui.FONDO)
+        w, h = surf.get_size()
+        m = esc.px(24)
+        x, ancho = m, w - 2 * m
+        y = esc.px(16) + ui.dibujar_cabecera(surf, esc, x, esc.px(16), ancho, "¿Qué consola?",
+                                             "Streaming" if self.modo == "streaming" else "Solo control") + esc.px(8)
+        color, texto = self.msg
+        alto_t = ui.alto_tira(esc, texto, ancho)
+        ui.dibujar_tira(surf, esc, pygame_rect(x, y, ancho, alto_t), color, texto)
+        y += alto_t + esc.px(10)
+        alto_pie = esc.px(84)
+        y_pie = h - m - alto_pie
+        hueco = esc.px(14)
+        alto_fila = (y_pie - hueco - y - hueco) // 2
+        for i, fila in enumerate(self.filas):
+            celdas = ui.columnas(pygame_rect(x, y + i * (alto_fila + hueco), ancho, alto_fila), len(fila), hueco)
+            for t, r in zip(fila, celdas):
+                t.dibujar(surf, r, self.nav.es_foco(t))
+        self.t_volver.dibujar(surf, pygame_rect(x, y_pie, ancho, alto_pie), self.nav.es_foco(self.t_volver))
+
+    def boton(self, nombre):
+        if self.salir_en is not None:
+            return
         if nombre == "DPAD_LEFT":
             self.nav.mover(-1, 0)
         elif nombre == "DPAD_RIGHT":
@@ -990,7 +1130,7 @@ class PantallaCliente(ui.Pantalla):
 
 
 def mostrar_menu():
-    """Devuelve 'streaming', 'control' o None si cancelo. Configurar servidor, Configurar cliente e
+    """Devuelve 'streaming', 'control', 'chiaki', 'xbplay' o None si cancelo. Configurar servidor, Configurar cliente e
     Info se abren dentro del menu (con transicion deslizante); al volver se esta otra vez en el menu."""
     import pygame
     if "SDL_VIDEODRIVER" in os.environ and os.environ["SDL_VIDEODRIVER"] == "dummy":
@@ -1816,23 +1956,22 @@ def main():
                 break
             continue
 
-        if modo == "streaming" and not MODO_FIJO:
-            try:
-                ok, mensaje = verificar_servidor_listo()
-            except Exception as e:
-                # Que un error de red al chequear no tire abajo TODO el
-                # programa (2026-09-11): mejor seguir a streaming como antes
-                # que cerrarse sin avisar nada - "se cerro y me mostro el
-                # escritorio" es peor que simplemente no chequear esta vez.
-                log.error("verificar_servidor_listo fallo, sigo sin chequear: %s", e)
-                ok, mensaje = True, ""
+        if modo in ("chiaki", "xbplay"):
+            # Apps externas (2026-10-04): se cierra nuestra ventana para que la app quede al
+            # frente (Armoury Crate solo le da el mando a la ventana del frente) y se espera a
+            # que la cierren; mientras, este proceso no lee el mando ni manda nada al ESP32.
+            import pygame
+            cerrar_ventana(pygame)
+            ok, mensaje = apps_externas.correr(modo)
             if not ok:
-                log.warning("Servidor no listo para streaming: %s", mensaje)
                 try:
                     ctypes.windll.user32.MessageBoxW(0, mensaje, "PS3 Remote Play", 0x30)
                 except Exception:
                     pass
-                continue
+            continue
+
+        # El servidor ya se verifico en "¿Qué consola?" (2026-10-04; antes se hacia aqui con una
+        # ventana emergente). Con PS3RP_MODO fijo nunca se verificaba, y sigue igual.
 
         log.info("--- modo STREAMING ---")
         # Cerrar la ventana propia antes: ffplay abre y maneja la suya, y
