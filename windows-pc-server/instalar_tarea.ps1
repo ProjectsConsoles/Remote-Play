@@ -30,6 +30,16 @@ $quien = New-ScheduledTaskPrincipal -UserId $usuario -LogonType Interactive -Run
 Register-ScheduledTask -TaskName 'PS3RP PC Server' -Action $accion -Trigger $disparo -Settings $ajustes `
     -Principal $quien -Force | Out-Null
 
+# Acceso directo en el escritorio: arranca el servidor (por la tarea) o, si ya corre, muestra su ventana
+$escritorio = [Environment]::GetFolderPath('Desktop')
+$acceso = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $escritorio 'Remote Play - Servidor de PC.lnk'))
+$acceso.TargetPath = $pythonw
+$acceso.Arguments = "`"$carpeta\abrir_servidor.pyw`""
+$acceso.WorkingDirectory = $carpeta
+$acceso.IconLocation = "$carpeta\icono.ico,0"
+$acceso.Description = 'Inicia el servidor de PC de Remote Play o muestra su ventana'
+$acceso.Save()
+
 # Arrancarlo ya (si habia uno corriendo, se reemplaza)
 Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { $_.CommandLine -like '*pc_server.py*' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force }

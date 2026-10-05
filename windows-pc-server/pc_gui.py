@@ -87,6 +87,7 @@ class Ventana:
         """`servidor`: el modulo pc_server (transmision, mando, gpu_de_la_pantalla, SALIDA_VIRTUAL...)."""
         self.sv = servidor
         self.cola = queue.Queue()
+        servidor.VENTANA_COLA = self.cola   # el acceso directo del escritorio pide "mostrar" por UDP
         self._paquetes = (0, time.monotonic())
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(1)   # texto nitido con la escala de Windows (125 %)

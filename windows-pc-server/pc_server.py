@@ -654,6 +654,10 @@ def bucle_config(transmision, mando):
             elif c == "stop_server":
                 transmision.detener()
                 resp["aplicado"] = "detenido"
+            elif c == "mostrar_ventana" and origen[0] == "127.0.0.1":
+                # el acceso directo del escritorio (abrir_servidor.pyw), solo desde esta misma PC
+                if VENTANA_COLA is not None:
+                    VENTANA_COLA.put("mostrar")
             elif c != "get_config":
                 resp = {"ok": False, "error": f"comando desconocido: {c}"}
         except Exception as e:
@@ -714,6 +718,7 @@ def bucle_vigia(transmision):
 
 TRANSMISION = None
 MANDO = None
+VENTANA_COLA = None   # la pone pc_gui: ordenes para la ventana desde otros hilos ("mostrar")
 
 
 def matar_ffmpeg_huerfanos():
