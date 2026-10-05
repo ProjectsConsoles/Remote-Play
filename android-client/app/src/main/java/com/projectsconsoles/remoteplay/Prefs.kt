@@ -58,7 +58,7 @@ class Prefs(ctx: Context) {
      * normal, 30 ms el 90 % de las veces) a cambio de ese retraso extra. 0 = apagado (como antes).
      */
     var ritmoParejoMs: Int
-        get() = i("ritmo_parejo_ms", 33)
+        get() = i("ritmo_parejo_ms", 50)
         set(v) = sp.edit().putInt("ritmo_parejo_ms", v.coerceIn(0, 100)).apply()
 
     fun zonaMuertaValor(): Float = when (zonaMuerta) {
