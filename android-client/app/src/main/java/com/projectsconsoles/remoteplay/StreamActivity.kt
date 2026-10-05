@@ -77,6 +77,7 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
     private var tasaMando = 0.0
     private var tasaCuadros = 0.0
 
+    private var tactil: TactilPc? = null
     private var controlIp = ""
     private var controlPuerto = 0
     private var fuente = ""
@@ -117,6 +118,11 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
             val sv = SurfaceView(this)
             sv.holder.addCallback(this)
             superficie = sv
+            // Modo PC: tocar la imagen = mouse de la PC (ver TactilPc). La SurfaceView mide justo lo que se
+            // ve del video, asi que la posicion del toque es la posicion en la pantalla de la PC.
+            if (intent.getBooleanExtra(EXTRA_TACTIL_PC, false)) {
+                tactil = TactilPc(controlIp, controlPuerto, Ui.dp(this, 12).toFloat()).also { sv.setOnTouchListener(it) }
+            }
             contenedor.addView(sv, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
         }
 
@@ -158,6 +164,7 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
 
     override fun onDestroy() {
         detenerTodo()
+        tactil?.cerrar()
         super.onDestroy()
     }
 
@@ -448,5 +455,6 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
         const val EXTRA_CONTROL_IP = "control_ip"
         const val EXTRA_CONTROL_PUERTO = "control_puerto"
         const val EXTRA_FUENTE = "fuente"
+        const val EXTRA_TACTIL_PC = "tactil_pc"
     }
 }

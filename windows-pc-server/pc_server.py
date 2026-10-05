@@ -88,7 +88,7 @@ class Transmision:
                 # asi que los frames de ddagrab viven en la Intel y NVENC no los puede tomar directo
                 # ("OpenEncodeSessionEx failed: no encode device"): se bajan a memoria (hwdownload) y
                 # NVENC los sube a la RTX. Cuesta unos ms por cuadro; los juegos siguen en la NVIDIA.
-                "-f", "lavfi", "-i", f"ddagrab=output_idx=0:framerate={FPS}:draw_mouse=0,hwdownload,format=bgra",
+                "-f", "lavfi", "-i", f"ddagrab=output_idx=0:framerate={FPS}:draw_mouse=1,hwdownload,format=bgra",
             ]
             if abrir_audio:
                 # -use_wallclock_as_timestamps: sin esto el audio del pipe lleva tiempos por cantidad de
@@ -340,6 +340,60 @@ def _pad_paciente(vg):
     return Pad()
 
 
+# ------------------------------------------------------------------------------------------------
+# Mouse: tocar la imagen en la tableta (TactilPc.kt) -> mouse real de Windows
+# ------------------------------------------------------------------------------------------------
+_MOVE, _ABS = 0x0001, 0x8000
+_LDOWN, _LUP, _RDOWN, _RUP, _WHEEL = 0x0002, 0x0004, 0x0008, 0x0010, 0x0800
+
+
+def _send_input(flags, x=None, y=None, datos=0):
+    """SendInput de un evento de mouse. x/y en 0..1 de la pantalla principal (la que captura ddagrab con
+    output_idx=0): en coordenadas absolutas de Windows eso es 0..65535 sin MOUSEEVENTF_VIRTUALDESK."""
+    import ctypes
+    from ctypes import wintypes
+
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [("dx", wintypes.LONG), ("dy", wintypes.LONG), ("mouseData", wintypes.DWORD),
+                    ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.c_size_t)]
+
+    class INPUT(ctypes.Structure):
+        class _U(ctypes.Union):
+            _fields_ = [("mi", MOUSEINPUT), ("relleno", ctypes.c_byte * 32)]
+        _anonymous_ = ("u",)
+        _fields_ = [("type", wintypes.DWORD), ("u", _U)]
+
+    i = INPUT(type=0)
+    if x is not None:
+        i.mi.dx, i.mi.dy = round(x * 65535), round(y * 65535)
+        flags |= _MOVE | _ABS
+    i.mi.dwFlags = flags
+    i.mi.mouseData = datos & 0xFFFFFFFF
+    ctypes.windll.user32.SendInput(1, ctypes.byref(i), ctypes.sizeof(INPUT))
+
+
+def aplicar_mouse(m):
+    ev = m.get("ev")
+    x, y = m.get("x"), m.get("y")
+    pos = (float(x), float(y)) if x is not None and y is not None else (None, None)
+    if ev == "mover":
+        _send_input(0, *pos)
+    elif ev == "clic":
+        _send_input(0, *pos)
+        _send_input(_LDOWN)
+        _send_input(_LUP)
+    elif ev == "clic_der":
+        _send_input(0, *pos)
+        _send_input(_RDOWN)
+        _send_input(_RUP)
+    elif ev == "izq_abajo":
+        _send_input(_LDOWN, *pos)
+    elif ev == "izq_arriba":
+        _send_input(_LUP, *pos)
+    elif ev == "scroll":
+        _send_input(_WHEEL, datos=120 * int(m.get("d", 0)))
+
+
 def bucle_mando(mando, transmision):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("0.0.0.0", PUERTO_MANDO))
@@ -366,6 +420,12 @@ def bucle_mando(mando, transmision):
             continue
         if "set_modo" in d:
             continue  # comando del ESP32, aqui no aplica
+        if "mouse" in d:
+            try:
+                aplicar_mouse(d["mouse"])
+            except Exception as e:
+                log.error("error con el mouse: %s", e)
+            continue
         try:
             mando.aplicar(d)
             mando.ultimo = time.monotonic()
