@@ -180,8 +180,8 @@ class Transmision:
                 captura += ",hwdownload,format=bgra"
             cmd = [
                 ffmpeg, "-hide_banner", "-loglevel", "warning",
-                # progreso cada 2 s (cuadros, fps, velocidad) para diagnosticar sin ver la pantalla
-                "-stats_period", "2", "-progress", os.path.join(CARPETA, "ffmpeg_progreso.log"),
+                # progreso cada 1 s (cuadros, bytes, tiempo) para la ventana y para ubicar caidas de fps
+                "-stats_period", "1", "-progress", os.path.join(CARPETA, "ffmpeg_progreso.log"),
                 # video: Desktop Duplication. En esta laptop (Optimus) la pantalla la maneja la GPU Intel,
                 # asi que los frames de ddagrab viven en la Intel y NVENC no los puede tomar directo
                 # ("OpenEncodeSessionEx failed: no encode device"): se bajan a memoria (hwdownload) y

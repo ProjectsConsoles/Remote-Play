@@ -42,6 +42,15 @@ class TsDemuxer(
     var paquetesOpus = 0L
         private set
 
+    /**
+     * Paquetes TS perdidos en la red, contados por el contador de continuidad (4 bits) de cada PID
+     * de video/audio. Si se pierden 16 seguidos del mismo PID no se notan, pero un salto chico si:
+     * sirve para saber si una caida de fps viene de la red o de otro lado.
+     */
+    var perdidosTs = 0L
+        private set
+    private val ultimoCc = IntArray(0x2000) { -1 }
+
     private class Pes {
         var buf = ByteArray(1 shl 16)
         var len = 0
@@ -113,6 +122,13 @@ class TsDemuxer(
             off += 1 + afLen
         }
         if ((afc and 1) == 0) return
+        if (pid == videoPid || pid == opusPid) {
+            val cc = u8(d[o + 3]) and 0x0F
+            val ant = ultimoCc[pid]
+            // cc igual al anterior = paquete repetido (lo permite la norma), no es perdida
+            if (ant >= 0 && cc != ant) perdidosTs += (cc - ant - 1) and 0x0F
+            ultimoCc[pid] = cc
+        }
         val n = o + TS_SIZE - off
         if (n <= 0) return
         when (pid) {

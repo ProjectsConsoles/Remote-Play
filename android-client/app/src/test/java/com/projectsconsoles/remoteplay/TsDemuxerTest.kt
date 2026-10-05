@@ -72,6 +72,26 @@ class TsDemuxerTest {
     }
 
     @Test
+    fun cuentaLosPaquetesPerdidos() {
+        val completa = muestra()
+        assertEquals(0L, demultiplexar(completa, 1316, true).demux.perdidosTs)
+        // Quitar 3 paquetes de video (PID 256) a mitad de la captura, como si la red los perdiera
+        val salida = java.io.ByteArrayOutputStream()
+        var quitados = 0
+        var p = 0
+        while (p + 188 <= completa.size) {
+            val pid = ((completa[p + 1].toInt() and 0x1F) shl 8) or (completa[p + 2].toInt() and 0xFF)
+            if (p >= 1000 * 188 && pid == 256 && quitados < 3) {
+                quitados++
+            } else {
+                salida.write(completa, p, 188)
+            }
+            p += 188
+        }
+        assertEquals(3L, demultiplexar(salida.toByteArray(), 1316, true).demux.perdidosTs)
+    }
+
+    @Test
     fun entregaTodosLosCuadrosDeVideo() {
         val r = demultiplexar(muestra(), 1316, true)
         assertEquals(120, r.video.size) // 2 s a 60 fps

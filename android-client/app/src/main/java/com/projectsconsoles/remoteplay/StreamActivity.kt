@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -76,6 +77,12 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
     private var tasaKbps = 0.0
     private var tasaMando = 0.0
     private var tasaCuadros = 0.0
+    // diagnostico de caidas de fps (ver VideoPlayer.huecoEntradaMaxNs)
+    private var huecoEntradaMs = 0.0
+    private var huecoSalidaMs = 0.0
+    private var fpsMinimo = -1.0
+    private var ultPerdidos = 0L
+    private var perdidosVentana = 0L
 
     private var tactil: TactilPc? = null
     private var controlIp = ""
@@ -216,7 +223,7 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
         errorDeInicio = null
         inicioNs = System.nanoTime()
         ultTicNs = inicioNs
-        ultPaquetes = 0; ultBytes = 0; ultEnviados = 0; ultCuadros = 0
+        ultPaquetes = 0; ultBytes = 0; ultEnviados = 0; ultCuadros = 0; ultPerdidos = 0; fpsMinimo = -1.0
 
         tomarBloqueoWifi()
 
@@ -329,6 +336,29 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
             if (v != null) {
                 tasaCuadros = (v.cuadrosSalida - ultCuadros) / dt
                 ultCuadros = v.cuadrosSalida
+                huecoEntradaMs = v.huecoEntradaMaxNs / 1e6
+                huecoSalidaMs = v.huecoSalidaMaxNs / 1e6
+                v.huecoEntradaMaxNs = 0L
+                v.huecoSalidaMaxNs = 0L
+                // el minimo cuenta desde 3 s despues de arrancar, para no medir la espera inicial
+                if (v.primerCuadro && (ahora - inicioNs) > 3_000_000_000L && (fpsMinimo < 0 || tasaCuadros < fpsMinimo)) {
+                    fpsMinimo = tasaCuadros
+                }
+            }
+            val d = demux
+            if (d != null) {
+                perdidosVentana = d.perdidosTs - ultPerdidos
+                ultPerdidos = d.perdidosTs
+            }
+            if (v != null && v.primerCuadro) {
+                // una linea por ventana para leer la sesion entera despues con `adb logcat -s PS3RP-STATS`
+                Log.i(
+                    "PS3RP-STATS",
+                    String.format(
+                        Locale.US, "fps %.1f entrada_max %.0f ms salida_max %.0f ms perdidos %d kbps %.0f tirados %d tirones %d",
+                        tasaCuadros, huecoEntradaMs, huecoSalidaMs, perdidosVentana, tasaKbps, v.descartados, v.tirones,
+                    ),
+                )
             }
             ultTicNs = ahora
         }
@@ -382,8 +412,8 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
         if (d != null) {
             sb.append(
                 String.format(
-                    l, "ts     video pid %d  opus pid %d  resync %d\n",
-                    d.videoPid, d.opusPid, d.resincronizaciones,
+                    l, "ts     video pid %d  opus pid %d  resync %d  perdidos %d\n",
+                    d.videoPid, d.opusPid, d.resincronizaciones, d.perdidosTs,
                 ),
             )
         }
@@ -392,6 +422,13 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
                 String.format(
                     l, "video  %dx%d  %.0f fps  dentro %d  fuera %d  tirados %d  err %d\n",
                     anchoVideo, altoVideo, tasaCuadros, v.cuadrosEntrada, v.cuadrosSalida, v.descartados, v.errores,
+                ),
+            )
+            sb.append(
+                String.format(
+                    l, "caidas fps min %s  hueco red %.0f ms  hueco pantalla %.0f ms  tirones %d\n",
+                    if (fpsMinimo < 0) "-" else String.format(l, "%.0f", fpsMinimo),
+                    huecoEntradaMs, huecoSalidaMs, v.tirones,
                 ),
             )
             v.ultimoError?.let { sb.append("       ultimo error: ").append(it).append('\n') }

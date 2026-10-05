@@ -38,7 +38,9 @@ AZUL_PC = "#2d6cdf"
 
 
 def _leer_progreso():
-    """(fps, Mbps) del ultimo bloque de -progress de ffmpeg, o (None, None)."""
+    """(fps, Mbps) del ULTIMO SEGUNDO segun -progress de ffmpeg, o (None, None). Los fps= y bitrate= que
+    escribe ffmpeg son promedios desde que arranco (una caida no se notaria): se calculan con la diferencia
+    de cuadros, bytes y tiempo entre los dos ultimos bloques."""
     try:
         with open(os.path.join(CARPETA, "ffmpeg_progreso.log"), "rb") as f:
             f.seek(0, 2)
@@ -46,9 +48,15 @@ def _leer_progreso():
             texto = f.read().decode("latin-1")
     except OSError:
         return None, None
-    fps = re.findall(r"^fps=([\d.]+)", texto, re.M)
-    br = re.findall(r"^bitrate=\s*([\d.]+)kbits/s", texto, re.M)
-    return (float(fps[-1]) if fps else None), (float(br[-1]) / 1000 if br else None)
+    cuadros = re.findall(r"^frame=(\d+)", texto, re.M)
+    tam = re.findall(r"^total_size=(\d+)", texto, re.M)
+    t = re.findall(r"^out_time_us=(\d+)", texto, re.M)
+    if len(cuadros) < 2 or len(tam) < 2 or len(t) < 2:
+        return None, None
+    dt = (int(t[-1]) - int(t[-2])) / 1e6
+    if dt <= 0:
+        return None, None
+    return (int(cuadros[-1]) - int(cuadros[-2])) / dt, (int(tam[-1]) - int(tam[-2])) * 8 / dt / 1e6
 
 
 def _ip_local():

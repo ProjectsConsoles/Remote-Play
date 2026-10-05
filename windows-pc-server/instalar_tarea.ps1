@@ -9,7 +9,7 @@ $carpeta = Split-Path -Parent $MyInvocation.MyCommand.Path
 $python = 'C:\Program Files\Python312\python.exe'
 $pythonw = 'C:\Program Files\Python312\pythonw.exe'
 
-& $python -m pip install --quiet --disable-pip-version-check vgamepad pyaudiowpatch pycaw
+& $python -m pip install --quiet --disable-pip-version-check vgamepad pyaudiowpatch pycaw pystray pillow
 if ($LASTEXITCODE -ne 0) { throw 'fallo pip install' }
 
 # Firewall: la tableta le habla por UDP 9200 (config) y 9000 (mando). Solo red local.
@@ -33,6 +33,8 @@ Register-ScheduledTask -TaskName 'PS3RP PC Server' -Action $accion -Trigger $dis
 # Arrancarlo ya (si habia uno corriendo, se reemplaza)
 Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { $_.CommandLine -like '*pc_server.py*' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+# sin esta pausa Windows todavia da la tarea por "en ejecucion" e ignora el arranque (quedaba sin servidor)
+Start-Sleep -Seconds 2
 Start-ScheduledTask -TaskName 'PS3RP PC Server'
 Start-Sleep -Seconds 3
 $vivo = Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { $_.CommandLine -like '*pc_server.py*' }

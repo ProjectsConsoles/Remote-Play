@@ -29,6 +29,16 @@ class VideoPlayer(
     @Volatile var primerCuadro = false
     @Volatile var ultimoError: String? = null
 
+    // Para ubicar las caidas de fps: el mayor hueco entre cuadros desde la ultima lectura, al ENTRAR
+    // al decodificador (lo que llega de la red/servidor) y al SALIR a la pantalla. Si solo crece el de
+    // salida, el cuello es el decodificador; si crecen los dos, viene de antes (red o captura).
+    @Volatile var huecoEntradaMaxNs = 0L
+    @Volatile var huecoSalidaMaxNs = 0L
+    /** Cuadros dibujados mas de [TIRON_NS] despues del anterior (se ven como un tiron). */
+    @Volatile var tirones = 0L
+    private var ultEntradaNs = 0L
+    private var ultSalidaNs = 0L
+
     fun iniciar() {
         val formato = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, 1280, 720)
         formato.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 1 shl 20)
@@ -73,6 +83,9 @@ class VideoPlayer(
             entrada.put(buf, off, size)
             c.queueInputBuffer(i, 0, size, ptsUs, 0)
             cuadrosEntrada++
+            val t = System.nanoTime()
+            if (ultEntradaNs != 0L && t - ultEntradaNs > huecoEntradaMaxNs) huecoEntradaMaxNs = t - ultEntradaNs
+            ultEntradaNs = t
         } catch (e: Exception) {
             errores++
             ultimoError = e.message
@@ -96,6 +109,13 @@ class VideoPlayer(
                         c.releaseOutputBuffer(i, true) // dibujar de inmediato
                         cuadrosSalida++
                         primerCuadro = true
+                        val t = System.nanoTime()
+                        if (ultSalidaNs != 0L) {
+                            val h = t - ultSalidaNs
+                            if (h > huecoSalidaMaxNs) huecoSalidaMaxNs = h
+                            if (h > TIRON_NS) tirones++
+                        }
+                        ultSalidaNs = t
                     }
                     i == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                         val f = c.outputFormat
@@ -139,6 +159,8 @@ class VideoPlayer(
     }
 
     companion object {
+        const val TIRON_NS = 50_000_000L
+
         /** El cuadro trae SPS (NAL 7) y un IDR (NAL 5): el decodificador puede arrancar aca. */
         fun empiezaEnIdr(b: ByteArray, off: Int, size: Int): Boolean {
             var sps = false
