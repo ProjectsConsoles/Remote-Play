@@ -37,6 +37,17 @@ VERDE = "#2fa84f"
 AZUL_PC = "#2d6cdf"
 
 
+def _buscar_icono():
+    for c in (os.path.join(CARPETA, "icon_256.png"),
+              os.path.join(CARPETA, "..", "deck-client", "remote_play_steam_assets", "icon_256.png")):
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+_ICONO_PROYECTO = _buscar_icono()
+
+
 def _leer_progreso():
     """(fps, Mbps) del ULTIMO SEGUNDO segun -progress de ffmpeg, o (None, None). Los fps= y bitrate= que
     escribe ffmpeg son promedios desde que arranco (una caida no se notaria): se calculan con la diferencia
@@ -84,6 +95,12 @@ class Ventana:
             dpi = 1.0
         self.root = tk.Tk()
         self.root.title("Remote Play - Servidor de PC")
+        if _ICONO_PROYECTO:
+            try:
+                self._icono_ventana = tk.PhotoImage(file=_ICONO_PROYECTO)   # barra de tareas y titulo
+                self.root.iconphoto(True, self._icono_ventana)
+            except tk.TclError:
+                pass
         self.root.configure(bg=ui.FONDO)
         ancho, alto = round(1000 * dpi), round(640 * dpi)
         self.root.geometry(f"{ancho}x{alto}")
@@ -132,12 +149,14 @@ class Ventana:
             self.root.deiconify()      # sin pystray no hay icono: la ventana se muestra
             return None
 
+        # El icono del proyecto (el mismo de Steam/Android) con un punto de estado en la esquina
+        base = Image.open(_ICONO_PROYECTO).convert("RGBA").resize((64, 64), Image.LANCZOS) \
+            if _ICONO_PROYECTO else None
+
         def imagen(color):
-            im = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+            im = base.copy() if base else Image.new("RGBA", (64, 64), (20, 28, 40, 255))
             d = ImageDraw.Draw(im)
-            d.rounded_rectangle((2, 8, 62, 46), radius=8, fill=color)
-            d.rectangle((24, 46, 40, 54), fill=color)
-            d.rounded_rectangle((14, 54, 50, 60), radius=3, fill=color)
+            d.ellipse((40, 40, 63, 63), fill=color, outline=(15, 20, 30), width=3)
             return im
 
         self._img = {"espera": imagen((147, 161, 176)), "transmite": imagen((61, 220, 132))}
