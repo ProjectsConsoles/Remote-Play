@@ -233,7 +233,10 @@ def _elegir_mosaicos(d_pc, f_cons, f_pc, actual, hay_consolas):
     ui.disponer(f, [t_cons, t_pc], esc)
     if not hay_consolas:
         t_cons.habilitar(False)
-    if f_pc and "los archivos del servidor de PC" in f_pc:
+    # Sin Python (o sin sus archivos) el servidor de PC no puede ni arrancar: no se deja elegir (2026-10-05, en
+    # el server W10 se eligio, no arranco y quedo guardado: sin ningun servidor). Sin ViGEmBus o NVIDIA si se
+    # deja (avisado): el video o el mando fallan, pero se ve el problema en su ventana.
+    if any(x in f_pc for x in ("los archivos del servidor de PC", "Python 3.12")):
         t_pc.habilitar(False)
     for t in (t_cons, t_pc):
         t.bind("<Enter>", lambda e, t=t: t.poner_foco(t.habilitado))
@@ -388,6 +391,7 @@ def _main(args):
         sys.exit(CODIGOS.get(r, 0))
     tipo = leer_tipo(aqui)
     log(f"arranque {sys.argv[1:]} tipo guardado={tipo}")
+    anterior = tipo
     if tipo is None or "--elegir" in args:
         nuevo = elegir(aqui, actual=tipo)
         if nuevo is None:
@@ -396,18 +400,28 @@ def _main(args):
         else:
             tipo = nuevo
             guardar_tipo(aqui, tipo)
+    if not arrancar(aqui, tipo, args) and anterior and anterior != tipo:
+        # el elegido no pudo arrancar (ya se aviso por que): se regresa al que habia, para no quedarse sin
+        # servidor ni guardar uno que no funciona en esta PC
+        log(f"{tipo} no arranco: vuelvo a {anterior}")
+        guardar_tipo(aqui, anterior)
+        arrancar(aqui, anterior, args)
+
+
+def arrancar(aqui, tipo, args):
+    """True si se lanzo el servidor."""
     if tipo == CONSOLAS:
         d = carpeta_consolas(aqui)
         if not d:
             mensaje(f"No encontre start_server_gui.ps1 junto a este .exe ni en consolas\\:\n{aqui}", 0x10)
-            return
+            return False
         arrancar_consolas(d)
-    else:
-        d = carpeta_pc(aqui)
-        if not d:
-            mensaje(f"No encontre pc_server.py junto a este .exe ni en pc\\:\n{aqui}", 0x10)
-            return
-        arrancar_pc(d, mostrar="--inicio" not in args)
+        return True
+    d = carpeta_pc(aqui)
+    if not d:
+        mensaje(f"No encontre pc_server.py junto a este .exe ni en pc\\:\n{aqui}", 0x10)
+        return False
+    return arrancar_pc(d, mostrar="--inicio" not in args)
 
 
 if __name__ == "__main__":
