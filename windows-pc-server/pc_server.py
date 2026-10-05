@@ -44,6 +44,8 @@ log = logging.getLogger("pc")
 PUERTO_CONFIG = 9200
 PUERTO_MANDO = int(os.environ.get("PS3RP_PC_PUERTO_MANDO", "9000"))
 PUERTO_VIDEO = int(os.environ.get("PS3RP_PC_PUERTO_VIDEO", "5000"))
+# ffmpeg no manda directo a la tableta sino a este puerto local, y bucle_relevo reenvia (ver alli por que)
+PUERTO_RELEVO = int(os.environ.get("PS3RP_PC_PUERTO_RELEVO", "5099"))
 # Captura a FPS cuadros por segundo. Con muestreo fijo a 60 contra una pantalla de 144 Hz se repetian/saltaban
 # cuadros: 51 distintos por segundo de un juego a 60 (medido 2026-10-05, "se ve con pocos fps"); a 90 cada
 # cuadro de un juego a 60 dura mas que el intervalo de muestreo y ninguno se pierde.
@@ -304,9 +306,9 @@ class Transmision:
             cmd += [
                 "-f", "mpegts", "-muxdelay", "0", "-muxpreload", "0", "-flush_packets", "1",
                 "-max_interleave_delta", MAX_INTERLEAVE_US, "-pes_payload_size", "0",
-                # buffer_size: con el de Windows por defecto, en escenas pesadas ffmpeg se caia con
-                # "Error number -10055" (WSAENOBUFS: se lleno el buffer de envio UDP).
-                f"udp://{ip}:{PUERTO_VIDEO}?pkt_size=1316&buffer_size=4194304",
+                # A la PC misma: bucle_relevo lo reenvia a la tableta. Directo a la tableta, cuando la red se
+                # atoraba ffmpeg se CERRABA con "Error number -10055" (WSAENOBUFS) aun con buffer de 4 MB.
+                f"udp://127.0.0.1:{PUERTO_RELEVO}?pkt_size=1316&buffer_size=4194304",
             ]
             log.info("ffmpeg -> %s:%s (%s fps, %s, audio=%s, %s): %s", ip, PUERTO_VIDEO, FPS, BITRATE,
                      bool(abrir_audio), "directo NVIDIA" if self.directo else "hwdownload", " ".join(cmd))
@@ -670,6 +672,37 @@ def bucle_config(transmision, mando):
 
 
 # ------------------------------------------------------------------------------------------------
+# Relevo: ffmpeg -> 127.0.0.1 -> tableta, tirando paquetes en vez de caerse
+# ------------------------------------------------------------------------------------------------
+def bucle_relevo(transmision):
+    """Reenvia a la tableta lo que ffmpeg manda a PUERTO_RELEVO. Si Windows contesta que el buffer de envio
+    esta lleno (WSAENOBUFS, la red se atoro un momento) el paquete se TIRA y se sigue: en la tableta se ve un
+    detalle borroso un instante (intra-refresh lo limpia) en vez de 1-2 s sin imagen mientras ffmpeg se
+    reiniciaba (medido 2026-10-05 10:20: ffmpeg se cerro con -10055 jugando)."""
+    entrada = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    entrada.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8 << 20)
+    entrada.bind(("127.0.0.1", PUERTO_RELEVO))
+    salida = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    salida.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8 << 20)
+    log.info("relevo de video: escuchando 127.0.0.1:%s", PUERTO_RELEVO)
+    tirados = 0
+    ultimo_aviso = 0.0
+    while True:
+        datos = entrada.recv(65536)
+        destino = transmision.destino
+        if not destino:
+            continue
+        try:
+            salida.sendto(datos, (destino, PUERTO_VIDEO))
+        except OSError:
+            tirados += 1
+            ahora = time.monotonic()
+            if ahora - ultimo_aviso > 5:
+                log.warning("relevo: red atorada, %s paquetes tirados hasta ahora", tirados)
+                ultimo_aviso = ahora
+
+
+# ------------------------------------------------------------------------------------------------
 # Vigia: la laptop cambia la pantalla de GPU (Intel <-> NVIDIA) al abrir/cerrar un juego
 # ------------------------------------------------------------------------------------------------
 def gpu_de_la_pantalla():
@@ -749,6 +782,7 @@ def main():
     MANDO = mando = Mando()
     threading.Thread(target=bucle_mando, args=(mando, transmision), daemon=True).start()
     threading.Thread(target=bucle_vigia, args=(transmision,), daemon=True).start()
+    threading.Thread(target=bucle_relevo, args=(transmision,), daemon=True).start()
     threading.Thread(target=bucle_config, args=(transmision, mando), daemon=True).start()
     # La ventana (pc_gui.py) va en el hilo principal (tkinter lo exige). Sin ella (PS3RP_PC_SIN_VENTANA=1 o si
     # falla), el servidor sigue igual de invisible que antes.
