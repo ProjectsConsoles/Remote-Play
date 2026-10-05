@@ -228,8 +228,13 @@ class Ventana:
                 with open(os.path.join(os.path.dirname(exe), "elegir.flag"), "w") as f:
                     f.write("1")
             else:
+                # Sin las variables que dejo PyInstaller al arrancar este servidor (_PYI*, _MEI*, TCL/TK_LIBRARY
+                # apuntando a su carpeta temporal, ya borrada): con ellas el .exe se moria al arrancar ("no se
+                # pudo usar la DLL de Python", server W10 2026-10-05).
+                entorno = {k: v for k, v in os.environ.items()
+                           if not k.upper().startswith(("_PYI", "_MEI")) and k.upper() not in ("TCL_LIBRARY", "TK_LIBRARY")}
                 subprocess.Popen([exe, "--elegir"], cwd=os.path.dirname(exe), stdin=subprocess.DEVNULL,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=entorno)
             if self.icono is not None:
                 self.icono.stop()
             os._exit(0)
