@@ -44,8 +44,13 @@ log = logging.getLogger("pc")
 PUERTO_CONFIG = 9200
 PUERTO_MANDO = int(os.environ.get("PS3RP_PC_PUERTO_MANDO", "9000"))
 PUERTO_VIDEO = int(os.environ.get("PS3RP_PC_PUERTO_VIDEO", "5000"))
-FPS = int(os.environ.get("PS3RP_PC_FPS", "60"))
-BITRATE = os.environ.get("PS3RP_PC_BITRATE", "15M")
+# Captura "solo cuadros nuevos" (dup_frames=0) revisando hasta FPS veces por segundo. Con muestreo fijo a 60
+# contra una pantalla de 144 Hz se repetian/saltaban cuadros: 51 distintos por segundo de un juego a 60 (medido
+# 2026-10-05, "se ve con pocos fps"). Con tope 90: 58.8. NVENC reparte el bitrate segun ese tope, asi que el
+# valor que se le pasa se escala para que a 60 fps reales salgan ~BITRATE_MBPS (medido: 15M con tope 90 = 10 Mbps).
+FPS = int(os.environ.get("PS3RP_PC_FPS", "90"))
+BITRATE_MBPS = float(os.environ.get("PS3RP_PC_BITRATE_MBPS", "15"))
+BITRATE = f"{BITRATE_MBPS * FPS / 60:.1f}M"
 SIN_MANDO_S = 60
 INTRA_REFRESH = os.environ.get("PS3RP_PC_INTRA_REFRESH", "1") == "1"
 # Mientras se transmite, la salida predeterminada pasa a esta "bocina" virtual (la instala Steam) para que
@@ -170,7 +175,7 @@ class Transmision:
             # misma GPU y NVENC toma los cuadros de D3D11 directo -> 60 fps. En la Intel (escritorio) hay
             # que bajarlos a memoria (hwdownload) y eso lo deja en ~40 fps.
             self.directo = "NVIDIA" in gpu_de_la_pantalla().upper() and not self.directo_falla
-            captura = f"ddagrab=output_idx=0:framerate={FPS}:draw_mouse=1"
+            captura = f"ddagrab=output_idx=0:framerate={FPS}:dup_frames=0:draw_mouse=1"
             if not self.directo:
                 captura += ",hwdownload,format=bgra"
             cmd = [
@@ -194,6 +199,8 @@ class Transmision:
                 "-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ull", "-zerolatency", "1",
                 "-rc", "cbr", "-b:v", BITRATE, "-maxrate", BITRATE, "-bufsize", "500k",
                 "-bf", "0", "-rc-lookahead", "0", "-delay", "0",
+                # cada cuadro sale apenas el juego lo dibuja (sin rellenar a un ritmo fijo)
+                "-fps_mode", "passthrough",
             ]
             if INTRA_REFRESH:
                 # En vez de un cuadro clave entero cada 30 cuadros (con un buffer tan chico cada uno sale
