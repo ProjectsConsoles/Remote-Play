@@ -200,7 +200,12 @@ class Transmision:
                 # con otra calidad/color y se ve un "parpadeo" 2 veces por segundo, reportado 2026-10-05),
                 # NVENC refresca la imagen por franjas a lo largo de 60 cuadros: sin pulso y se sigue
                 # recuperando de paquetes perdidos.
-                cmd += ["-g", "60", "-intra-refresh", "1"]
+                # OJO: con intra-refresh solo el PRIMER cuadro es clave y trae la configuracion del video
+                # (SPS/PPS): un cliente que empieza a escuchar un instante tarde no decodifica NADA (medido:
+                # 0 cuadros; la tableta se quedaba en "esperando la primera imagen" con audio). Por eso la
+                # configuracion se repite en cada cuadro (global_header + dump_extra, unos bytes por cuadro).
+                cmd += ["-g", "60", "-intra-refresh", "1", "-flags", "+global_header",
+                        "-bsf:v", "dump_extra=freq=all"]
             else:
                 cmd += ["-g", "30"]
             if abrir_audio:
