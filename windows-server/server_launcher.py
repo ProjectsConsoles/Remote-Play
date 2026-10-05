@@ -117,9 +117,30 @@ def guardar_tipo(aqui, tipo):
 
 
 # --- ventana para elegir --------------------------------------------------------------------------------
+CODIGOS = {CONSOLAS: 10, PC: 11}
+
+
 def elegir(aqui, actual=None):
-    """Devuelve CONSOLAS, PC o None (se cerro sin elegir). Usa los mosaicos de la ventana del servidor
-    de PC (ui_mosaicos.py, en la carpeta del servidor de PC); si no se puede, un cuadro de Si/No."""
+    """Devuelve CONSOLAS, PC o None (se cerro sin elegir).
+    En el .exe la ventana se abre SIEMPRE en un proceso nuevo (este mismo .exe con --solo-elegir, la
+    eleccion vuelve como codigo de salida): una segunda ventana de tkinter en el mismo proceso (despues de
+    "Cambiar tipo", el lanzador sigue vivo esperando al servidor) reusaba imagenes de la ventana anterior,
+    ya destruida, y los mosaicos salian VACIOS ("image pyimage2 doesn't exist", 2026-10-05)."""
+    if getattr(sys, "frozen", False):
+        args = [sys.executable, "--solo-elegir"] + (["--actual=" + actual] if actual else [])
+        try:
+            r = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL).returncode
+        except OSError as e:
+            log(f"no se pudo abrir la ventana de eleccion en otro proceso ({e}): la abro aqui")
+            return elegir_aqui(aqui, actual)
+        return {v: k for k, v in CODIGOS.items()}.get(r)
+    return elegir_aqui(aqui, actual)
+
+
+def elegir_aqui(aqui, actual=None):
+    """La ventana en este proceso. Usa los mosaicos de la ventana del servidor de PC (ui_mosaicos.py, en la
+    carpeta del servidor de PC); si no se puede, un cuadro de Si/No."""
     d_cons, d_pc = carpeta_consolas(aqui), carpeta_pc(aqui)
     f_cons, f_pc = faltantes_consolas(d_cons), faltantes_pc(d_pc)
     try:
@@ -150,6 +171,10 @@ def _elegir_mosaicos(d_pc, f_cons, f_pc, actual, hay_consolas):
         raise RuntimeError("sin ui_mosaicos")
     sys.path.insert(0, d_pc)
     import ui_mosaicos as ui
+    # por si acaso: las imagenes guardadas son de la ventana de tkinter que las creo
+    for cache in ("_tarjetas_suaves", "_degradados"):
+        if isinstance(getattr(ui, cache, None), dict):
+            getattr(ui, cache).clear()
 
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
@@ -167,7 +192,10 @@ def _elegir_mosaicos(d_pc, f_cons, f_pc, actual, hay_consolas):
     root.title(TITULO)
     root.configure(bg=ui.FONDO)
     ancho, alto = round(860 * dpi), round(470 * dpi)
-    root.geometry(f"{ancho}x{alto}")
+    # centrada en la pantalla (pedido 2026-10-05)
+    x = max(0, (root.winfo_screenwidth() - ancho) // 2)
+    y = max(0, (root.winfo_screenheight() - alto) // 2 - round(30 * dpi))
+    root.geometry(f"{ancho}x{alto}+{x}+{y}")
     root.minsize(round(700 * dpi), round(420 * dpi))
     icono = os.path.join(d_pc, "icon_256.png")
     if os.path.isfile(icono):
@@ -337,6 +365,10 @@ def main():
 
 def _main(args):
     aqui = app_dir()
+    if "--solo-elegir" in args:
+        actual = next((a.split("=", 1)[1] for a in args if a.startswith("--actual=")), None)
+        r = elegir_aqui(aqui, actual if actual in CODIGOS else None)
+        sys.exit(CODIGOS.get(r, 0))
     tipo = leer_tipo(aqui)
     log(f"arranque {sys.argv[1:]} tipo guardado={tipo}")
     if tipo is None or "--elegir" in args:
