@@ -21,6 +21,7 @@ import tkinter as tk
 import ui_mosaicos as ui
 
 CARPETA = os.path.dirname(os.path.abspath(__file__))
+AZUL_PS = "#0070d1"   # azul de PlayStation, para el mosaico de chiaki-ng (con el logo PS: iconos/ps_*.png)
 CHIAKI_APPIMAGE = os.environ.get("PS3RP_CHIAKI_APPIMAGE") or os.path.join(CARPETA, "apps", "chiaki-ng.AppImage")
 # El AppImage guarda su config en ~/.config/Chiaki; el Flatpak, dentro de su sandbox. Si solo
 # existe la del Flatpak, start_client_stream.sh la copia antes de lanzar (consolas ya registradas).
@@ -66,9 +67,9 @@ class PantallaApps(ui.Pantalla):
             self.tira.pintar(ui.TENUE, "chiaki-ng listo. Sin consolas registradas: se registran con el PIN.")
 
         f = ui.fila(marco, esc)
-        t_chiaki = ui.Mosaico(f, esc, iconos, "play", "PS4 / PS5",
+        t_chiaki = ui.Mosaico(f, esc, iconos, "ps", "PS4 / PS5",
                               "chiaki-ng: Remote Play de Sony. Al cerrarlo regresas a este menu.",
-                              ui.AZUL, on_a=self.abrir_chiaki, tam_titulo=32, tam_detalle=16)
+                              AZUL_PS, on_a=self.abrir_chiaki, tam_titulo=32, tam_detalle=16)
         ui.disponer(f, [t_chiaki], esc)
         tk.Label(marco, text="Estas apps traen su propio video, audio y control: no usan el servidor "
                              "Windows ni el ESP32-S3.",

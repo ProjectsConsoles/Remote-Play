@@ -474,10 +474,29 @@ if [ "$MODO" = "chiaki" ]; then
             cp -n "$CHIAKI_CONF_FLATPAK"/*.conf "$HOME/.config/Chiaki/" \
                 && echo "Config de chiaki-ng copiada del Flatpak (consolas ya registradas)." | tee -a "$LOG"
         fi
+        # NADIE MANDA AL ESP32 MIENTRAS CHIAKI ESTA ABIERTO (2026-10-04, pedido
+        # del usuario). El mismo mando que usa chiaki-ng lo lee input_client_v3.py:
+        # si quedo uno vivo (de este script o de OTRA instancia en streaming o
+        # control), cada boton para la PS4/PS5 tambien le llega a la consola del
+        # ESP32. Se baja antes de abrir la app y se vigila cada 2 s mientras siga
+        # abierta, por si otra instancia arranca uno. Solo el control: el video
+        # de otra instancia no se toca.
+        detener_control
+        pkill -f "client_control_ui.py" 2>/dev/null
         "$CHIAKI_APPIMAGE" >> "$LOG" 2>&1 &
         CHIAKI_PID=$!
+        (
+            while kill -0 "$CHIAKI_PID" 2>/dev/null; do
+                if pkill -f "input_client_v3.py" 2>/dev/null; then
+                    echo "chiaki-ng abierto: detuve un cliente de input que mandaba al ESP32." >> "$LOG"
+                fi
+                sleep 2
+            done
+        ) &
+        CHIAKI_VIGIA=$!
         wait "$CHIAKI_PID"
         echo "chiaki-ng termino (codigo $?)." >> "$LOG"
+        kill "$CHIAKI_VIGIA" 2>/dev/null
         CHIAKI_PID=""
     fi
     # Con el modo fijado por variable no hay menu al que volver.
