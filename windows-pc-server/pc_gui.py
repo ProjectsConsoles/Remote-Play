@@ -133,10 +133,12 @@ class Ventana:
                                     ui.ROJO, on_a=self.detener, **bkw)
         b_ocultar = ui.Mosaico(pie, esc, iconos, "back", "Ocultar", "Sigue corriendo junto al reloj",
                                ui.GRIS, on_a=self.ocultar, **bkw)
+        b_cambiar = ui.Mosaico(pie, esc, iconos, "settings", "Cambiar tipo de servidor", "Consolas o juegos de PC",
+                               ui.MORADO, on_a=self.cambiar_tipo, **bkw)
         b_salir = ui.Mosaico(pie, esc, iconos, "exit", "Salir", "Apaga el servidor", ui.ROJO_OSCURO,
                              on_a=self.salir, **bkw)
-        ui.disponer(pie, [self.b_detener, b_ocultar, b_salir], esc)
-        for b in (self.b_detener, b_ocultar, b_salir):
+        ui.disponer(pie, [self.b_detener, b_ocultar, b_cambiar, b_salir], esc)
+        for b in (self.b_detener, b_ocultar, b_cambiar, b_salir):
             self._con_mouse(b)
 
         self.icono = self._crear_icono()
@@ -198,6 +200,36 @@ class Ventana:
 
     def detener(self):
         threading.Thread(target=self.sv.TRANSMISION.detener, daemon=True).start()
+
+    def cambiar_tipo(self):
+        """Abre la eleccion del lanzador unico ("Iniciar Servidor Remote Play.exe --elegir", 2026-10-05) y
+        se apaga: el lanzador arranca el servidor que se elija (este de nuevo, o el de consolas)."""
+        import subprocess
+        exe = next((c for c in (os.path.join(CARPETA, "Iniciar Servidor Remote Play.exe"),
+                                os.path.join(os.path.dirname(CARPETA), "Iniciar Servidor Remote Play.exe"))
+                    if os.path.isfile(c)), None)
+        if exe is None:
+            self.tira.pintar(ui.AVISO, "Falta 'Iniciar Servidor Remote Play.exe' junto al servidor: no se puede cambiar.")
+            return
+        self.tira.pintar(ui.AVISO, "Cambiando de servidor: deteniendo la transmisión y regresando el audio...")
+        self.root.update_idletasks()
+        try:
+            self.sv.TRANSMISION.detener()
+        finally:
+            # Arrancado por la tarea de inicio, el lanzador se queda vivo esperando a este proceso (Windows no
+            # lo deja soltarlo) y un lanzador nuevo moriria con el: se le deja elegir.flag y el muestra la
+            # eleccion al salir este. Si no hay lanzador vivo, se abre uno.
+            r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq Iniciar Servidor Remote Play.exe", "/NH"],
+                               capture_output=True, text=True, creationflags=0x08000000)
+            if "Iniciar Servidor" in r.stdout:
+                with open(os.path.join(os.path.dirname(exe), "elegir.flag"), "w") as f:
+                    f.write("1")
+            else:
+                subprocess.Popen([exe, "--elegir"], cwd=os.path.dirname(exe), stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if self.icono is not None:
+                self.icono.stop()
+            os._exit(0)
 
     def salir(self):
         self.tira.pintar(ui.AVISO, "Cerrando: deteniendo la transmisión y regresando el audio...")

@@ -74,6 +74,26 @@ PC"** en el escritorio. Se puede repetir sin problema.
 > servicio: Windows solo deja capturar la pantalla y crear el control virtual
 > desde el escritorio real. Por eso se usa una tarea programada interactiva.
 
+## Un solo lanzador para los dos servidores
+
+`Iniciar Servidor Remote Play.exe` (`windows-server/server_launcher.py`) sirve para
+el servidor de consolas y para este. La primera vez pregunta en una ventana qué es
+esa PC, **Consolas** (capturadora HDMI) o **Juegos de esta PC**, y lo guarda en
+`tipo_servidor.txt` junto al `.exe`. Desde ahí arranca ese servidor directo en cada
+inicio de sesión, sin preguntar. Para cambiarlo, el botón **Cambiar tipo de
+servidor** de la ventana de cada servidor lo apaga y vuelve a mostrar la elección.
+
+Cada opción dice si en esa PC falta algo (ffmpeg, Python, ViGEmBus, NVIDIA).
+Busca el servidor de consolas junto al `.exe` o en `consolas\`, y el de PC en `pc\`
+o junto al `.exe`. Si `instalar_tarea.ps1` encuentra el `.exe`, la tarea de inicio y
+el acceso directo lo usan a él (con `--inicio` al arrancar Windows, para que la
+ventana no se abra sola), y si no hay nada guardado deja `pc`.
+
+> Desde la tarea programada Windows no deja que el lanzador suelte al servidor (su
+> Job no lo permite: `WinError 5`), así que el lanzador se queda abierto esperándolo.
+> Por eso "Cambiar tipo" le deja un `elegir.flag` en vez de abrir otro lanzador.
+> Errores y arranques quedan en `lanzador.log`.
+
 ## Usar
 
 1. En la tableta: **Configurar cliente → IP de la PC (juegos)** (una sola vez).

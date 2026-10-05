@@ -11,6 +11,10 @@ REM  quede fijo y no se pierda la proxima vez que haga falta recompilar.
 REM
 REM  Requiere PyInstaller instalado en el Python que se use para correr
 REM  esto:   pip install pyinstaller
+REM  Desde 2026-10-05 el lanzador es UNICO para los dos servidores (consolas y
+REM  juegos de PC) y muestra una ventana para elegir (tkinter): ese Python tiene
+REM  que traer tkinter (el de python.org si; el "embeddable" NO). Se compilo en la
+REM  laptop con C:\Program Files\Python312.
 REM
 REM  Uso: doble clic, o "build_launcher.bat" desde esta misma carpeta.
 REM  El .exe resultante queda en esta carpeta (--distpath .), listo para

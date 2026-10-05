@@ -506,13 +506,42 @@ try {
 
     # ---- acciones ----
     $yAcc = 518
-    $btnIniciar = Nuevo-Mosaico "Iniciar servidor" "" $colVerde "play" $m $yAcc 220 72 12.5 9 $true 30
-    $btnDetener = Nuevo-Mosaico "Detener servidor" "" $colRojo "power" ($m + 220 + $gap) $yAcc 200 72 12.5 9 $true 30
-    $btnLogs    = Nuevo-Mosaico "Ver logs" "" $colGris "info" ($m + 220 + 200 + 2 * $gap) $yAcc 150 72 12 9 $true 28
-    $btnCerrar  = Nuevo-Mosaico "Cerrar" "" $colGris "back" ($m + 220 + 200 + 150 + 3 * $gap) $yAcc ($anchoTotal - 220 - 200 - 150 - 3 * $gap) 72 12 9 $true 28
+    # (2026-10-05) cinco botones: se agrego "Cambiar tipo" (lanzador unico, ver server_launcher.py)
+    $btnIniciar = Nuevo-Mosaico "Iniciar servidor" "" $colVerde "play" $m $yAcc 162 72 12 9 $true 28
+    $btnDetener = Nuevo-Mosaico "Detener servidor" "" $colRojo "power" ($m + 162 + $gap) $yAcc 152 72 12 9 $true 28
+    $btnLogs    = Nuevo-Mosaico "Ver logs" "" $colGris "info" ($m + 162 + 152 + 2 * $gap) $yAcc 108 72 11.5 9 $true 26
+    $btnCambiar = Nuevo-Mosaico "Cambiar tipo" "" $colMorado "refresh" ($m + 162 + 152 + 108 + 3 * $gap) $yAcc 142 72 11.5 9 $true 26
+    $btnCerrar  = Nuevo-Mosaico "Cerrar" "" $colGris "back" ($m + 162 + 152 + 108 + 142 + 4 * $gap) $yAcc ($anchoTotal - 162 - 152 - 108 - 142 - 4 * $gap) 72 11.5 9 $true 26
     $btnCerrar.Add_Click({ $form.Close() })
 
     [void](Nuevo-Label "Cerrar esta ventana no detiene el servidor: queda en la bandeja. Salir, en el icono de la bandeja, apaga todo (servidor y escucha). Tambien se puede configurar desde la Deck, la Ally y la tableta." $m 604 $anchoTotal 44 9 $false $colTenue "TopLeft")
+
+    # "Cambiar tipo" (2026-10-05): un solo paquete con los dos servidores (consolas y juegos de PC). Abre
+    # la eleccion del lanzador ("Iniciar Servidor Remote Play.exe --elegir") y apaga TODO este servidor,
+    # igual que "Salir" de la bandeja; el lanzador arranca el que se elija.
+    $btnCambiar.Add_Click({
+        $exe = @((Join-Path $Aqui "Iniciar Servidor Remote Play.exe"),
+                 (Join-Path (Split-Path -Parent $Aqui) "Iniciar Servidor Remote Play.exe")) |
+            Where-Object { Test-Path $_ } | Select-Object -First 1
+        if (-not $exe) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "No encontre 'Iniciar Servidor Remote Play.exe' junto al servidor.",
+                "Remote Play", "OK", "Warning") | Out-Null
+            return
+        }
+        $r = [System.Windows.Forms.MessageBox]::Show(
+            "Se apaga este servidor y se abre la eleccion: Consolas o Juegos de esta PC.",
+            "Remote Play", "OKCancel", "Question")
+        if ($r -ne "OK") { return }
+        # Si el lanzador sigue vivo esperando a este servidor (arrancado por una tarea programada, donde
+        # Windows no lo deja soltarlo), se le deja elegir.flag y el muestra la eleccion; si no, se abre.
+        if (Get-Process -Name "Iniciar Servidor Remote Play" -ErrorAction SilentlyContinue) {
+            Set-Content -Path (Join-Path (Split-Path -Parent $exe) "elegir.flag") -Value "1" -Encoding ASCII
+        } else {
+            Start-Process -FilePath $exe -ArgumentList "--elegir" -WorkingDirectory (Split-Path -Parent $exe)
+        }
+        Salir-De-Verdad
+    })
 
     $btnLogs.Add_Click({
         $carpeta = Join-Path $Aqui "logs"

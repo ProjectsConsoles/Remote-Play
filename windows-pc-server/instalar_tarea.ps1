@@ -19,10 +19,25 @@ foreach ($p in 9200, 9000) {
         -Protocol UDP -LocalPort $p -RemoteAddress LocalSubnet -Action Allow -Profile Any | Out-Null
 }
 
-# Tarea: al iniciar sesion del usuario, sin ventana (pythonw), reiniciandose si se cae.
+# Lanzador unico (2026-10-05): "Iniciar Servidor Remote Play.exe" (windows-server/server_launcher.py) junto a
+# este archivo o en la carpeta de arriba. Si esta, la tarea y el acceso directo lo usan a EL: arranca el tipo de
+# servidor guardado en tipo_servidor.txt (consolas o PC) y se cambia desde la ventana del servidor. Si no esta,
+# todo queda como antes (pc_server.py directo).
+$lanzador = @("$carpeta\Iniciar Servidor Remote Play.exe", "$(Split-Path -Parent $carpeta)\Iniciar Servidor Remote Play.exe") |
+    Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($lanzador) {
+    $tipo = Join-Path (Split-Path -Parent $lanzador) 'tipo_servidor.txt'
+    if (-not (Test-Path $tipo)) { Set-Content -Path $tipo -Value 'pc' -Encoding ASCII }   # esta PC: juegos
+}
+
+# Tarea: al iniciar sesion del usuario, sin ventana, reiniciandose si se cae.
 $usuario = (Get-CimInstance Win32_ComputerSystem).UserName
 if (-not $usuario) { $usuario = "$env:USERDOMAIN\$env:USERNAME" }
-$accion = New-ScheduledTaskAction -Execute $pythonw -Argument "`"$carpeta\pc_server.py`"" -WorkingDirectory $carpeta
+if ($lanzador) {
+    $accion = New-ScheduledTaskAction -Execute $lanzador -Argument '--inicio' -WorkingDirectory (Split-Path -Parent $lanzador)
+} else {
+    $accion = New-ScheduledTaskAction -Execute $pythonw -Argument "`"$carpeta\pc_server.py`"" -WorkingDirectory $carpeta
+}
 $disparo = New-ScheduledTaskTrigger -AtLogOn -User $usuario
 $ajustes = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 99 -RestartInterval (New-TimeSpan -Minutes 1)
@@ -30,12 +45,18 @@ $quien = New-ScheduledTaskPrincipal -UserId $usuario -LogonType Interactive -Run
 Register-ScheduledTask -TaskName 'PS3RP PC Server' -Action $accion -Trigger $disparo -Settings $ajustes `
     -Principal $quien -Force | Out-Null
 
-# Acceso directo en el escritorio: arranca el servidor (por la tarea) o, si ya corre, muestra su ventana
+# Acceso directo en el escritorio: arranca el servidor o, si ya corre, muestra su ventana
 $escritorio = [Environment]::GetFolderPath('Desktop')
 $acceso = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $escritorio 'Remote Play - Servidor de PC.lnk'))
-$acceso.TargetPath = $pythonw
-$acceso.Arguments = "`"$carpeta\abrir_servidor.pyw`""
-$acceso.WorkingDirectory = $carpeta
+if ($lanzador) {
+    $acceso.TargetPath = $lanzador
+    $acceso.Arguments = ''
+    $acceso.WorkingDirectory = Split-Path -Parent $lanzador
+} else {
+    $acceso.TargetPath = $pythonw
+    $acceso.Arguments = "`"$carpeta\abrir_servidor.pyw`""
+    $acceso.WorkingDirectory = $carpeta
+}
 $acceso.IconLocation = "$carpeta\icono.ico,0"
 $acceso.Description = 'Inicia el servidor de PC de Remote Play o muestra su ventana'
 $acceso.Save()

@@ -1,27 +1,37 @@
 #!/usr/bin/env python3
-"""Lanzador nativo del servidor de PS3 Remote Play (reemplaza iniciar_servidor.bat).
+"""Lanzador del servidor de Remote Play: "Iniciar Servidor Remote Play.exe".
 
-POR QUE EXISTE: el usuario ya habia pedido una vez convertir el motor del
-servidor (start_server_stream.ps1/.bat, el que de verdad maneja ffmpeg) a
-.exe con ps2exe, y eso metio un desfase de audio (ps2exe re-aloja el script
-completo dentro de su propio runtime, lo que cambio el timing de algo en esa
-cadena). La leccion, documentada en los comentarios de start_client_stream.sh
-del lado de la Deck y en start_server_gui.ps1 del lado de la PC ("POR QUE NO
-REIMPLEMENTA FFMPEG"), es: nunca tocar ni re-alojar el motor.
+UN SOLO PAQUETE PARA LOS DOS SERVIDORES (2026-10-05, pedido del usuario):
+  - Consolas (capturadora HDMI): start_server_gui.ps1 + config_listener.ps1 (windows-server/).
+  - Juegos de esta PC: pc_server.py (windows-pc-server/), para la tableta.
+La primera vez pregunta en una ventana cual es esta PC y lo guarda en tipo_servidor.txt (junto al
+.exe). Despues arranca ese directo, sin preguntar, en cada arranque de Windows. Para cambiarlo:
+el boton "Cambiar tipo de servidor" de la ventana de cada servidor (lanza este .exe con --elegir).
 
-Por eso esto NO reimplementa nada de start_server_gui.ps1 ni de
-start_server_stream.bat. Hace exactamente lo mismo que hacia
-iniciar_servidor.bat (un "start" con ventana oculta hacia start_server_gui.ps1)
-pero como un .exe nativo de verdad, para poder pinearlo al taskbar / darle un
-icono / abrirlo con doble clic sin pasar por "Abrir con -> Windows PowerShell".
+Argumentos:  --elegir  mostrar la ventana de eleccion aunque ya haya uno guardado (o elegir.flag, ver main)
+             --inicio  arranque de Windows: el servidor de PC se queda oculto junto al reloj
 
-El .bat, el .ps1 de la interfaz y el .bat del motor siguen intactos y
-siguen siendo la unica fuente de verdad de la logica del servidor.
+Donde busca cada servidor (para que sirva con la carpeta vieja de cada PC y con la nueva):
+  consolas: junto al .exe o en consolas\\ ;  PC: en pc\\ o junto al .exe.
+
+POR QUE ESTE LANZADOR NO TOCA EL MOTOR (de antes, sigue valiendo): el usuario ya habia pedido una
+vez convertir el motor (start_server_stream.ps1/.bat, el que maneja ffmpeg) a .exe con ps2exe, y eso
+metio un desfase de audio. Aqui no se reimplementa nada: solo se lanza lo de siempre.
 """
 
+import glob
+import json
 import os
+import shutil
+import socket
 import subprocess
 import sys
+import time
+
+TITULO = "Remote Play - Servidor"
+CONSOLAS, PC = "consolas", "pc"
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+CREATE_NO_WINDOW = 0x08000000
 
 
 def app_dir():
@@ -30,105 +40,318 @@ def app_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 
-def lanzar_oculto(ps1_path, aqui):
-    """Mismo patron para cualquier .ps1: consola real pero oculta, escapa
-    del Job Object del .exe, descriptores explicitos. Ver las notas largas
-    mas abajo (se dejan una sola vez, valen para los dos lanzamientos)."""
-    CREATE_BREAKAWAY_FROM_JOB = 0x01000000
-    subprocess.Popen(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-         "-WindowStyle", "Hidden", "-File", ps1_path],
-        cwd=aqui,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=CREATE_BREAKAWAY_FROM_JOB,
-        close_fds=True,
-    )
+def mensaje(texto, icono=0x40):
+    try:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(0, texto, TITULO, icono)
+    except Exception:
+        pass
+
+
+# --- donde esta cada servidor y que le falta ---------------------------------------------------------
+def carpeta_consolas(aqui):
+    for d in (aqui, os.path.join(aqui, "consolas")):
+        if os.path.isfile(os.path.join(d, "start_server_gui.ps1")):
+            return d
+    return None
+
+
+def carpeta_pc(aqui):
+    for d in (os.path.join(aqui, "pc"), aqui):
+        if os.path.isfile(os.path.join(d, "pc_server.py")):
+            return d
+    return None
+
+
+def buscar_pythonw():
+    candidatos = [r"C:\Program Files\Python312\pythonw.exe"]
+    candidatos += sorted(glob.glob(r"C:\Program Files\Python3*\pythonw.exe"), reverse=True)
+    candidatos += sorted(glob.glob(os.path.expandvars(r"%LOCALAPPDATA%\Programs\Python\Python3*\pythonw.exe")),
+                         reverse=True)
+    for c in candidatos:
+        if os.path.isfile(c):
+            return c
+    return shutil.which("pythonw")
+
+
+def faltantes_consolas(d):
+    if not d:
+        return ["los archivos del servidor de consolas"]
+    falta = []
+    if not glob.glob(os.path.join(d, "ffmpeg-*", "bin", "ffmpeg.exe")):
+        falta.append("ffmpeg (carpeta ffmpeg-*-full_build)")
+    return falta
+
+
+def faltantes_pc(d):
+    if not d:
+        return ["los archivos del servidor de PC"]
+    falta = []
+    if not buscar_pythonw():
+        falta.append("Python 3.12")
+    sistema = os.path.expandvars(r"%SystemRoot%\System32")
+    if not os.path.isfile(os.path.join(sistema, "drivers", "ViGEmBus.sys")):
+        falta.append("ViGEmBus (control virtual)")
+    if not os.path.isfile(os.path.join(sistema, "nvEncodeAPI64.dll")):
+        falta.append("una tarjeta NVIDIA")
+    return falta
+
+
+# --- tipo guardado ------------------------------------------------------------------------------------
+def archivo_tipo(aqui):
+    return os.path.join(aqui, "tipo_servidor.txt")
+
+
+def leer_tipo(aqui):
+    try:
+        with open(archivo_tipo(aqui)) as f:
+            t = f.read().strip().lower()
+        return t if t in (CONSOLAS, PC) else None
+    except OSError:
+        return None
+
+
+def guardar_tipo(aqui, tipo):
+    with open(archivo_tipo(aqui), "w") as f:
+        f.write(tipo + "\n")
+
+
+# --- ventana para elegir --------------------------------------------------------------------------------
+def elegir(aqui, actual=None):
+    """Devuelve CONSOLAS, PC o None (se cerro sin elegir). Usa los mosaicos de la ventana del servidor
+    de PC (ui_mosaicos.py, en la carpeta del servidor de PC); si no se puede, un cuadro de Si/No."""
+    d_cons, d_pc = carpeta_consolas(aqui), carpeta_pc(aqui)
+    f_cons, f_pc = faltantes_consolas(d_cons), faltantes_pc(d_pc)
+    try:
+        return _elegir_mosaicos(d_pc, f_cons, f_pc, actual, d_cons is not None)
+    except Exception:
+        pass
+    r = _messagebox_si_no(
+        "Que tipo de servidor es esta PC?\n\n"
+        f"Si = Consolas (capturadora HDMI){'  - falta: ' + ', '.join(f_cons) if f_cons else ''}\n"
+        f"No = Juegos de esta PC (tableta){'  - falta: ' + ', '.join(f_pc) if f_pc else ''}\n\n"
+        "Se recuerda para los proximos arranques.")
+    return {6: CONSOLAS, 7: PC}.get(r)
+
+
+def _messagebox_si_no(texto):
+    try:
+        import ctypes
+        return ctypes.windll.user32.MessageBoxW(0, texto, TITULO, 0x3 | 0x20)   # Si/No/Cancelar, pregunta
+    except Exception:
+        return 2
+
+
+def _elegir_mosaicos(d_pc, f_cons, f_pc, actual, hay_consolas):
+    import ctypes
+    import tkinter as tk
+    if not d_pc:
+        raise RuntimeError("sin ui_mosaicos")
+    sys.path.insert(0, d_pc)
+    import ui_mosaicos as ui
+
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        dpi = ctypes.windll.user32.GetDpiForSystem() / 96
+    except Exception:
+        dpi = 1.0
+    eleccion = {"tipo": None}
+    root = tk.Tk()
+    root.title(TITULO)
+    root.configure(bg=ui.FONDO)
+    ancho, alto = round(860 * dpi), round(470 * dpi)
+    root.geometry(f"{ancho}x{alto}")
+    root.minsize(round(700 * dpi), round(420 * dpi))
+    icono = os.path.join(d_pc, "icon_256.png")
+    if os.path.isfile(icono):
+        try:
+            root._icono = tk.PhotoImage(file=icono)
+            root.iconphoto(True, root._icono)
+        except tk.TclError:
+            pass
+    esc = ui.Escala(alto * 1.6)
+    iconos = ui.Iconos()
+    marco = tk.Frame(root, bg=ui.FONDO, padx=esc.px(24), pady=esc.px(16))
+    marco.pack(fill="both", expand=True)
+    cab, _ = ui.cabecera(marco, esc, "Servidor de Remote Play", "")
+    cab.pack(fill="x")
+    tira = ui.TiraEstado(marco, esc)
+    tira.pack(fill="x", pady=(esc.px(6), esc.px(8)))
+    tira.pintar(ui.TENUE, "¿Qué es esta PC? Se recuerda para los próximos arranques; se cambia desde la "
+                          "ventana del servidor.")
+
+    def detalle(base, falta):
+        return base + ("  ·  Falta: " + ", ".join(falta) if falta else "  ·  Listo")
+
+    def elegir_y_cerrar(tipo):
+        eleccion["tipo"] = tipo
+        root.destroy()
+
+    f = ui.fila(marco, esc)
+    kw = dict(marco=False, tam_titulo=24, tam_detalle=13)
+    t_cons = ui.Mosaico(f, esc, iconos, "gamepad", "Consolas",
+                        detalle("Capturadora HDMI: PS3, PS2, Xbox... a la Deck, la Ally o la tableta", f_cons),
+                        ui.AZUL, on_a=lambda: elegir_y_cerrar(CONSOLAS), **kw)
+    t_pc = ui.Mosaico(f, esc, iconos, "server", "Juegos de esta PC",
+                      detalle("Su pantalla y su sonido a la tableta, con el mando como control de Xbox", f_pc),
+                      ui.VERDE, on_a=lambda: elegir_y_cerrar(PC), **kw)
+    ui.disponer(f, [t_cons, t_pc], esc)
+    if not hay_consolas:
+        t_cons.habilitar(False)
+    if f_pc and "los archivos del servidor de PC" in f_pc:
+        t_pc.habilitar(False)
+    for t in (t_cons, t_pc):
+        t.bind("<Enter>", lambda e, t=t: t.poner_foco(t.habilitado))
+        t.bind("<Leave>", lambda e, t=t: t.poner_foco(False))
+    if actual:
+        (t_cons if actual == CONSOLAS else t_pc).poner_marca(True)
+    root.protocol("WM_DELETE_WINDOW", root.destroy)
+    root.lift()
+    root.focus_force()
+    root.mainloop()
+    return eleccion["tipo"]
+
+
+# --- arrancar cada servidor --------------------------------------------------------------------------
+HIJOS_A_ESPERAR = []
+
+
+def lanzar(cmd, carpeta, flags=0):
+    """Popen soltando al hijo del Job Object de este .exe (CREATE_BREAKAWAY_FROM_JOB, ver lanzar_oculto).
+    Desde la tarea programada de inicio de sesion Windows NO deja soltarlo (el Job de la tarea no lo
+    permite: medido 2026-10-05, el .exe se quedaba atorado mostrando un error que nadie veia y el
+    servidor no arrancaba). En ese caso se lanza sin soltarlo y este proceso se queda esperando a que
+    el hijo termine (ver main): si saliera, el Job del .exe se llevaria al servidor con el."""
+    base = dict(cwd=carpeta, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                close_fds=True)
+    try:
+        return subprocess.Popen(cmd, creationflags=flags | CREATE_BREAKAWAY_FROM_JOB, **base)
+    except OSError as e:
+        log(f"sin breakaway ({e}): se lanza dentro del Job y se espera al hijo")
+        p = subprocess.Popen(cmd, creationflags=flags, **base)
+        HIJOS_A_ESPERAR.append(p)
+        return p
+
+
+def log(texto):
+    try:
+        with open(os.path.join(app_dir(), "lanzador.log"), "a", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + texto + "\n")
+    except OSError:
+        pass
+
+
+def lanzar_oculto(ps1_path, carpeta):
+    """Igual que siempre para los .ps1 del servidor de consolas: consola real pero oculta, escapa del
+    Job Object del .exe y con descriptores explicitos. Por que cada cosa (medido 2026-09-11):
+      - CREATE_BREAKAWAY_FROM_JOB: un .exe --onefile de PyInstaller mete su proceso en un Job Object que
+        mata a los hijos al salir; sin esto el servidor moria en cuanto este lanzador terminaba.
+      - SIN CREATE_NO_WINDOW: el motor detecta la capturadora corriendo otros procesos de consola y sin
+        ninguna consola detras (ni oculta) eso fallaba. -WindowStyle Hidden la oculta.
+      - DEVNULL explicito: un .exe --windowed no tiene stdio valido y el motor se colgaba al heredarlo.
+    """
+    lanzar(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", ps1_path],
+           carpeta)
+
+
+def arrancar_consolas(d):
+    lanzar_oculto(os.path.join(d, "start_server_gui.ps1"), d)
+    # config_listener.ps1 aparte de la GUI: se puede configurar desde los clientes aun con la ventana
+    # cerrada. Si ya habia uno, el script nuevo mata al viejo (logs\config_listener.pid).
+    listener = os.path.join(d, "config_listener.ps1")
+    if os.path.isfile(listener):
+        lanzar_oculto(listener, d)
+
+
+def _pedir_local(cmd, espera=1.5):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(espera)
+    try:
+        s.sendto(json.dumps({"cmd": cmd}).encode(), ("127.0.0.1", 9200))
+        return json.loads(s.recvfrom(4096)[0])
+    except (OSError, ValueError):
+        return None
+    finally:
+        s.close()
+
+
+def arrancar_pc(d, mostrar):
+    """Si ya corre, solo muestra su ventana. Si no, lo arranca (pythonw, sin consola) y, si mostrar, abre la
+    ventana en cuanto conteste (arranca oculta junto al reloj)."""
+    estado = _pedir_local("get_config")
+    if estado is not None and estado.get("modo") == "pc":
+        if mostrar:
+            _pedir_local("mostrar_ventana")
+        return True
+    pythonw = buscar_pythonw()
+    if not pythonw:
+        mensaje("No encontre Python 3.12 (python.org, para todos los usuarios): el servidor de PC lo necesita.",
+                0x10)
+        return False
+    lanzar([pythonw, os.path.join(d, "pc_server.py")], d, CREATE_NO_WINDOW)
+    if mostrar:
+        fin = time.monotonic() + 20
+        while time.monotonic() < fin:
+            time.sleep(1)
+            if _pedir_local("get_config", 1) is not None:
+                time.sleep(2)   # la ventana se arma un momento despues de abrir el puerto
+                _pedir_local("mostrar_ventana")
+                break
+    return True
 
 
 def main():
-    aqui = app_dir()
-    gui_ps1 = os.path.join(aqui, "start_server_gui.ps1")
-    listener_ps1 = os.path.join(aqui, "config_listener.ps1")
-
-    if not os.path.isfile(gui_ps1):
-        # Sin consola (windowed): un cuadro de mensaje via WinForms es la
-        # unica forma de avisar que algo esta mal, en vez de fallar en
-        # silencio total.
+    """Si el servidor se quedo como hijo de este proceso (tarea programada, ver lanzar), al terminar puede
+    haber dejado elegir.flag: lo pidio "Cambiar tipo de servidor" en su ventana. Entonces se muestra la
+    eleccion aqui mismo y se arranca el elegido (un .exe nuevo moriria junto con el Job de este)."""
+    args = [a.lower() for a in sys.argv[1:]]
+    flag = os.path.join(app_dir(), "elegir.flag")
+    while True:
         try:
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(
-                0,
-                f"No encontre start_server_gui.ps1 junto a este .exe:\n{aqui}",
-                "PS3 Remote Play - Servidor",
-                0x10,  # MB_ICONERROR
-            )
-        except Exception:
+            _main(args)
+        except Exception as e:
+            import traceback
+            log("ERROR: " + traceback.format_exc())
+            mensaje(f"El lanzador del servidor fallo: {e}\n(detalles en lanzador.log)", 0x10)
+        if not HIJOS_A_ESPERAR:
+            return
+        for p in HIJOS_A_ESPERAR:
+            p.wait()
+        del HIJOS_A_ESPERAR[:]
+        if not os.path.exists(flag):
+            return
+        try:
+            os.remove(flag)
+        except OSError:
             pass
-        return
+        log("el servidor pidio cambiar de tipo")
+        args = ["--elegir"]
 
-    # CREATE_BREAKAWAY_FROM_JOB (2026-09-11): imprescindible. Un .exe --onefile
-    # de PyInstaller envuelve su proceso extraido en un Job Object de Windows
-    # con JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE (para poder borrar sus archivos
-    # temporales al salir). Los procesos hijos heredan esa membresia del job
-    # por defecto - asi que sin este flag, en cuanto ESTE lanzador termina
-    # (que es casi al instante, por diseno: es "fire and forget"), Windows
-    # mata TAMBIEN al powershell/GUI que acaba de lanzar, y a todo lo que ese
-    # GUI lance despues (el .bat, ffmpeg). El .bat viejo (iniciar_servidor.bat)
-    # nunca tuvo este problema porque cmd.exe no envuelve nada en un Job Object.
-    #
-    # SIN CREATE_NO_WINDOW (2026-09-11, segunda vuelta): la primera version de
-    # este lanzador SI lo llevaba, y el servidor fallaba siempre al arrancar
-    # por la GUI (ffmpeg nunca llegaba a aparecer, sin log ni nada - fallaba
-    # ANTES de la deteccion de la capturadora). CREATE_NO_WINDOW le dice a
-    # Windows que no le asigne NINGUNA consola al proceso hijo. El
-    # iniciar_servidor.bat viejo, en cambio, usa `start ... -WindowStyle
-    # Hidden`, que SI asigna una consola real a powershell (solo que oculta).
-    # La deteccion automatica de la capturadora dentro del motor (start_
-    # server_stream.bat) corre otros procesos de consola y lee su salida; sin
-    # ninguna consola de verdad detras (ni siquiera oculta), esa lectura
-    # aparentemente no funciona igual. Quitando CREATE_NO_WINDOW, Windows le
-    # asigna una consola nueva a powershell (como no la hereda de este exe,
-    # que no tiene ninguna), y "-WindowStyle Hidden" la oculta exactamente
-    # igual que hacia el .bat - mismo resultado visual, sin la consola
-    # faltante.
-    # DESCRIPTORES EXPLICITOS (2026-09-11, la causa de verdad). Un .exe
-    # compilado con --windowed no tiene consola, y por lo tanto sus
-    # sys.stdin/stdout/stderr son None: los descriptores estandar del proceso
-    # son INVALIDOS. Si se lanza un hijo sin decir nada, Windows le pasa esos
-    # descriptores invalidos, y los hereda TODA la cadena de abajo
-    # (powershell -> cmd del motor -> ffmpeg). La ventana del GUI sobrevive
-    # (WinForms no usa stdio), por eso se veia normal y se podia escribir la
-    # IP; pero el motor, que si lee y escribe salida, se colgaba en el acto,
-    # antes siquiera de crear su archivo de log. Ese era exactamente el
-    # sintoma: "no arranco en 15 segundos" y ni un log de esa corrida.
-    #
-    # Comprobado con una sonda compilada igual (env_probe.py): con los
-    # descriptores heredados el arranque se cuelga; con DEVNULL explicito,
-    # arranca. El iniciar_servidor.bat viejo nunca tuvo el problema porque
-    # cmd.exe siempre tiene descriptores de consola validos que heredar.
-    #
-    # DEVNULL no pierde nada de diagnostico: el motor escribe sus propios
-    # logs a logs\ffmpeg-*.log y logs\progreso-*.log por su cuenta.
-    lanzar_oculto(gui_ps1, aqui)
 
-    # config_listener.ps1 (2026-09-11): deja configurar modo/IP del servidor
-    # en remoto desde el menu de la Deck, aun con esta ventana cerrada -
-    # por eso se lanza APARTE de la GUI, no dentro de ella (ver la nota
-    # larga en config_listener.ps1 sobre por que). Si ya hay uno corriendo de
-    # un lanzamiento anterior, el propio script nuevo lo mata al arrancar
-    # (PID guardado en logs\config_listener.pid) - un bug real en produccion
-    # dejo un proceso viejo con $udp en null corriendo para siempre, y como
-    # CREATE_BREAKAWAY_FROM_JOB lo hace sobrevivir a quien lo lanzo, nada de
-    # afuera lo mataba solo. Contar con que el puerto ocupado lo frene ya no
-    # alcanza: por eso ahora se mata la instancia anterior explicitamente en
-    # vez de solo confiar en que el bind falle.
-    if os.path.isfile(listener_ps1):
-        lanzar_oculto(listener_ps1, aqui)
-
-    # Fire-and-forget, igual que el "start" del .bat viejo: este proceso
-    # termina enseguida, el servidor sigue vivo por su cuenta.
+def _main(args):
+    aqui = app_dir()
+    tipo = leer_tipo(aqui)
+    log(f"arranque {sys.argv[1:]} tipo guardado={tipo}")
+    if tipo is None or "--elegir" in args:
+        nuevo = elegir(aqui, actual=tipo)
+        if nuevo is None:
+            if tipo is None:
+                return          # se cerro sin elegir y no habia nada guardado
+        else:
+            tipo = nuevo
+            guardar_tipo(aqui, tipo)
+    if tipo == CONSOLAS:
+        d = carpeta_consolas(aqui)
+        if not d:
+            mensaje(f"No encontre start_server_gui.ps1 junto a este .exe ni en consolas\\:\n{aqui}", 0x10)
+            return
+        arrancar_consolas(d)
+    else:
+        d = carpeta_pc(aqui)
+        if not d:
+            mensaje(f"No encontre pc_server.py junto a este .exe ni en pc\\:\n{aqui}", 0x10)
+            return
+        arrancar_pc(d, mostrar="--inicio" not in args)
 
 
 if __name__ == "__main__":
