@@ -44,11 +44,15 @@ log = logging.getLogger("pc")
 PUERTO_CONFIG = 9200
 PUERTO_MANDO = int(os.environ.get("PS3RP_PC_PUERTO_MANDO", "9000"))
 PUERTO_VIDEO = int(os.environ.get("PS3RP_PC_PUERTO_VIDEO", "5000"))
-# Captura "solo cuadros nuevos" (dup_frames=0) revisando hasta FPS veces por segundo. Con muestreo fijo a 60
-# contra una pantalla de 144 Hz se repetian/saltaban cuadros: 51 distintos por segundo de un juego a 60 (medido
-# 2026-10-05, "se ve con pocos fps"). Con tope 90: 58.8. NVENC reparte el bitrate segun ese tope, asi que el
-# valor que se le pasa se escala para que a 60 fps reales salgan ~BITRATE_MBPS (medido: 15M con tope 90 = 10 Mbps).
+# Captura a FPS cuadros por segundo. Con muestreo fijo a 60 contra una pantalla de 144 Hz se repetian/saltaban
+# cuadros: 51 distintos por segundo de un juego a 60 (medido 2026-10-05, "se ve con pocos fps"); a 90 cada
+# cuadro de un juego a 60 dura mas que el intervalo de muestreo y ninguno se pierde.
+# DUP_FRAMES=1 (default): manda cuadro aunque la pantalla no cambie. Con 0 ("solo cuadros nuevos", probado la
+# noche del 2026-10-05) el escritorio quieto no producia NADA: ni video ni audio (el muxer espera al video), la
+# tableta se quedaba sin datos y con la imagen congelada (el cursor solo no cuenta como cambio).
+# NVENC reparte el bitrate segun FPS, asi que se escala para que a 60 fps reales salgan ~BITRATE_MBPS.
 FPS = int(os.environ.get("PS3RP_PC_FPS", "90"))
+DUP_FRAMES = os.environ.get("PS3RP_PC_DUP_FRAMES", "1") == "1"
 BITRATE_MBPS = float(os.environ.get("PS3RP_PC_BITRATE_MBPS", "15"))
 BITRATE = f"{BITRATE_MBPS * FPS / 60:.1f}M"
 SIN_MANDO_S = 60
@@ -175,7 +179,7 @@ class Transmision:
             # misma GPU y NVENC toma los cuadros de D3D11 directo -> 60 fps. En la Intel (escritorio) hay
             # que bajarlos a memoria (hwdownload) y eso lo deja en ~40 fps.
             self.directo = "NVIDIA" in gpu_de_la_pantalla().upper() and not self.directo_falla
-            captura = f"ddagrab=output_idx=0:framerate={FPS}:dup_frames=0:draw_mouse=1"
+            captura = f"ddagrab=output_idx=0:framerate={FPS}:dup_frames={int(DUP_FRAMES)}:draw_mouse=1"
             if not self.directo:
                 captura += ",hwdownload,format=bgra"
             cmd = [
@@ -632,9 +636,28 @@ TRANSMISION = None
 MANDO = None
 
 
+def matar_ffmpeg_huerfanos():
+    """Si la instancia anterior murio a la fuerza (Stop-Process, reinicio de la tarea) su ffmpeg SIGUE VIVO
+    mandando video a la tableta. Con el nuevo encima, la tableta recibe dos transmisiones revueltas en el mismo
+    puerto (paso el 2026-10-05: tirones y fps raros por ~10 min). Se reconocen por el archivo de progreso."""
+    marca = os.path.join(CARPETA, "ffmpeg_progreso.log").replace("'", "''")
+    ps = ("Get-CimInstance Win32_Process -Filter \"Name='ffmpeg.exe'\" | "
+          f"Where-Object {{ $_.CommandLine -like '*{marca}*' }} | "
+          "ForEach-Object { Stop-Process -Id $_.ProcessId -Force; $_.ProcessId }")
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
+                           timeout=20, creationflags=subprocess.CREATE_NO_WINDOW)
+        pids = r.stdout.split()
+        if pids:
+            log.warning("ffmpeg huerfanos de una instancia anterior detenidos: %s", ", ".join(pids))
+    except Exception:
+        log.exception("no se pudieron revisar ffmpeg huerfanos")
+
+
 def main():
     global TRANSMISION, MANDO
     log.info("=== servidor de PC iniciando ===")
+    matar_ffmpeg_huerfanos()
     restaurar_salida()   # si la vez anterior se cayo transmitiendo, la laptop se quedo sin sonido
     TRANSMISION = transmision = Transmision()
     MANDO = mando = Mando()

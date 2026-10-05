@@ -33,6 +33,9 @@ Register-ScheduledTask -TaskName 'PS3RP PC Server' -Action $accion -Trigger $dis
 # Arrancarlo ya (si habia uno corriendo, se reemplaza)
 Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { $_.CommandLine -like '*pc_server.py*' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+# y su ffmpeg: no muere con el y seguiria mandando video a la tableta (el servidor nuevo tambien lo revisa)
+Get-CimInstance Win32_Process -Filter "Name='ffmpeg.exe'" | Where-Object { $_.CommandLine -like '*ffmpeg_progreso.log*' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 # sin esta pausa Windows todavia da la tarea por "en ejecucion" e ignora el arranque (quedaba sin servidor)
 Start-Sleep -Seconds 2
 Start-ScheduledTask -TaskName 'PS3RP PC Server'

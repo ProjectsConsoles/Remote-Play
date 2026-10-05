@@ -11,7 +11,7 @@ import android.view.Surface
  *
  * Igual que el modo GStreamer de la Deck y la Ally: nada espera a un reloj. Cada cuadro se entrega
  * apenas llega y se dibuja apenas sale, y si el decodificador no tiene lugar para uno nuevo se
- * TIRA (y se espera al siguiente IDR) en vez de acumular retraso.
+ * TIRA (y se espera al siguiente cuadro con SPS/PPS, ver [puedeArrancar]) en vez de acumular retraso.
  */
 class VideoPlayer(
     private val superficie: Surface,
@@ -62,14 +62,14 @@ class VideoPlayer(
     fun encolar(buf: ByteArray, off: Int, size: Int, ptsUs: Long) {
         val c = codec ?: return
         if (!sincronizado) {
-            if (!empiezaEnIdr(buf, off, size)) return
+            if (!puedeArrancar(buf, off, size)) return
             sincronizado = true
         }
         try {
             val i = c.dequeueInputBuffer(0)
             if (i < 0) {
                 descartados++
-                sincronizado = false // se perdio un cuadro: hay que reanudar en el proximo IDR
+                sincronizado = false // se perdio un cuadro: reanudar en el proximo que traiga SPS/PPS
                 return
             }
             val entrada = c.getInputBuffer(i) ?: return
@@ -93,7 +93,7 @@ class VideoPlayer(
         }
     }
 
-    /** Tras un corte largo de red: descartar lo que haya y esperar al proximo IDR. */
+    /** Tras un corte largo de red: descartar lo que haya y esperar al proximo cuadro con SPS/PPS. */
     fun reiniciarSincronia() {
         sincronizado = false
     }
@@ -161,24 +161,31 @@ class VideoPlayer(
     companion object {
         const val TIRON_NS = 50_000_000L
 
-        /** El cuadro trae SPS (NAL 7) y un IDR (NAL 5): el decodificador puede arrancar aca. */
-        fun empiezaEnIdr(b: ByteArray, off: Int, size: Int): Boolean {
+        /**
+         * El decodificador puede (re)arrancar en este cuadro: trae la configuracion del video (SPS = NAL 7
+         * y PPS = NAL 8). Con GOP normal eso solo viene en los IDR. Con intra-refresh (servidores desde
+         * 2026-10-05) solo el PRIMER cuadro es IDR, pero el servidor repite SPS/PPS en todos: exigir un IDR
+         * dejaba la imagen congelada para siempre tras cualquier corte (p. ej. la pantalla de la PC quieta
+         * unos segundos) aunque el video siguiera llegando. Arrancando aca la imagen se limpia sola en lo
+         * que dura un ciclo de refresco (menos de 1 s).
+         */
+        fun puedeArrancar(b: ByteArray, off: Int, size: Int): Boolean {
             var sps = false
-            var idr = false
+            var pps = false
             var i = off
             val fin = off + size - 3
             while (i < fin) {
                 if (b[i].toInt() == 0 && b[i + 1].toInt() == 0 && b[i + 2].toInt() == 1) {
                     val tipo = b[i + 3].toInt() and 0x1F
                     if (tipo == 7) sps = true
-                    if (tipo == 5) idr = true
-                    if (sps && idr) return true
+                    if (tipo == 8) pps = true
+                    if (sps && pps) return true
                     i += 3
                 } else {
                     i++
                 }
             }
-            return sps && idr
+            return false
         }
     }
 }

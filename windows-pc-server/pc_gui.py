@@ -127,7 +127,7 @@ class Ventana:
         ui.disponer(f2, [self.t_mando, self.t_tableta], esc)
 
         pie = ui.fila(marco, esc, expandir=False)
-        bkw = dict(tam_titulo=18, tam_detalle=12, tam_icono=40, horizontal=True, alto=esc.px(84))
+        bkw = dict(borde_foco=False, tam_titulo=18, tam_detalle=12, tam_icono=40, horizontal=True, alto=esc.px(84))
         self.b_detener = ui.Mosaico(pie, esc, iconos, "power", "Detener transmisión", "La tableta se queda sin video",
                                     ui.ROJO, on_a=self.detener, **bkw)
         b_ocultar = ui.Mosaico(pie, esc, iconos, "back", "Ocultar", "Sigue corriendo junto al reloj",
@@ -135,10 +135,24 @@ class Ventana:
         b_salir = ui.Mosaico(pie, esc, iconos, "exit", "Salir", "Apaga el servidor", ui.ROJO_OSCURO,
                              on_a=self.salir, **bkw)
         ui.disponer(pie, [self.b_detener, b_ocultar, b_salir], esc)
+        for b in (self.b_detener, b_ocultar, b_salir):
+            self._con_mouse(b)
 
         self.icono = self._crear_icono()
         self.root.withdraw()            # arranca oculta: solo el icono junto al reloj
         self.root.after(200, self._tic)
+
+    def _con_mouse(self, b):
+        """Los mosaicos se pensaron para el mando de la Deck: aca el mouse los agranda al pasar por encima
+        (como la ventana del server del PS3) y cada clic queda en el log."""
+        b.bind("<Enter>", lambda e: b.poner_foco(b.habilitado))
+        b.bind("<Leave>", lambda e: b.poner_foco(False))
+        accion = b.on_a
+
+        def con_log():
+            self.sv.log.info("ventana: clic en '%s'", b.titulo)
+            accion()
+        b.on_a = con_log
 
     # --- icono junto al reloj (pystray, en su propio hilo) ----------------------------------------
     def _crear_icono(self):
@@ -229,8 +243,12 @@ class Ventana:
         else:
             self.tira.pintar(ui.TENUE, "Esperando a la tableta: en la app, Streaming → PC (juegos de Windows).")
 
+        if self.b_detener.habilitado != transmite:   # sin transmision no hay nada que detener: se atenua
+            self.b_detener.habilitar(transmite)
+            if not transmite:
+                self.b_detener.poner_foco(False)
         self._poner(self.t_video, titulo="Video: " + ("transmitiendo" if transmite else "en espera"))
-        self._poner(self.t_video, detalle=f"Pantalla en {gpu}. Captura de cuadros nuevos hasta {self.sv.FPS} fps, "
+        self._poner(self.t_video, detalle=f"Pantalla en {gpu}. Captura a {self.sv.FPS} fps, "
                                    f"{'directo a NVENC' if t.directo else 'copiada a NVENC'}.")
         if transmite and t.salida_previa is not None:
             self._poner(self.t_audio, detalle=f"Suena solo en la tableta (salida: {self.sv.SALIDA_VIRTUAL}).")

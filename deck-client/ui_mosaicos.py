@@ -170,7 +170,7 @@ class Mosaico(tk.Canvas):
 
     def __init__(self, parent, esc, iconos, icono, titulo, detalle="", color=AZUL, on_a=None,
                  tam_titulo=24, tam_detalle=13, tam_icono=72, color_texto=BLANCO,
-                 interactivo=True, horizontal=False, alto=None, on_click=None):
+                 interactivo=True, horizontal=False, alto=None, on_click=None, borde_foco=True):
         super().__init__(parent, bg=FONDO, highlightthickness=0, bd=0, takefocus=0,
                          height=alto if alto else esc.px(150), width=esc.px(200))
         self.esc = esc
@@ -186,6 +186,7 @@ class Mosaico(tk.Canvas):
         self.on_a = on_a
         self.on_click = on_click  # si se da, el dedo hace esto en vez de on_a (solo enfoca/elige)
         self.interactivo = interactivo
+        self.borde_foco = borde_foco   # False: al enfocar solo crece, sin aclarar el borde (ventanas de servidor)
         self.horizontal = horizontal
         self.habilitado = True
         self.foco = False
@@ -254,7 +255,7 @@ class Mosaico(tk.Canvas):
             return
         color = self.color if self.habilitado else mezclar(self.color, FONDO, 0.55)
         self.coords("forma", *self._puntos_forma(w, h))
-        self.itemconfigure("forma", outline=mezclar(color, BLANCO, self._t))
+        self.itemconfigure("forma", outline=mezclar(color, BLANCO, self._t if self.borde_foco else 0))
 
     def poner_titulo(self, texto):
         self.titulo = texto
@@ -301,7 +302,7 @@ class Mosaico(tk.Canvas):
         grosor = esc.px(4)
         self.create_polygon(
             self._puntos_forma(w, h), smooth=True, fill=color,
-            outline=mezclar(color, BLANCO, self._t), width=grosor, tags="forma")
+            outline=mezclar(color, BLANCO, self._t if self.borde_foco else 0), width=grosor, tags="forma")
         # Encima, el degradado de Android (2026-10-04), metido un borde mas adentro que la forma sin
         # foco: queda un marco del color solido alrededor (el "stroke" de las tarjetas de Android) y
         # la forma de atras sigue creciendo y aclarando su borde al enfocar, sin rehacer la imagen.

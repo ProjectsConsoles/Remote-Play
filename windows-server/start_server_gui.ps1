@@ -196,15 +196,9 @@ namespace PS3RP
             using (GraphicsPath path = Ui.Redondeado(r, radio))
             using (LinearGradientBrush br = new LinearGradientBrush(r, Ui.Mezclar(c, Color.White, 0.16f), c, 90f))
             {
+                // sin borde blanco al enfocar (2026-10-05, el usuario: en el servidor no hace falta ese marco
+                // de los clientes); el foco se nota solo porque la tarjeta crece
                 g.FillPath(br, path);
-                if (t > 0.02f)
-                {
-                    using (Pen p = new Pen(Color.FromArgb((int)(255 * Math.Min(1f, t)), Color.White), 4 * esc))
-                    {
-                        p.LineJoin = LineJoin.Round;
-                        g.DrawPath(p, path);
-                    }
-                }
             }
 
             int pad = (int)((Pad > 0 ? Pad : (Horizontal ? 16 : 22)) * esc);

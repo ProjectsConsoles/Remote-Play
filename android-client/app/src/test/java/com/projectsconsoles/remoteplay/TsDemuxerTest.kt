@@ -72,6 +72,19 @@ class TsDemuxerTest {
     }
 
     @Test
+    fun arrancaSoloEnCuadrosConConfiguracion() {
+        // GOP normal (la muestra: IDR cada 30): solo los IDR traen SPS/PPS -> igual que antes
+        val r = demultiplexar(muestra(), 1316, true)
+        assertEquals(4, r.video.count { VideoPlayer.puedeArrancar(it.bytes, 0, it.bytes.size) })
+        // Intra-refresh con SPS/PPS repetidos: un cuadro P (NAL 1) que los trae SI sirve para arrancar
+        val inicio = byteArrayOf(0, 0, 0, 1)
+        val conConfig = inicio + byteArrayOf(0x67, 1, 2) + inicio + byteArrayOf(0x68, 3) + inicio + byteArrayOf(0x41, 9, 9)
+        assertTrue(VideoPlayer.puedeArrancar(conConfig, 0, conConfig.size))
+        val soloCuadro = inicio + byteArrayOf(0x41, 9, 9)
+        assertTrue(!VideoPlayer.puedeArrancar(soloCuadro, 0, soloCuadro.size))
+    }
+
+    @Test
     fun cuentaLosPaquetesPerdidos() {
         val completa = muestra()
         assertEquals(0L, demultiplexar(completa, 1316, true).demux.perdidosTs)

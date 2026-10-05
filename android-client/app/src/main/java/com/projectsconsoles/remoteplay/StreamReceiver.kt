@@ -43,7 +43,7 @@ class StreamReceiver(
                 val ahora = System.nanoTime()
                 if (paquetes > 0 && ahora - ultimoPaqueteNs > HUECO_NS) {
                     // Corte largo (p. ej. el servidor se reinicio): lo armado a medias ya no sirve
-                    // y el video debe reanudar en el proximo IDR.
+                    // y el video debe reanudar en el proximo cuadro con SPS/PPS (VideoPlayer.puedeArrancar).
                     demux.descartar()
                     alReanudar?.invoke()
                 }
