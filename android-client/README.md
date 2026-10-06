@@ -19,7 +19,7 @@ Los cuadros y el audio se entregan al decodificador apenas llegan, sin reloj de
 sincronía (igual que el modo GStreamer de la Deck): si el decodificador no tiene
 sitio para un cuadro, se tira y se espera al siguiente que traiga la configuración
 del video (SPS/PPS; con intra-refresh el servidor la repite en cada cuadro) en
-vez de acumular retraso. Con **Ritmo parejo** (*Configurar cliente*, +50 ms por
+vez de acumular retraso. Con **Ritmo parejo** (*Configurar cliente*, +83 ms por
 defecto) cada cuadro se muestra según la hora en que se capturó, más un colchón,
 en vez de en cuanto llega: quita los tirones que mete el WiFi.
 
