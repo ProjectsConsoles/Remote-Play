@@ -57,7 +57,8 @@ class ClientConfigActivity : PantallaActivity() {
 
         val ritmo = Ui.mosaicoCiclo(
             this, R.drawable.ic_timer, "Ritmo parejo (menos tirones)",
-            listOf("0" to "Apagado", "20" to "+20 ms", "33" to "+33 ms", "50" to "+50 ms"),
+            listOf("0" to "Apagado", "20" to "+20 ms", "33" to "+33 ms", "50" to "+50 ms",
+                   "66" to "+66 ms", "83" to "+83 ms"),
             { prefs.ritmoParejoMs.toString() }, naranja, compacto,
         ) { prefs.ritmoParejoMs = it.toInt() }
 
