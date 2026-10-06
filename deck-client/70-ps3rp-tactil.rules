@@ -1,0 +1,8 @@
+# Remote Play (modo PC, 2026-10-05): deja que el usuario de la sesion (deck) lea la pantalla
+# tactil de la Steam Deck (FTS3528) para mandar los toques como mouse a la PC (tactil_pc.py).
+# Sin esto /dev/input/eventN es root:input 0660 y deck no esta en el grupo input.
+# Solo LECTURA de toques: no la "agarra", gamescope y Steam la siguen recibiendo igual.
+# Instalar una vez:
+#   sudo cp 70-ps3rp-tactil.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=input
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="FTS3528:00 2808:1015", TAG+="uaccess"

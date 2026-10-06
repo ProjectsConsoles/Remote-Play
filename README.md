@@ -22,8 +22,8 @@ por USB. No es un emulador: la consola sigue siendo la real.
    (`deck-client/`), ROG Ally X (`rog-ally-client/`) y tableta Android
    (`android-client/`).
 4. **Servidor de PC** (`windows-pc-server/`) — aparte de las consolas: transmite
-   los juegos de una PC con Windows a la tableta Android (NVENC, control de
-   Xbox 360 virtual, táctil como mouse). Ver su [`README.md`](windows-pc-server/README.md).
+   los juegos de una PC con Windows a la tableta Android o a la Steam Deck (NVENC,
+   control de Xbox 360 virtual, táctil como mouse). Ver su [`README.md`](windows-pc-server/README.md).
 
 ```
  Consola  --HDMI-->  Capturadora USB  --ffmpeg-->  PC Windows  --UDP/red-->  Handheld
@@ -109,7 +109,7 @@ muestran es simulado.</sub>
 | Servidor Windows | ✅ Funcional |
 | Cliente ROG Ally X (Windows) | ✅ Funcional |
 | Cliente Android | ✅ Funcional (probado en una Samsung Galaxy Tab A9 con mando Bluetooth) |
-| Servidor de PC (juegos de Windows → tableta) | ✅ Funcional (~60 fps; en laptops con Optimus queda un tirón ocasional) |
+| Servidor de PC (juegos de Windows → tableta / Deck) | ✅ Funcional (~60 fps; en laptops con Optimus queda un tirón ocasional) |
 | PS2 (Open PS2 Loader / PADEMU) | ✅ Funcional. Pendiente: el menú de OPL a veces pierde el control por USB unos segundos (se recupera solo). |
 | Xbox 360 (RGH/JTAG + Aurora) | ✅ Funcional vía hiddriver360 |
 | Xbox clásico (el original de 2001) | ✅ Funcional (probado en consola real); necesita cable propio |
@@ -146,6 +146,14 @@ de cada tarjeta también es suave (0.14 s: crece y el borde se ilumina):
   sosteniendo BOOT en la placa.
 - **PS4 / PS5** y **Xbox One / Series** (solo en Streaming): abren las apps
   externas de abajo.
+- **PC (juegos de Windows)** (solo en Streaming, abajo junto a *Volver*): le pide
+  a la PC con el [servidor de PC](windows-pc-server/README.md) que transmita a la
+  Deck. El mando va a la PC (control de Xbox virtual) y **la pantalla táctil es su
+  mouse**: un dedo toca/arrastra, dos dedos clic derecho o scroll. El ESP32 no
+  recibe nada. La IP está en *Configurar cliente → IP de la PC (juegos)*.
+  El táctil necesita, **una sola vez**, un permiso de lectura:
+  `sudo cp deck-client/70-ps3rp-tactil.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=input`
+  (sin él se juega igual, solo sin táctil; el log lo avisa).
 
 ## Apps externas (Deck): PS4 / PS5 y Xbox
 

@@ -175,6 +175,18 @@ VQ_ARRANQUE_INTENTOS="${PS3RP_VQ_ARRANQUE_INTENTOS:-3}"
 
 VENV_PY="$SCRIPT_DIR/ps3rp-env/bin/python3"
 INPUT_SCRIPT="$SCRIPT_DIR/input_client_v3.py"
+
+# Modo PC (2026-10-05, como el boton PC de Android): juegos de una PC con el
+# servidor de PC (windows-pc-server/pc_server.py). El menu ya le pidio a la PC
+# que transmita a esta Deck (set_config por UDP 9200) e imprime "pc"; aqui el
+# mando va a la PC (puerto 9000, mismo JSON que al ESP32: alla es un control de
+# Xbox virtual) y la pantalla tactil es su mouse (tactil_pc.py). El ESP32 no
+# recibe nada. El video llega al puerto 5000 como siempre (H.264 + Opus en TS).
+PC_IP="${PS3RP_PC_IP:-192.168.0.171}"
+PC_PORT=9000
+MODO_PC=0
+TACTIL_SCRIPT="$SCRIPT_DIR/tactil_pc.py"
+TACTIL_PID=""
 MENU_SCRIPT="$SCRIPT_DIR/client_menu.py"
 CONTROL_UI="$SCRIPT_DIR/client_control_ui.py"
 INPUT_PID=""
@@ -262,6 +274,8 @@ cleanup() {
     # cualquier instancia que haya quedado dando vueltas. Es seguro porque
     # solo deberia existir la que lanza este script.
     pkill -f "input_client_v3.py" 2>/dev/null
+    [ -n "$TACTIL_PID" ] && kill -TERM "$TACTIL_PID" 2>/dev/null
+    pkill -f "tactil_pc.py" 2>/dev/null
 
     # La ventana del modo control, si quedo abierta (ej. Steam mando SIGTERM
     # con la ventana todavia en pantalla).
@@ -457,7 +471,26 @@ start_input_client() {
         --rate "$INPUT_RATE" >> "$LOG" 2>&1 &
     INPUT_PID=$!
 
-    check_esp32_latency &
+    # En modo PC no hay ESP32 que medir (y la PC no contesta ping por su firewall).
+    [ "$MODO_PC" = "1" ] || check_esp32_latency &
+}
+
+# Tactil = mouse de la PC (modo PC). Las coordenadas dependen de como se acomoda
+# la imagen (barras/estirar/zoom), que solo cambia con gstreamer; ffplay pone barras.
+start_tactil_pc() {
+    if [ ! -x "$VENV_PY" ] || [ ! -f "$TACTIL_SCRIPT" ]; then
+        echo "AVISO: no encontre tactil_pc.py; sin tactil." | tee -a "$LOG"
+        return
+    fi
+    local ajuste=barras
+    case "$PLAYER" in
+        gstreamer) ajuste="$AJUSTE" ;;
+        gstreamer_lsfg) [ "$AJUSTE" = "estirar" ] && ajuste=estirar ;;
+    esac
+    case "$ajuste" in barras|estirar|zoom) ;; *) ajuste=barras ;; esac
+    pkill -f "tactil_pc.py" 2>/dev/null
+    "$VENV_PY" -u "$TACTIL_SCRIPT" --host "$PC_IP" --port "$PC_PORT" --ajuste "$ajuste" >> "$LOG" 2>&1 &
+    TACTIL_PID=$!
 }
 
 # ------------------------------------------------------------
@@ -489,7 +522,7 @@ if [ -z "$MODO" ]; then
         MENU_RC=$?
         MODO=$(printf '%s\n' "$MENU_SALIDA" \
                | tr -d '\r' \
-               | grep -E '^(streaming|control|chiaki|xbplay)$' \
+               | grep -E '^(streaming|control|chiaki|xbplay|pc)$' \
                | tail -n 1)
         case "$MENU_RC" in
             0)
@@ -607,7 +640,14 @@ if [ "$MODO" = "control" ]; then
     continue
 fi
 
-# Streaming: salir del bucle y seguir con el resto del script.
+if [ "$MODO" = "pc" ]; then
+    MODO_PC=1
+    ESP32_IP="$PC_IP"
+    ESP32_PORT="$PC_PORT"
+    echo "--- $(date) --- modo PC: juegos de $PC_IP (mando y tactil a la PC, sin ESP32)" >> "$LOG"
+fi
+
+# Streaming (o PC): salir del bucle y seguir con el resto del script.
 break
 done
 
@@ -644,6 +684,7 @@ LOG_LINES_BEFORE=$(wc -l < "$LOG" 2>/dev/null || echo 0)
 # que se cierra la ventana, asi que cualquier cosa que vaya despues no correria
 # hasta el final.
 start_input_client
+[ "$MODO_PC" = "1" ] && start_tactil_pc
 
 # -fflags nobuffer -flags low_delay -framedrop -probesize 32
 #   -analyzeduration 0 : minimizan el buffering/probing interno de

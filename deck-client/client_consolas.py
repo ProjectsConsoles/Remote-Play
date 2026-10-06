@@ -15,10 +15,15 @@ consolas del ESP32 (las apps traen su propio control).
 
 import tkinter as tk
 
+import threading
+
 import client_apps
+import client_settings
+import server_udp
 import ui_mosaicos as ui
 
 ESPERA_SALIDA_MS = 900   # lo justo para leer "Modo X enviado" antes de que se cierre el menu
+IP_PC_DEFAULT = "192.168.0.171"   # la laptop; mismo default que PS3RP_PC_IP en client_settings y el .sh
 
 
 class PantallaConsola(ui.Pantalla):
@@ -90,11 +95,23 @@ class PantallaConsola(ui.Pantalla):
             ui.disponer(f, fila_, esc, columnas=por_fila)
 
         pie = ui.fila(marco, esc, expandir=False)
+        abajo = []
+        if modo == "streaming":
+            # PC (2026-10-05, como en Android): juegos de una PC con el servidor de PC (windows-pc-server),
+            # sin capturadora ni ESP32. Solo en streaming: sin video no tiene caso.
+            self.ip_pc = client_settings.leer_guardado().get("PS3RP_PC_IP") or IP_PC_DEFAULT
+            pc = ui.Mosaico(pie, esc, iconos, "computer", "PC (juegos de Windows)", self.ip_pc, ui.AZUL,
+                            on_a=self.elegir_pc, tam_titulo=22, tam_detalle=13, tam_icono=40,
+                            horizontal=True, alto=esc.px(84))
+            self.estados[pc] = (ui.TENUE, f"PC {self.ip_pc}: transmite su pantalla, el mando llega como control "
+                                          "de Xbox y la pantalla táctil es el mouse (cámbiala en Configurar cliente).")
+            abajo.append(pc)
         volver = ui.Mosaico(pie, esc, iconos, "back", "Volver", "B o Escape", ui.GRIS, on_a=app.volver,
                             tam_titulo=22, tam_detalle=13, tam_icono=40, horizontal=True, alto=esc.px(84))
-        ui.disponer(pie, [volver], esc)
+        abajo.append(volver)
+        ui.disponer(pie, abajo, esc)
         self.estados[volver] = (ui.TENUE, "Volver al menú.")
-        self.nav = ui.Navegador(filas + [[volver]], al_cambiar=self._foco)
+        self.nav = ui.Navegador(filas + [abajo], al_cambiar=self._foco)
 
     def _foco(self, mosaico):
         if not self.saliendo:
@@ -123,6 +140,41 @@ class PantallaConsola(ui.Pantalla):
             self.tira.pintar(ui.AVISO, f"No pude mandar el modo {consola} al ESP32; sigo igual "
                                        "(revisa Info si el control no responde).")
         self._salir(self.modo)
+
+    def elegir_pc(self):
+        """Le pide a la PC (protocolo UDP 9200, igual que el server del PS3) que transmita a esta Deck y sale
+        con "pc": start_client_stream.sh abre el streaming con el mando y el tactil apuntando a la PC. Primero
+        get_config (3 s) para avisar rapido si la PC no tiene el servidor corriendo, en vez de esperar los
+        20 s de set_config. En un hilo: set_config tarda lo que la PC en arrancar ffmpeg."""
+        if self.saliendo:
+            return
+        self.saliendo = True
+        ip_pc = self.ip_pc
+        self.tira.pintar(ui.TENUE, f"Pidiéndole a la PC ({ip_pc}) que transmita a esta Deck...")
+        resultado = {}
+
+        def trabajo():
+            mi_ip = server_udp.obtener_ip_local()
+            if not mi_ip:
+                resultado["error"] = (ui.ERROR, "Esta Deck no tiene red.")
+            elif not server_udp.obtener_config(ip_pc)[0] or not server_udp.aplicar_config(ip_pc, mi_ip, "pc")[0]:
+                resultado["error"] = (ui.AVISO, f"La PC {ip_pc} no responde. ¿Está prendida y con el servidor "
+                                                "de PC corriendo?")
+            resultado["listo"] = True
+
+        def revisar():
+            if not resultado.get("listo"):
+                self.app.root.after(100, revisar)
+                return
+            if "error" in resultado:
+                self.saliendo = False
+                self.tira.pintar(*resultado["error"])
+                return
+            self.tira.pintar(ui.OK, "PC lista: arrancando el streaming...")
+            self.app.root.after(ESPERA_SALIDA_MS, lambda: self.app.terminar("pc"))
+
+        threading.Thread(target=trabajo, daemon=True).start()
+        revisar()
 
     def elegir_app(self, resultado, estado):
         if self.saliendo:

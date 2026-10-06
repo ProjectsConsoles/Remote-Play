@@ -50,6 +50,10 @@ CAMPOS = [
     ("PS3RP_PS_COMBO", "Acorde para el boton PS", "texto", "SELECT+R1",
      None, "Ej. SELECT+L1+R1, o 'none' para apagarlo."),
 
+    ("__SECCION__", "PC (juegos de Windows)", None, None, None, None),
+    ("PS3RP_PC_IP", "IP de la PC (juegos)", "texto", "192.168.0.171",
+     None, "La PC con el servidor de PC: transmite su pantalla y el mando llega alla como control de Xbox."),
+
     ("__SECCION__", "Video y latencia", None, None, None, None),
     ("PS3RP_LSFG", "Lossless Scaling (generacion de cuadros, ~/lsfg)", "bool", "0",
      None, "Envuelve el lanzamiento con ~/lsfg. Necesita lsfg-vk instalado y ese script en el home."),
@@ -125,6 +129,7 @@ def guardar(valores: dict):
 ESTILO_SECCION = {
     "Pantalla": ("image", ui.NARANJA),
     "Control remoto (ESP32 -> PS3)": ("gamepad", ui.VERDE),
+    "PC (juegos de Windows)": ("computer", ui.AZUL),   # mismo azul que el boton PC de Android
     "Video y latencia": ("play", ui.AZUL),
     "Watchdog de atasco de video": ("timer", ui.MORADO),
     "Diagnostico": ("info", ui.GRIS),

@@ -96,11 +96,17 @@ ventana no se abra sola), y si no hay nada guardado deja `pc`.
 
 ## Usar
 
-1. En la tableta: **Configurar cliente → IP de la PC (juegos)** (una sola vez).
-2. **Streaming → PC (juegos de Windows)**. La app le avisa a la PC, que empieza
-   a transmitir a la tableta.
-3. Para salir: **L1 + R1 + SELECT + START**. Si la tableta deja de mandar el
-   mando por 60 s, la PC deja de transmitir sola.
+1. En la tableta o en la Steam Deck: **Configurar cliente → IP de la PC (juegos)**
+   (una sola vez).
+2. **Streaming → PC (juegos de Windows)**. El cliente le avisa a la PC, que empieza
+   a transmitir a esa tableta o Deck.
+3. Para salir: **L1 + R1 + SELECT + START** en la tableta; en la Deck, cerrar el
+   juego desde Steam. Si el cliente deja de mandar el mando por 60 s, la PC deja de
+   transmitir sola.
+
+En la Deck la pantalla táctil también es el mouse (`deck-client/tactil_pc.py`;
+necesita una vez la regla `deck-client/70-ps3rp-tactil.rules`, ver el README
+principal). El botón Guía de Xbox es el acorde del botón PS (SELECT+R1).
 
 En la PC, el servidor arranca oculto con un **ícono junto al reloj**: un punto gris
 significa esperando y uno verde, transmitiendo. Al ícono o al acceso directo del
