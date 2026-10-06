@@ -4,6 +4,7 @@ import android.media.MediaCodec
 import android.media.MediaFormat
 import android.os.Build
 import android.os.Process
+import android.util.Log
 import android.view.Surface
 
 /**
@@ -82,19 +83,34 @@ class VideoPlayer(
     }
     private var ultSalidaNs = 0L
 
-    fun iniciar() {
+    private fun formato(conFabricante: Boolean): MediaFormat {
         val formato = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, 1280, 720)
         formato.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 1 shl 20)
         formato.setInteger(MediaFormat.KEY_PRIORITY, 0) // tiempo real
         formato.setInteger(MediaFormat.KEY_OPERATING_RATE, 120)
         if (Build.VERSION.SDK_INT >= 30) formato.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-        // Qualcomm (Snapdragon): modo de baja latencia del decodificador; los demas lo ignoran.
-        try {
+        if (conFabricante) {
+            // Qualcomm (Snapdragon): modo de baja latencia del decodificador; los demas lo ignoran.
             formato.setInteger("vendor.qti-ext-dec-low-latency.enable", 1)
-        } catch (_: Exception) {
+            // MediaTek (la Tab A9, c2.mtk.avc.decoder): su baja latencia no es una llave vendor.* sino
+            // "vdec-lowlatency" (OMX.MTK.index.param.video.LowLatencyDecode), la misma que pone Moonlight.
+            formato.setInteger("vdec-lowlatency", 1)
         }
-        val c = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-        c.configure(formato, superficie, null, 0)
+        return formato
+    }
+
+    fun iniciar() {
+        var c = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        try {
+            c.configure(formato(true), superficie, null, 0)
+        } catch (e: Exception) {
+            // algun decodificador rechaza llaves que no conoce: otra vez sin las de fabricante
+            Log.w("PS3RP", "configure con llaves de baja latencia fallo, sin ellas", e)
+            c.release()
+            c = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+            c.configure(formato(false), superficie, null, 0)
+        }
+        Log.i("PS3RP", "decodificador ${c.name}")
         c.start()
         codec = c
         corriendo = true

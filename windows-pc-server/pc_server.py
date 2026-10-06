@@ -326,6 +326,7 @@ class Transmision:
             self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE if abrir_audio else subprocess.DEVNULL,
                                          stdout=subprocess.DEVNULL, stderr=err,
                                          creationflags=subprocess.CREATE_NO_WINDOW)
+            prioridad_alta(self.proc)
             self.destino = ip
             self.inicio = time.monotonic()
             if abrir_audio:
@@ -552,6 +553,16 @@ def _pad_paciente(vg):
 # ------------------------------------------------------------------------------------------------
 _MOVE, _ABS = 0x0001, 0x8000
 _LDOWN, _LUP, _RDOWN, _RUP, _WHEEL = 0x0002, 0x0004, 0x0008, 0x0010, 0x0800
+
+
+def prioridad_alta(proc):
+    """ffmpeg con prioridad de CPU alta, como Sunshine con su proceso. Sunshine ademas sube su prioridad de GPU
+    (D3DKMTSetProcessSchedulingPriorityClass), pero Windows solo deja hacerlo al propio proceso (con el handle de
+    ffmpeg: 0xC000000D, y no se hereda); meter la llamada dentro de ffmpeg funciono pero Defender lo marca como
+    VirTool:Python/Empium (2026-10-05), asi que no se hace."""
+    import ctypes
+    if not ctypes.windll.kernel32.SetPriorityClass(int(proc._handle), 0x80):   # HIGH_PRIORITY_CLASS
+        log.warning("SetPriorityClass de ffmpeg fallo (%s)", ctypes.windll.kernel32.GetLastError())
 
 
 def _send_input(flags, x=None, y=None, datos=0):
