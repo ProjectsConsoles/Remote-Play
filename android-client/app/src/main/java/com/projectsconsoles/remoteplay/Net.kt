@@ -73,6 +73,9 @@ object ServerClient {
 
     fun detenerServidor(ip: String) = preguntar(ip, JSONObject().put("cmd", "stop_server"), TIMEOUT_APLICAR_MS)
 
+    /** Solo el servidor de PC (pc_server.py): lo deja como recien abierto, sin transmitir. */
+    fun reiniciarServidorPc(ip: String) = preguntar(ip, JSONObject().put("cmd", "reiniciar_servidor"), TIMEOUT_APLICAR_MS)
+
     /** clave del servidor -> nombre para mostrar (los mismos de la Deck). */
     val MODOS: List<Pair<String, String>> = listOf(
         "mjpeg720" to "1280x720 - MJPEG (recomendado)",

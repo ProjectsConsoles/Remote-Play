@@ -9,6 +9,7 @@ Tres partes, todas en este proceso:
         {"cmd": "get_config"}                    -> estado
         {"cmd": "set_config", "ip": ..., ...}    -> transmitir a esa IP (reinicia si ya transmitia)
         {"cmd": "stop_server"}                   -> dejar de transmitir
+        {"cmd": "reiniciar_servidor"}            -> como recien abierto (boton de la tableta, ver reiniciar)
   2. Transmision: ffmpeg captura la pantalla con ddagrab (Desktop Duplication) y la codifica con NVENC
      con los MISMOS ajustes de baja latencia del servidor del PS3 (start_server_stream.bat): H.264 p1 ull,
      sin B-frames, intra-refresh, Opus lowdelay de 5 ms, MPEG-TS con -pes_payload_size 0 por UDP al puerto
@@ -510,6 +511,12 @@ class Mando:
             self.pad.reset()
             self.pad.update()
 
+    def recrear(self):
+        """Quita el control virtual (su __del__ lo saca de ViGEmBus); el siguiente paquete crea uno nuevo."""
+        self.soltar()
+        self.pad = None
+        self._intento = 0.0
+
 
 def _pad_paciente(vg):
     """VX360Gamepad que ESPERA a que el driver lo conecte. El de vgamepad revisa vigem_target_is_attached
@@ -677,6 +684,9 @@ def bucle_config(transmision, mando):
             elif c == "stop_server":
                 transmision.detener()
                 resp["aplicado"] = "detenido"
+            elif c == "reiniciar_servidor":
+                reiniciar(transmision, mando)
+                resp["aplicado"] = "reiniciado"
             elif c == "mostrar_ventana" and origen[0] == "127.0.0.1":
                 # el acceso directo del escritorio (abrir_servidor.pyw), solo desde esta misma PC
                 if VENTANA_COLA is not None:
@@ -695,6 +705,12 @@ def bucle_config(transmision, mando):
 # ------------------------------------------------------------------------------------------------
 # Relevo: ffmpeg -> 127.0.0.1 -> tableta, tirando paquetes en vez de caerse
 # ------------------------------------------------------------------------------------------------
+# Paquete TS nulo (PID 0x1FFF, solo relleno) y cada cuanto se manda si no sale video (menos que el corte de
+# 1 s con el que la tableta da por perdido lo que estaba armando, StreamReceiver.HUECO_NS).
+PAQUETE_NULO = bytes([0x47, 0x1F, 0xFF, 0x10]) + b"\xff" * 184
+SIGO_AQUI_S = 0.5
+
+
 def bucle_relevo(transmision):
     """Reenvia a la tableta lo que ffmpeg manda a PUERTO_RELEVO. Si Windows contesta que el buffer de envio
     esta lleno (WSAENOBUFS, la red se atoro un momento) el paquete se TIRA y se sigue: en la tableta se ve un
@@ -705,11 +721,20 @@ def bucle_relevo(transmision):
     entrada.bind(("127.0.0.1", PUERTO_RELEVO))
     salida = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     salida.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8 << 20)
+    entrada.settimeout(SIGO_AQUI_S)
     log.info("relevo de video: escuchando 127.0.0.1:%s", PUERTO_RELEVO)
     tirados = 0
     ultimo_aviso = 0.0
     while True:
-        datos = entrada.recv(65536)
+        try:
+            datos = entrada.recv(65536)
+        except socket.timeout:
+            # Pantalla quieta (Steam sin moverse): con dup_frames=0 ffmpeg no saca nada y la tableta contaba
+            # "Sin video desde hace N s" hasta que un toque movia el cursor (reportado 2026-10-17). Mientras
+            # ffmpeg siga vivo se manda un paquete TS nulo: la tableta lo ignora pero sabe que seguimos.
+            datos = PAQUETE_NULO
+            if not transmision.corriendo():
+                continue
         destino = transmision.destino
         if not destino:
             continue
@@ -791,6 +816,18 @@ def matar_ffmpeg_huerfanos():
             log.warning("ffmpeg huerfanos de una instancia anterior detenidos: %s", ", ".join(pids))
     except Exception:
         log.exception("no se pudieron revisar ffmpeg huerfanos")
+
+
+def reiniciar(transmision, mando):
+    """Boton "Reiniciar servidor de PC" de la tableta (pedido 2026-10-17): deja el servidor como recien abierto
+    sin cerrar el proceso (el lanzador espera a este proceso: si saliera, nadie lo volveria a abrir). Detiene
+    la transmision (regresa audio y brillo), mata ffmpeg colgados y vuelve a crear el control virtual. No
+    vuelve a transmitir: la tableta lo pide de nuevo al elegir PC."""
+    log.info("=== reinicio pedido desde %s ===", transmision.destino or "la red")
+    transmision.detener()
+    transmision.directo_falla = False
+    matar_ffmpeg_huerfanos()
+    mando.recrear()
 
 
 def main():

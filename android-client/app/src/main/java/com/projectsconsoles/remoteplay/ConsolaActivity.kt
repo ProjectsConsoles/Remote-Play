@@ -91,6 +91,9 @@ class ConsolaActivity : PantallaActivity() {
             val pc = Ui.botonIcono(this, R.drawable.ic_computer, "PC (juegos de Windows)", 0xFF2D6CDF.toInt()) { elegirPc() }
             estados[pc] = Ui.TENUE to "PC ${prefs.pcIp}: transmite su pantalla y el mando llega como control de Xbox (cámbiala en Configurar cliente)."
             pie.addView(pc)
+            val reiniciar = Ui.botonIcono(this, R.drawable.ic_refresh, "Reiniciar servidor de PC", 0xFF8A4B14.toInt()) { reiniciarPc() }
+            estados[reiniciar] = Ui.TENUE to "Reinicia el servidor de la PC ${prefs.pcIp} (si se trabó la imagen o el control). Luego elige PC otra vez."
+            pie.addView(reiniciar)
         }
         val volver = Ui.botonIcono(this, R.drawable.ic_back, "Volver", 0xFF2A3441.toInt()) { finish() }
         estados[volver] = Ui.TENUE to "Volver al menú."
@@ -214,6 +217,28 @@ class ConsolaActivity : PantallaActivity() {
                         )
                         finish()
                     }
+                }
+            }
+        }.start()
+    }
+
+    /** Pedido 2026-10-17: reiniciar el servidor de PC desde la tableta sin ir a la laptop. */
+    private fun reiniciarPc() {
+        if (saliendo) return
+        saliendo = true
+        val ipPc = prefs.pcIp
+        tira.pintar(Ui.TENUE, "Reiniciando el servidor de la PC ($ipPc)...")
+        Thread {
+            val resp = ServerClient.reiniciarServidorPc(ipPc)
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                saliendo = false
+                when {
+                    resp is ServerClient.Resp.Error ->
+                        tira.pintar(Ui.AVISO, "La PC $ipPc no responde. ¿Está prendida y con el servidor de PC corriendo?")
+                    resp is ServerClient.Resp.Ok && !resp.json.optBoolean("ok", false) ->
+                        tira.pintar(Ui.ERROR, "La PC no pudo reiniciar: ${resp.json.optString("error", "servidor viejo, sin este comando")}")
+                    else -> tira.pintar(Ui.OK, "Servidor de PC reiniciado. Elige PC para volver a jugar.")
                 }
             }
         }.start()
