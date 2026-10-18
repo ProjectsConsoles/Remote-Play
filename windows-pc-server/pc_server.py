@@ -68,6 +68,9 @@ BITRATE_MBPS = float(os.environ.get("PS3RP_PC_BITRATE_MBPS", "15"))
 BITRATE = f"{BITRATE_MBPS * FPS / 60:.1f}M"
 SIN_MANDO_S = 60
 INTRA_REFRESH = os.environ.get("PS3RP_PC_INTRA_REFRESH", "1") == "1"
+# Cuadros que tarda el intra-refresh en repasar la pantalla completa. Tras perder datos la imagen se ve mal y se
+# limpia de arriba a abajo en ese tiempo: con 60 y el juego a 30 fps eran 2 s ("se barre la pantalla", 2026-10-17).
+CICLO_REFRESCO = int(os.environ.get("PS3RP_PC_CICLO_REFRESCO", "30"))
 # Mientras se transmite, la salida predeterminada pasa a esta "bocina" virtual (la instala Steam) para que
 # el juego no suene en la laptop y se capture de ahi; al terminar se regresa la que estaba. Vacio = no tocar.
 SALIDA_VIRTUAL = os.environ.get("PS3RP_PC_SALIDA_VIRTUAL", "Steam Streaming Speakers")
@@ -141,6 +144,15 @@ def silenciar_laptop():
     except Exception as e:
         log.error("no se pudo cambiar la salida de audio: %s", e)
         return None
+
+
+def salida_es_virtual():
+    """True si la salida predeterminada es SALIDA_VIRTUAL (o si no hay virtual que poner: nada que hacer)."""
+    if not SALIDA_VIRTUAL:
+        return True
+    salidas, actual = _dispositivos_salida()
+    virtual = next((i for n, i in salidas.items() if SALIDA_VIRTUAL.lower() in n.lower()), None)
+    return virtual is None or virtual == actual
 
 
 def restaurar_salida(previa=None):
@@ -264,6 +276,10 @@ class Transmision:
                 raise RuntimeError("no encuentro ffmpeg")
             if self.salida_previa is None:
                 self.salida_previa = silenciar_laptop()
+            else:
+                # Ya estaba puesta, pero algo pudo regresarla a las bocinas de la laptop (2026-10-17, al abrir
+                # el juego): se vuelve a poner sin perder cual era la original.
+                silenciar_laptop()
             oscurecer_pantalla()
             tasa, canales, abrir_audio = _abrir_loopback()
             # Pantalla en la NVIDIA (con un juego abierto, ver bucle_vigia): ddagrab y NVENC estan en la
@@ -306,7 +322,7 @@ class Transmision:
                 # (SPS/PPS): un cliente que empieza a escuchar un instante tarde no decodifica NADA (medido:
                 # 0 cuadros; la tableta se quedaba en "esperando la primera imagen" con audio). Por eso la
                 # configuracion se repite en cada cuadro (global_header + dump_extra, unos bytes por cuadro).
-                cmd += ["-g", "60", "-intra-refresh", "1", "-flags", "+global_header",
+                cmd += ["-g", str(CICLO_REFRESCO), "-intra-refresh", "1", "-flags", "+global_header",
                         "-bsf:v", "dump_extra=freq=all"]
             else:
                 cmd += ["-g", "30"]
@@ -725,6 +741,9 @@ def bucle_relevo(transmision):
     log.info("relevo de video: escuchando 127.0.0.1:%s", PUERTO_RELEVO)
     tirados = 0
     ultimo_aviso = 0.0
+    atasco_inicio = None    # (hora, tirados) del primer paquete tirado del atasco actual
+    ultimo_tirado = 0.0
+    lento_max = 0.0         # sendto mas lento desde el ultimo aviso
     while True:
         try:
             datos = entrada.recv(65536)
@@ -738,14 +757,29 @@ def bucle_relevo(transmision):
         destino = transmision.destino
         if not destino:
             continue
+        t0 = time.monotonic()
         try:
             salida.sendto(datos, (destino, PUERTO_VIDEO))
-        except OSError:
-            tirados += 1
             ahora = time.monotonic()
-            if ahora - ultimo_aviso > 5:
-                log.warning("relevo: red atorada, %s paquetes tirados hasta ahora", tirados)
+            lento_max = max(lento_max, ahora - t0)
+            # Registro de atascos (2026-10-17: la tableta dejaba de recibir 1-3.5 s y luego todo de golpe):
+            # cuando la red se destapa, una linea con cuanto duro y cuanto se tiro.
+            if atasco_inicio is not None and ahora - ultimo_tirado > 0.5:
+                log.warning("relevo: atasco de red de %.1f s, %s paquetes tirados (envio mas lento %.0f ms)",
+                            ultimo_tirado - atasco_inicio[0] + 0.001, tirados - atasco_inicio[1],
+                            lento_max * 1000)
+                atasco_inicio = None
+                lento_max = 0.0
+            elif lento_max > 0.1 and ahora - ultimo_aviso > 5:
+                log.warning("relevo: un envio tardo %.0f ms (red lenta sin tirar paquetes)", lento_max * 1000)
                 ultimo_aviso = ahora
+                lento_max = 0.0
+        except OSError:
+            ahora = time.monotonic()
+            if atasco_inicio is None:
+                atasco_inicio = (ahora, tirados)
+            tirados += 1
+            ultimo_tirado = ahora
 
 
 # ------------------------------------------------------------------------------------------------
@@ -778,9 +812,21 @@ def bucle_vigia(transmision):
     transmite, se reinicia ffmpeg (corte de 1-2 s); tambien si ffmpeg se murio solo."""
     gpu = gpu_de_la_pantalla()
     log.info("pantalla en: %s", gpu)
+    vuelta = 0
     while True:
         time.sleep(1)
+        vuelta += 1
         try:
+            # Cada 2 s: si algo regreso la salida de audio a las bocinas de la laptop mientras se transmite
+            # (paso el 2026-10-17 al abrir el juego: sonaba en la laptop Y en la tableta), se vuelve a poner
+            # la virtual y se reinicia la captura para que el audio salga otra vez de ahi.
+            if vuelta % 2 == 0 and transmision.corriendo() and transmision.destino and not salida_es_virtual():
+                # silenciar_laptop devuelve None si no pudo cambiarla: entonces no reiniciar (seria cada 2 s)
+                if silenciar_laptop() is not None:
+                    log.warning("algo regreso la salida de audio a la laptop: otra vez %s y captura reiniciada",
+                                SALIDA_VIRTUAL)
+                    transmision.iniciar(transmision.destino)
+                    continue
             ahora = gpu_de_la_pantalla()
             cambio = ahora and ahora != gpu
             if cambio:

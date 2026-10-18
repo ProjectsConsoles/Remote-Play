@@ -365,9 +365,9 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
                 Log.i(
                     "PS3RP-STATS",
                     String.format(
-                        Locale.US, "fps %.1f entrada_max %.0f ms salida_max %.0f ms perdidos %d kbps %.0f tirados %d tirones %d pts_max %.0f ms jitter %.0f ms ritmo %d",
+                        Locale.US, "fps %.1f entrada_max %.0f ms salida_max %.0f ms perdidos %d kbps %.0f tirados %d tirones %d pts_max %.0f ms jitter %.0f ms ritmo %d saltados %d",
                         tasaCuadros, huecoEntradaMs, huecoSalidaMs, perdidosVentana, tasaKbps, v.descartados, v.tirones,
-                        ptsHuecoMs, jitterMs, prefs.ritmoParejoMs,
+                        ptsHuecoMs, jitterMs, prefs.ritmoParejoMs, v.saltados,
                     ),
                 )
             }

@@ -39,6 +39,8 @@ class VideoPlayer(
     @Volatile var huecoSalidaMaxNs = 0L
     /** Cuadros dibujados mas de [TIRON_NS] despues del anterior (se ven como un tiron). */
     @Volatile var tirones = 0L
+    /** Cuadros decodificados pero NO dibujados porque llegaron atrasados (ver [ATRASO_MAX_US]). */
+    @Volatile var saltados = 0L
     private var ultEntradaNs = 0L
     // Para separar captura de red: el pts de cada cuadro es la hora en que la PC lo capturo.
     // ptsHuecoMaxUs = mayor hueco entre cuadros SEGUN LA CAPTURA (si ya es dispareja, es el juego o la
@@ -56,10 +58,11 @@ class VideoPlayer(
     private var minAnteriorUs = Long.MAX_VALUE
     private var inicioVentanaNs = 0L
 
-    private fun anotarDesfase(desfase: Long, ahoraNs: Long) {
-        val b = baseUs
-        if (b != Long.MIN_VALUE && desfase - b > 500_000) {
-            // salto grande (el servidor se reinicio y el pts volvio a empezar): olvidar la base vieja
+    private fun anotarDesfase(desfase: Long, ahoraNs: Long, ptsSalto: Boolean) {
+        // Solo un salto del PTS (el servidor se reinicio y volvio a empezar) borra la base. Antes tambien
+        // un desfase 0.5 s mas grande, pero eso es justo lo que pasa tras un hueco de la red (los cuadros
+        // llegan tarde de golpe) y entonces los atrasados se tomaban como la nueva normalidad.
+        if (ptsSalto) {
             minActualUs = Long.MAX_VALUE
             minAnteriorUs = Long.MAX_VALUE
         }
@@ -82,6 +85,12 @@ class VideoPlayer(
         return if (objetivo <= ahora || objetivo - ahora > 200_000_000L) ahora else objetivo
     }
     private var ultSalidaNs = 0L
+
+    private fun atrasado(ptsUs: Long): Boolean {
+        val b = baseUs
+        if (ptsUs < 0 || b == Long.MIN_VALUE) return false
+        return System.nanoTime() / 1000 - (ptsUs + b) > ATRASO_MAX_US + colchonUs
+    }
 
     private fun formato(conFabricante: Boolean): MediaFormat {
         val formato = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, 1280, 720)
@@ -147,13 +156,14 @@ class VideoPlayer(
             ultEntradaNs = t
             if (ptsUs >= 0) {
                 val d = ptsUs - ultPtsUs
+                val ptsSalto = ultPtsUs >= 0 && (d < 0 || d > 5_000_000)
                 // un salto de mas de 1 s (o hacia atras) es un reinicio del servidor: no cuenta
                 if (ultPtsUs >= 0 && d in 0..1_000_000 && d > ptsHuecoMaxUs) ptsHuecoMaxUs = d
                 ultPtsUs = ptsUs
                 val desfase = t / 1000 - ptsUs
                 if (desfase < desfaseMinUs) desfaseMinUs = desfase
                 if (desfase > desfaseMaxUs) desfaseMaxUs = desfase
-                anotarDesfase(desfase, t)
+                anotarDesfase(desfase, t, ptsSalto)
             }
         } catch (e: Exception) {
             errores++
@@ -174,6 +184,13 @@ class VideoPlayer(
             try {
                 val i = c.dequeueOutputBuffer(info, 10_000)
                 when {
+                    i >= 0 && atrasado(info.presentationTimeUs) -> {
+                        // Llego tarde (hueco de la red y luego todo de golpe, 2026-10-17): se decodifica
+                        // para no romper la cadena de cuadros pero no se dibuja; asi la imagen salta al
+                        // presente en vez de pasar lo viejo en camara rapida.
+                        c.releaseOutputBuffer(i, false)
+                        saltados++
+                    }
                     i >= 0 -> {
                         if (colchonUs > 0) {
                             c.releaseOutputBuffer(i, horaDeDibujo(info.presentationTimeUs))
@@ -233,6 +250,8 @@ class VideoPlayer(
 
     companion object {
         const val TIRON_NS = 50_000_000L
+        /** Un cuadro que sale del decodificador con mas de esto de retraso (sobre el colchon) no se dibuja. */
+        const val ATRASO_MAX_US = 250_000L
 
         /**
          * El decodificador puede (re)arrancar en este cuadro: trae la configuracion del video (SPS = NAL 7
