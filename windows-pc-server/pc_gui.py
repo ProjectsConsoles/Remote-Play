@@ -279,7 +279,12 @@ class Ventana:
 
         if transmite:
             fps, mbps = _leer_progreso()
-            extra = " · ".join(x for x in (f"{fps:.0f} fps" if fps else "", f"{mbps:.1f} Mbps" if mbps else "") if x)
+            cal = self.sv.CALIDAD
+            # con el motor PyAV la calidad sube y baja segun la red: se muestra el objetivo de ahora
+            objetivo = (f"calidad {cal.objetivo:.0f}/{self.sv.BITRATE_MBPS:.0f}"
+                        if cal is not None and t.motor == "pyav" else "")
+            extra = " · ".join(x for x in (f"{fps:.0f} fps" if fps else "", f"{mbps:.1f} Mbps" if mbps else "",
+                                           objetivo) if x)
             self.tira.pintar(ui.OK, f"Transmitiendo a {t.destino}" + (f" · {extra}" if extra else ""))
         else:
             self.tira.pintar(ui.TENUE, "Esperando a la tableta: en la app, Streaming → PC (juegos de Windows).")

@@ -213,7 +213,8 @@ class ConsolaActivity : PantallaActivity() {
                                 .putExtra(StreamActivity.EXTRA_CONTROL_IP, ipPc)
                                 .putExtra(StreamActivity.EXTRA_CONTROL_PUERTO, PUERTO_CONTROL_PC)
                                 .putExtra(StreamActivity.EXTRA_FUENTE, "PC $ipPc")
-                                .putExtra(StreamActivity.EXTRA_TACTIL_PC, true),
+                                .putExtra(StreamActivity.EXTRA_TACTIL_PC, true)
+                                .putExtra(StreamActivity.EXTRA_REPORTAR_RED, true),
                         )
                         finish()
                     }

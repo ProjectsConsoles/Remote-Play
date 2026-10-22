@@ -71,6 +71,14 @@ INTRA_REFRESH = os.environ.get("PS3RP_PC_INTRA_REFRESH", "1") == "1"
 # Cuadros que tarda el intra-refresh en repasar la pantalla completa. Tras perder datos la imagen se ve mal y se
 # limpia de arriba a abajo en ese tiempo: con 60 y el juego a 30 fps eran 2 s ("se barre la pantalla", 2026-10-17).
 CICLO_REFRESCO = int(os.environ.get("PS3RP_PC_CICLO_REFRESCO", "30"))
+# Calidad adaptativa (2026-10-22, idea del usuario: "como YouTube, que baja la calidad un momento en vez de
+# pausar"): el video lo codifica motor_video.py (PyAV) en vez de ffmpeg, porque asi el bitrate de NVENC se puede
+# cambiar sin reiniciar. Cuando la red se atora se baja (ver ControlCalidad) y despues se sube poco a poco.
+# "ffmpeg" = el motor de siempre, con calidad fija. Si PyAV no esta instalado o el motor muere al arrancar, se
+# usa ffmpeg solo.
+MOTOR = os.environ.get("PS3RP_PC_MOTOR", "pyav")
+PUERTO_MOTOR = int(os.environ.get("PS3RP_PC_PUERTO_MOTOR", "5098"))   # local: ordenes al motor
+BITRATE_MIN_MBPS = float(os.environ.get("PS3RP_PC_BITRATE_MIN_MBPS", "3"))
 # Mientras se transmite, la salida predeterminada pasa a esta "bocina" virtual (la instala Steam) para que
 # el juego no suene en la laptop y se capture de ahi; al terminar se regresa la que estaba. Vacio = no tocar.
 SALIDA_VIRTUAL = os.environ.get("PS3RP_PC_SALIDA_VIRTUAL", "Steam Streaming Speakers")
@@ -255,6 +263,8 @@ class Transmision:
         self.salida_previa = None
         self.directo_falla = False   # el camino directo a NVENC fallo una vez: ya no se intenta
         self.directo = False
+        self.pyav_falla = False      # motor_video.py murio al arrancar: ffmpeg desde ahora
+        self.motor = "ffmpeg"        # el que esta corriendo: "pyav" (calidad ajustable) o "ffmpeg"
 
     def corriendo(self):
         return self.proc is not None and self.proc.poll() is None
@@ -270,9 +280,13 @@ class Transmision:
             if self.directo and self.murio() and time.monotonic() - self.inicio < 5:
                 log.warning("el camino directo a NVENC fallo: se usa hwdownload desde ahora")
                 self.directo_falla = True
+            if self.motor == "pyav" and self.murio() and time.monotonic() - self.inicio < 5:
+                log.warning("motor_video.py fallo al arrancar (ver motor_video.log): se usa ffmpeg desde ahora")
+                self.pyav_falla = True
             self._detener(restaurar_audio=False)   # reinicio: la salida virtual se queda puesta
+            usar_pyav = MOTOR == "pyav" and not self.pyav_falla and pyav_instalado()
             ffmpeg = buscar_ffmpeg()
-            if not ffmpeg:
+            if not ffmpeg and not usar_pyav:
                 raise RuntimeError("no encuentro ffmpeg")
             if self.salida_previa is None:
                 self.salida_previa = silenciar_laptop()
@@ -337,7 +351,21 @@ class Transmision:
                 # atoraba ffmpeg se CERRABA con "Error number -10055" (WSAENOBUFS) aun con buffer de 4 MB.
                 f"udp://127.0.0.1:{PUERTO_RELEVO}?pkt_size=1316&buffer_size=4194304",
             ]
-            log.info("ffmpeg -> %s:%s (%s fps, %s, audio=%s, %s): %s", ip, PUERTO_VIDEO, FPS, BITRATE,
+            if usar_pyav:
+                # Lo mismo de arriba pero con PyAV (motor_video.py), para poder cambiar la calidad en caliente.
+                # No hay camino directo D3D11 -> NVENC: siempre se copia (hwdownload).
+                self.directo = False
+                cmd = [_python_sin_consola(), os.path.join(CARPETA, "motor_video.py"),
+                       "--destino", f"127.0.0.1:{PUERTO_RELEVO}", "--control", str(PUERTO_MOTOR),
+                       "--fps", str(FPS), "--dup", str(int(DUP_FRAMES)),
+                       "--bitrate", str(int(BITRATE_MBPS * 1e6 * FPS / 60)), "--bufsize", "500000",
+                       "--intra", str(int(INTRA_REFRESH)), "--ciclo", str(CICLO_REFRESCO),
+                       "--max_interleave", MAX_INTERLEAVE_US,
+                       "--audio", f"{tasa},{canales}" if abrir_audio else "",
+                       "--progreso", os.path.join(CARPETA, "ffmpeg_progreso.log"),
+                       "--log", os.path.join(CARPETA, "motor_video.log")]
+            self.motor = "pyav" if usar_pyav else "ffmpeg"
+            log.info("%s -> %s:%s (%s fps, %s, audio=%s, %s): %s", self.motor, ip, PUERTO_VIDEO, FPS, BITRATE,
                      bool(abrir_audio), "directo NVIDIA" if self.directo else "hwdownload", " ".join(cmd))
             err = open(os.path.join(CARPETA, "ffmpeg.log"), "ab")
             self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE if abrir_audio else subprocess.DEVNULL,
@@ -346,6 +374,8 @@ class Transmision:
             prioridad_alta(self.proc)
             self.destino = ip
             self.inicio = time.monotonic()
+            if CALIDAD is not None:
+                CALIDAD.reiniciar()     # cada transmision arranca con la calidad completa
             if abrir_audio:
                 self.hilo_audio = threading.Thread(target=abrir_audio, args=(self.proc,), daemon=True)
                 self.hilo_audio.start()
@@ -375,6 +405,104 @@ class Transmision:
             self.salida_previa = None
         if restaurar_audio:     # (False = reinicio de la captura: la pantalla se queda negra)
             restaurar_brillo()
+
+
+def pyav_instalado():
+    import importlib.util
+    return importlib.util.find_spec("av") is not None and importlib.util.find_spec("numpy") is not None
+
+
+def _python_sin_consola():
+    """pythonw junto al Python que corre este servidor (lo lanza el .exe o la tarea con pythonw)."""
+    import sys
+    w = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    return w if os.path.isfile(w) else sys.executable
+
+
+# ------------------------------------------------------------------------------------------------
+# Calidad adaptativa: bajar el bitrate cuando la red se atora, subirlo cuando se calma
+# ------------------------------------------------------------------------------------------------
+class ControlCalidad:
+    """Como YouTube o Moonlight: ante un atasco se baja la calidad YA (de golpe, al 60 %) y despues se recupera
+    de a poco. Solo con motor_video.py (con ffmpeg no se puede cambiar sin reiniciar).
+
+    Senales de atasco:
+      - la tableta (cada 0.5 s, comando "red"): paquetes perdidos o cuadros llegando desparejos (jitter: la
+        red los esta encolando, es el aviso ANTES de que se pierdan);
+      - el relevo de esta PC: tuvo que tirar paquetes o un envio tardo (la red ni siquiera los acepta).
+    Cada cambio fuerza un cuadro clave en NVENC (ver motor_video.py), por eso hay una pausa minima entre cambios.
+    """
+    BAJAR_A = 0.6           # factor al detectar un atasco
+    PAUSA_BAJAR_S = 1.5     # entre dos bajadas (que se note el efecto de la anterior antes de volver a bajar)
+    CALMA_PARA_SUBIR_S = 5  # sin atascos este tiempo para empezar a subir
+    PAUSA_SUBIR_S = 4       # entre dos subidas
+    PASO_SUBIR = 0.25       # de BITRATE_MBPS por subida: de 3 a 15 Mbps en ~4 pasos
+    PERDIDOS = 2            # paquetes TS perdidos en 0.5 s
+    JITTER_MS = 70          # cuadros llegando desparejos (mas que el colchon de 83 ms se ve como tiron)
+
+    def __init__(self, transmision):
+        self.transmision = transmision
+        self.objetivo = BITRATE_MBPS
+        self.ultimo_cambio = 0.0
+        self.ultimo_atasco = 0.0
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.cerrojo = threading.Lock()
+
+    def activo(self):
+        return self.transmision.motor == "pyav" and self.transmision.corriendo()
+
+    def reiniciar(self):
+        with self.cerrojo:
+            self.objetivo = BITRATE_MBPS
+            self.ultimo_cambio = self.ultimo_atasco = time.monotonic()
+
+    def atasco(self, motivo):
+        if not self.activo():
+            return
+        with self.cerrojo:
+            ahora = time.monotonic()
+            self.ultimo_atasco = ahora
+            if self.objetivo <= BITRATE_MIN_MBPS or ahora - self.ultimo_cambio < self.PAUSA_BAJAR_S:
+                return
+            self._poner(max(BITRATE_MIN_MBPS, self.objetivo * self.BAJAR_A), f"baja ({motivo})")
+
+    def reporte(self, d):
+        """Comando "red" de la tableta (StreamActivity, cada 0.5 s)."""
+        perdidos = int(d.get("perdidos", 0))
+        jitter = float(d.get("jitter_ms", -1))
+        if perdidos >= self.PERDIDOS:
+            self.atasco(f"tableta: {perdidos} paquetes perdidos")
+        elif jitter >= self.JITTER_MS:
+            self.atasco(f"tableta: jitter {jitter:.0f} ms")
+
+    def tic(self):
+        if not self.activo():
+            return
+        with self.cerrojo:
+            ahora = time.monotonic()
+            if (self.objetivo < BITRATE_MBPS and ahora - self.ultimo_atasco > self.CALMA_PARA_SUBIR_S
+                    and ahora - self.ultimo_cambio > self.PAUSA_SUBIR_S):
+                self._poner(min(BITRATE_MBPS, self.objetivo + BITRATE_MBPS * self.PASO_SUBIR), "sube (red tranquila)")
+
+    def _poner(self, mbps, motivo):
+        log.info("calidad: %.1f -> %.1f Mbps, %s", self.objetivo, mbps, motivo)
+        self.objetivo = mbps
+        self.ultimo_cambio = time.monotonic()
+        # -b:v se escala por FPS/60 (NVENC reparte el bitrate segun el tope de fps, ver BITRATE)
+        orden = json.dumps({"bitrate": int(mbps * 1e6 * FPS / 60)}).encode()
+        try:
+            self.sock.sendto(orden, ("127.0.0.1", PUERTO_MOTOR))
+        except OSError as e:
+            log.error("calidad: no se pudo avisar al motor: %s", e)
+
+
+def bucle_calidad(calidad):
+    while True:
+        time.sleep(0.5)
+        try:
+            calidad.tic()
+        except Exception as e:
+            log.error("calidad: %s", e)
 
 
 def _abrir_loopback():
@@ -691,6 +819,11 @@ def bucle_config(transmision, mando):
         except ValueError:
             continue
         c = cmd.get("cmd")
+        if c == "red":
+            # reporte de la tableta cada 0.5 s (calidad adaptativa): no lleva respuesta
+            if CALIDAD is not None:
+                CALIDAD.reporte(cmd)
+            continue
         resp = {"ok": True}
         try:
             if c == "set_config":
@@ -714,7 +847,8 @@ def bucle_config(transmision, mando):
             resp = {"ok": False, "error": str(e)}
         corriendo = transmision.corriendo()
         resp.update({"corriendo": corriendo, "transmitiendo": corriendo, "ip": transmision.destino or "",
-                     "modo": "pc", "modos": ["pc"], "mando_paquetes": mando.paquetes})
+                     "modo": "pc", "modos": ["pc"], "mando_paquetes": mando.paquetes,
+                     "motor": transmision.motor, "calidad_mbps": round(CALIDAD.objetivo, 1) if CALIDAD else None})
         s.sendto(json.dumps(resp).encode(), origen)
 
 
@@ -762,6 +896,8 @@ def bucle_relevo(transmision):
             salida.sendto(datos, (destino, PUERTO_VIDEO))
             ahora = time.monotonic()
             lento_max = max(lento_max, ahora - t0)
+            if ahora - t0 > 0.05 and CALIDAD is not None:
+                CALIDAD.atasco(f"envio de {(ahora - t0) * 1000:.0f} ms")
             # Registro de atascos (2026-10-17: la tableta dejaba de recibir 1-3.5 s y luego todo de golpe):
             # cuando la red se destapa, una linea con cuanto duro y cuanto se tiro.
             if atasco_inicio is not None and ahora - ultimo_tirado > 0.5:
@@ -778,6 +914,8 @@ def bucle_relevo(transmision):
             ahora = time.monotonic()
             if atasco_inicio is None:
                 atasco_inicio = (ahora, tirados)
+                if CALIDAD is not None:
+                    CALIDAD.atasco("el relevo tiro paquetes")
             tirados += 1
             ultimo_tirado = ahora
 
@@ -843,6 +981,7 @@ def bucle_vigia(transmision):
 
 TRANSMISION = None
 MANDO = None
+CALIDAD = None
 VENTANA_COLA = None   # la pone pc_gui: ordenes para la ventana desde otros hilos ("mostrar")
 
 
@@ -851,7 +990,8 @@ def matar_ffmpeg_huerfanos():
     mandando video a la tableta. Con el nuevo encima, la tableta recibe dos transmisiones revueltas en el mismo
     puerto (paso el 2026-10-05: tirones y fps raros por ~10 min). Se reconocen por el archivo de progreso."""
     marca = os.path.join(CARPETA, "ffmpeg_progreso.log").replace("'", "''")
-    ps = ("Get-CimInstance Win32_Process -Filter \"Name='ffmpeg.exe'\" | "
+    # (motor_video.py tambien lleva el archivo de progreso en su linea de comando)
+    ps = ("Get-CimInstance Win32_Process -Filter \"Name='ffmpeg.exe' OR Name='pythonw.exe' OR Name='python.exe'\" | "
           f"Where-Object {{ $_.CommandLine -like '*{marca}*' }} | "
           "ForEach-Object { Stop-Process -Id $_.ProcessId -Force; $_.ProcessId }")
     try:
@@ -877,13 +1017,17 @@ def reiniciar(transmision, mando):
 
 
 def main():
-    global TRANSMISION, MANDO
+    global TRANSMISION, MANDO, CALIDAD
     log.info("=== servidor de PC iniciando ===")
     matar_ffmpeg_huerfanos()
     restaurar_salida()   # si la vez anterior se cayo transmitiendo, la laptop se quedo sin sonido
     restaurar_brillo()   # ... y con la pantalla negra
     TRANSMISION = transmision = Transmision()
     MANDO = mando = Mando()
+    CALIDAD = ControlCalidad(transmision)
+    log.info("motor de video: %s", "PyAV (calidad adaptativa)" if MOTOR == "pyav" and pyav_instalado()
+             else "ffmpeg (calidad fija)")
+    threading.Thread(target=bucle_calidad, args=(CALIDAD,), daemon=True).start()
     threading.Thread(target=bucle_mando, args=(mando, transmision), daemon=True).start()
     threading.Thread(target=bucle_vigia, args=(transmision,), daemon=True).start()
     threading.Thread(target=bucle_relevo, args=(transmision,), daemon=True).start()

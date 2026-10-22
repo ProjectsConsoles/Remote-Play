@@ -26,6 +26,11 @@ Todo vive en un solo programa, `pc_server.py`:
   la comprime con NVENC con ajustes de baja latencia (`p1`, `ull`, sin B-frames,
   intra-refresh). Va en MPEG-TS por UDP, igual que el servidor de las consolas, así
   que la app lo reproduce sin cambios.
+- **Calidad adaptativa** (como YouTube o Moonlight): si la red se atora, la
+  calidad baja al momento (la imagen se ve borrosa un rato en vez de congelarse)
+  y luego sube sola de a poco. El video lo codifica `motor_video.py` (PyAV), que
+  puede cambiar el bitrate de NVENC sin reiniciar; ffmpeg por línea de comandos no
+  puede. Sin PyAV, o si el motor falla al arrancar, se usa ffmpeg con calidad fija.
 - **Audio:** lo que suena en la PC, capturado por loopback de WASAPI y comprimido
   en Opus de 5 ms. Mientras transmite, la salida de Windows pasa a la bocina
   virtual de Steam para que **suene solo en la tableta**. Al detener vuelve la
@@ -45,6 +50,8 @@ Todo vive en un solo programa, `pc_server.py`:
   (`C:\Program Files\Python312`).
 - **ffmpeg 8 o más nuevo**: `winget install Gyan.FFmpeg`. El servidor lo busca
   solo; si está en otro lado, se indica con `PS3RP_FFMPEG`.
+- **PyAV y numpy** (`pip install av numpy`, lo hace `instalar_tarea.ps1`): para
+  la calidad adaptativa. Las ruedas de PyAV ya traen su ffmpeg con NVENC.
 - **ViGEmBus** (driver del control virtual): [ViGEmBus 1.22](https://github.com/nefarius/ViGEmBus/releases).
 - **Steam** (opcional, recomendado): trae la bocina virtual *Steam Streaming
   Speakers*. Sin ella el audio se transmite igual, pero también suena en la PC.
@@ -151,13 +158,22 @@ mejores:
 | `PS3RP_PC_SIN_VENTANA` | — | `1` = sin ventana ni ícono (solo el servidor). |
 | `PS3RP_PC_PUERTO_VIDEO` / `_MANDO` / `_RELEVO` | `5000` / `9000` / `5099` | Puertos. `_RELEVO` es local (ver abajo). |
 | `PS3RP_FFMPEG` | — | Ruta de `ffmpeg.exe` si no se encuentra solo. |
+| `PS3RP_PC_MOTOR` | `pyav` | `ffmpeg` = el motor de antes, con calidad fija. |
+| `PS3RP_PC_BITRATE_MIN_MBPS` | `3` | Lo más que baja la calidad cuando la red se atora. |
+| `PS3RP_PC_PUERTO_MOTOR` | `5098` | Puerto local por el que el servidor le cambia el bitrate al motor. |
 
 ## Protocolo
 
 - **UDP 9200** (JSON): `get_config` (estado), `set_config` (`{"ip": ...}`:
   transmitir a esa IP; si ya transmitía, se reinicia), `stop_server` y
   `mostrar_ventana` (solo desde la misma PC, lo usa el acceso directo). Es el
-  mismo protocolo que `windows-server/config_listener.ps1`.
+  mismo protocolo que `windows-server/config_listener.ps1`. Además, la tableta
+  manda cada 0.5 s `{"cmd": "red", "perdidos": n, "jitter_ms": ms, ...}` (sin
+  respuesta): con 2 o más paquetes perdidos, o con 70 ms o más de jitter, la
+  calidad baja al 60 %. También baja si el relevo tiene que tirar paquetes o un
+  envío tarda más de 50 ms. Entre dos bajadas pasan al menos 1.5 s. Tras 5 s sin
+  atascos sube un 25 % cada 4 s hasta `PS3RP_PC_BITRATE_MBPS`. Cada cambio cuesta
+  un cuadro clave, por eso no se cambia más seguido.
 - **UDP 9000**: el JSON del mando (`GamepadState.toJson` de la app) y los
   eventos táctiles `{"mouse": {"ev": "mover|clic|clic_der|izq_abajo|izq_arriba|scroll", "x": 0..1, "y": 0..1}}`.
 - **UDP 5000**: MPEG-TS hacia la tableta. ffmpeg no lo manda directo: lo manda a
@@ -180,11 +196,13 @@ mejores:
 
 | Archivo | Qué es |
 |---|---|
-| `pc_server.py` | El servidor: video, audio, mando, táctil, relevo y vigía |
+| `pc_server.py` | El servidor: video, audio, mando, táctil, relevo, vigía y control de calidad |
+| `motor_video.py` | Captura y codificación con PyAV (calidad ajustable en caliente). `--prueba` usa una imagen sintética para probarlo por SSH |
 | `pc_gui.py` | Ventana en mosaicos e ícono junto al reloj (reusa `deck-client/ui_mosaicos.py`) |
 | `abrir_servidor.pyw` | Lo que abre el acceso directo: muestra la ventana o arranca el servidor |
 | `instalar_tarea.ps1` | Instalación: librerías, firewall, tarea programada y acceso directo |
 | `icono.ico` | Ícono del acceso directo |
 
-Logs junto al servidor: `pc_server.log` (lo que hace el servidor), `ffmpeg.log`
-(avisos de ffmpeg) y `ffmpeg_progreso.log` (cuadros y bytes por segundo).
+Logs junto al servidor: `pc_server.log` (lo que hace el servidor, incluidos los
+cambios de calidad), `motor_video.log` (el motor PyAV), `ffmpeg.log` (avisos de
+ffmpeg) y `ffmpeg_progreso.log` (cuadros y bytes por segundo, de los dos motores).

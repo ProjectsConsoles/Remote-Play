@@ -48,6 +48,7 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
     private var demux: TsDemuxer? = null
     private var receptor: StreamReceiver? = null
     private var envio: InputSender? = null
+    private var reporteRed: ReporteRed? = null
     private var wifi: WifiManager.WifiLock? = null
 
     private var anchoVideo = 1280
@@ -262,6 +263,7 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
                 it.alReanudar = { video?.reiniciarSincronia() }
                 it.start()
             }
+            if (intent.getBooleanExtra(EXTRA_REPORTAR_RED, false)) reporteRed = ReporteRed(controlIp)
         }
 
         envio = InputSender(
@@ -283,6 +285,8 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
             }
         }
         receptor = null
+        reporteRed?.cerrar()
+        reporteRed = null
         envio?.detener()
         envio = null
         video?.detener()
@@ -370,6 +374,7 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
                         ptsHuecoMs, jitterMs, prefs.ritmoParejoMs, v.saltados,
                     ),
                 )
+                reporteRed?.mandar(perdidosVentana, jitterMs, huecoEntradaMs, tasaKbps)
             }
             ultTicNs = ahora
         }
@@ -505,5 +510,7 @@ class StreamActivity : Activity(), SurfaceHolder.Callback {
         const val EXTRA_CONTROL_PUERTO = "control_puerto"
         const val EXTRA_FUENTE = "fuente"
         const val EXTRA_TACTIL_PC = "tactil_pc"
+        /** Servidor de PC: contarle como llega el video para que ajuste la calidad (ver ReporteRed). */
+        const val EXTRA_REPORTAR_RED = "reportar_red"
     }
 }
