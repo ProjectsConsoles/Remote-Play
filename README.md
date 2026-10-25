@@ -148,7 +148,9 @@ de cada tarjeta también es suave (0.14 s: crece y el borde se ilumina):
   sosteniendo BOOT en la placa.
 - **PS4 / PS5** y **Xbox One / Series** (solo en Streaming): abren las apps
   externas de abajo.
-- **PC (juegos de Windows)** (solo en Streaming, abajo junto a *Volver*): le pide
+- **PC (juegos de Windows)** (solo en Streaming, en su propia fila debajo de las
+  consolas, junto a **Reiniciar servidor de PC**, que deja el servidor de la PC como
+  recién abierto si se trabó la imagen o el control): le pide
   a la PC con el [servidor de PC](windows-pc-server/README.md) que transmita a la
   Deck. El mando va a la PC (control de Xbox virtual) y **la pantalla táctil es su
   mouse**: un dedo toca/arrastra, dos dedos clic derecho o scroll. El ESP32 no
