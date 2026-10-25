@@ -19,6 +19,15 @@ Gestos (iguales a Android):
 
 Manda {"mouse": {"ev": ..., "x": .., "y": ..}} por UDP al puerto del mando de la PC (pc_server.py), con
 x/y de 0 a 1 sobre la imagen de la PC (se descuentan las barras negras o el recorte segun --ajuste).
+
+TRACKPAD (2026-10-24, pedido del usuario: trackpad como mouse, R2 clic izquierdo, L2 derecho, sin estorbar
+al control): Steam ya lo trae de fabrica en Modo Juego. Manteniendo el boton Steam, el trackpad derecho
+mueve el puntero, Steam+R2 es clic izquierdo y Steam+L2 clic derecho; sin Steam, R2/L2 siguen siendo
+gatillos. Nuestra app no ve el boton Steam (Steam se lo queda), pero ese puntero llega a la ventana del
+juego: el display X de gamescope (:1). Medido: query_pointer ahi da la posicion (1280x800) y los botones
+(Button1 = izquierdo, Button3 = derecho). bucle_puntero lo sigue a 120 Hz y lo manda a la PC con los mismos
+eventos que el tactil. Tocar la pantalla tambien mueve ese puntero: mientras se toca (y 0.5 s despues) se
+ignora, para no dar dos clics.
 """
 
 import argparse
@@ -28,6 +37,7 @@ import os
 import socket
 import struct
 import sys
+import threading
 import time
 
 NOMBRE_TACTIL = "FTS3528:00 2808:1015"   # pantalla tactil de la Steam Deck (LCD y OLED)
@@ -159,6 +169,51 @@ class Gestos:
         self.dedos_antes = n
 
 
+# hora del ultimo cuadro del tactil (para que bucle_puntero no repita lo que ya mando el tactil)
+ULTIMO_TOQUE = [0.0]
+PAUSA_TRAS_TOQUE_S = 0.5
+
+
+def bucle_puntero(mandar):
+    """El puntero de Steam (boton Steam + trackpad derecho; Steam+R2 / Steam+L2 = clics) -> mouse de la PC."""
+    try:
+        from Xlib import X, display
+        d = display.Display(os.environ.get("DISPLAY") or ":1")
+    except Exception as e:
+        log(f"sin trackpad como mouse (no pude abrir el display X: {e})")
+        return
+    raiz = d.screen().root
+    ancho, alto = d.screen().width_in_pixels, d.screen().height_in_pixels
+    log(f"trackpad: puntero de Steam en {d.get_display_name()} ({ancho}x{alto}) -> mouse de la PC")
+    # donde este el puntero al arrancar no cuenta: solo lo que se mueva despues (si no, el mouse de la PC
+    # brincaria a la orilla donde quedo el puntero la ultima vez)
+    p = raiz.query_pointer()
+    antes = (p.root_x * PANTALLA_W / ancho, p.root_y * PANTALLA_H / alto)
+    izq, der = bool(p.mask & X.Button1Mask), bool(p.mask & X.Button3Mask)
+    while True:
+        time.sleep(1 / 120)
+        try:
+            p = raiz.query_pointer()
+        except Exception as e:
+            log(f"trackpad: se perdio el display X ({e}); sin trackpad")
+            return
+        x, y = p.root_x * PANTALLA_W / ancho, p.root_y * PANTALLA_H / alto
+        ahora_izq, ahora_der = bool(p.mask & X.Button1Mask), bool(p.mask & X.Button3Mask)
+        if time.monotonic() - ULTIMO_TOQUE[0] < PAUSA_TRAS_TOQUE_S:
+            # lo esta moviendo el tactil: solo se anota, sin mandar nada
+            antes, izq, der = (x, y), ahora_izq, ahora_der
+            continue
+        if (x, y) != antes:
+            mandar("mover", x, y)
+            antes = (x, y)
+        if ahora_izq != izq:
+            mandar("izq_abajo" if ahora_izq else "izq_arriba", x, y)
+            izq = ahora_izq
+        if ahora_der and not der:
+            mandar("clic_der", x, y)     # la PC no tiene "derecho abajo/arriba": el clic va al apretar
+        der = ahora_der
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", required=True, help="IP de la PC")
@@ -166,20 +221,10 @@ def main():
     ap.add_argument("--ajuste", default="barras", choices=["barras", "estirar", "zoom"])
     args = ap.parse_args()
 
-    ruta = buscar_dispositivo()
-    if not ruta:
-        log(f"no encontre la pantalla tactil ({NOMBRE_TACTIL}); sigo sin tactil.")
-        return
-    try:
-        fd = os.open(ruta, os.O_RDONLY)
-    except PermissionError:
-        log(f"sin permiso para leer {ruta}: falta instalar 70-ps3rp-tactil.rules (ver el archivo). "
-            "Sigo sin tactil.")
-        return
-    a = AVideo(rango_eje(fd, ABS_MT_POSITION_X), rango_eje(fd, ABS_MT_POSITION_Y), args.ajuste)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     destino = (args.host, args.port)
-    log(f"{ruta} -> mouse de {args.host}:{args.port} (ajuste {args.ajuste})")
+    a = AVideo((0, 1), (0, 1), args.ajuste)     # el rango del panel se pone abajo, si hay tactil
+    envio = threading.Lock()                    # tactil y trackpad mandan desde dos hilos
 
     def mandar(ev, x=None, y=None, d=0):
         j = {"ev": ev}
@@ -190,9 +235,28 @@ def main():
         if d:
             j["d"] = d
         try:
-            sock.sendto(json.dumps({"mouse": j}).encode("ascii"), destino)
+            with envio:
+                sock.sendto(json.dumps({"mouse": j}).encode("ascii"), destino)
         except OSError:
             pass
+
+    hilo_puntero = threading.Thread(target=bucle_puntero, args=(mandar,), daemon=True)
+    hilo_puntero.start()
+
+    ruta = buscar_dispositivo()
+    if not ruta:
+        log(f"no encontre la pantalla tactil ({NOMBRE_TACTIL}); sigo sin tactil.")
+        hilo_puntero.join()
+        return
+    try:
+        fd = os.open(ruta, os.O_RDONLY)
+    except PermissionError:
+        log(f"sin permiso para leer {ruta}: falta instalar 70-ps3rp-tactil.rules (ver el archivo). "
+            "Sigo sin tactil.")
+        hilo_puntero.join()
+        return
+    a.rx, a.ry = rango_eje(fd, ABS_MT_POSITION_X), rango_eje(fd, ABS_MT_POSITION_Y)
+    log(f"{ruta} -> mouse de {args.host}:{args.port} (ajuste {args.ajuste})")
 
     gestos = Gestos(mandar)
     slots = {}      # slot -> [tracking_id, x crudo, y crudo]
@@ -214,6 +278,7 @@ def main():
                 elif codigo == ABS_MT_POSITION_Y and slot in slots:
                     slots[slot][2] = valor
             elif tipo == EV_SYN and codigo == SYN_REPORT:
+                ULTIMO_TOQUE[0] = time.monotonic()
                 puntos = []
                 for _, tx, ty in (slots[k] for k in sorted(slots, key=lambda k: slots[k][0])):
                     sx, sy = a.pantalla(tx, ty)
