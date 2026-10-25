@@ -79,6 +79,7 @@ CICLO_REFRESCO = int(os.environ.get("PS3RP_PC_CICLO_REFRESCO", "30"))
 MOTOR = os.environ.get("PS3RP_PC_MOTOR", "pyav")
 PUERTO_MOTOR = int(os.environ.get("PS3RP_PC_PUERTO_MOTOR", "5098"))   # local: ordenes al motor
 BITRATE_MIN_MBPS = float(os.environ.get("PS3RP_PC_BITRATE_MIN_MBPS", "3"))
+SIN_PERMISO_CAPTURA = 3   # codigo de salida de motor_video.py cuando Windows no deja capturar la pantalla
 # Mientras se transmite, la salida predeterminada pasa a esta "bocina" virtual (la instala Steam) para que
 # el juego no suene en la laptop y se capture de ahi; al terminar se regresa la que estaba. Vacio = no tocar.
 SALIDA_VIRTUAL = os.environ.get("PS3RP_PC_SALIDA_VIRTUAL", "Steam Streaming Speakers")
@@ -273,6 +274,21 @@ class Transmision:
         """ffmpeg se cerro solo (no lo detuvimos nosotros)."""
         return self.proc is not None and self.proc.poll() is not None
 
+    def captura_fallo(self):
+        """ffmpeg perdio la captura pero sigue vivo. Al cerrar el juego Windows le quita la pantalla a ddagrab
+        (AcquireNextFrame failed: 887a0026 = DXGI_ERROR_ACCESS_LOST) y el video se termina, pero ffmpeg sigue
+        corriendo por el audio: la tableta/Deck se quedaba con la imagen congelada hasta reiniciar la app
+        (2026-10-24). motor_video.py no tiene este problema: se muere y bucle_vigia lo reinicia."""
+        if self.motor != "ffmpeg" or not self.corriendo():
+            return False
+        try:
+            with open(os.path.join(CARPETA, "ffmpeg.log"), "rb") as f:
+                f.seek(self.log_desde)
+                nuevo = f.read()
+        except (OSError, AttributeError):
+            return False
+        return b"Error during demuxing" in nuevo or b"AcquireNextFrame failed" in nuevo
+
     def iniciar(self, ip):
         with self.cerrojo:
             # (antes de _detener, que borra el proceso) si el camino directo a NVENC murio en sus primeros
@@ -281,8 +297,14 @@ class Transmision:
                 log.warning("el camino directo a NVENC fallo: se usa hwdownload desde ahora")
                 self.directo_falla = True
             if self.motor == "pyav" and self.murio() and time.monotonic() - self.inicio < 5:
-                log.warning("motor_video.py fallo al arrancar (ver motor_video.log): se usa ffmpeg desde ahora")
-                self.pyav_falla = True
+                if self.proc.returncode == SIN_PERMISO_CAPTURA:
+                    # Windows no deja capturar (ventana de permisos de administrador o pantalla bloqueada,
+                    # 2026-10-24): ffmpeg tampoco podria. Antes esto mandaba a ffmpeg para siempre y con ffmpeg
+                    # la imagen se congelaba al salir del juego (ver captura_fallo).
+                    log.warning("Windows no deja capturar la pantalla (¿ventana de permisos abierta?): se reintenta")
+                else:
+                    log.warning("motor_video.py fallo al arrancar (ver motor_video.log): se usa ffmpeg desde ahora")
+                    self.pyav_falla = True
             self._detener(restaurar_audio=False)   # reinicio: la salida virtual se queda puesta
             usar_pyav = MOTOR == "pyav" and not self.pyav_falla and pyav_instalado()
             ffmpeg = buscar_ffmpeg()
@@ -368,6 +390,7 @@ class Transmision:
             log.info("%s -> %s:%s (%s fps, %s, audio=%s, %s): %s", self.motor, ip, PUERTO_VIDEO, FPS, BITRATE,
                      bool(abrir_audio), "directo NVIDIA" if self.directo else "hwdownload", " ".join(cmd))
             err = open(os.path.join(CARPETA, "ffmpeg.log"), "ab")
+            self.log_desde = err.tell()     # lo que este ffmpeg escriba en su log empieza aqui (captura_fallo)
             self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE if abrir_audio else subprocess.DEVNULL,
                                          stdout=subprocess.DEVNULL, stderr=err,
                                          creationflags=subprocess.CREATE_NO_WINDOW)
@@ -656,26 +679,42 @@ class Mando:
             self.pad.update()
 
     def recrear(self):
-        """Quita el control virtual (su __del__ lo saca de ViGEmBus); el siguiente paquete crea uno nuevo."""
+        """Quita el control virtual (y su conexion con ViGEmBus); el siguiente paquete crea uno nuevo."""
         self.soltar()
+        if self.pad is not None:
+            self.pad.cerrar()
         self.pad = None
         self._intento = 0.0
 
 
 def _pad_paciente(vg):
-    """VX360Gamepad que ESPERA a que el driver lo conecte. El de vgamepad revisa vigem_target_is_attached
-    una sola vez, al instante, e ignora el error de vigem_target_add: si ViGEmBus tardaba, fallaba con
-    "could not connect" pero el control SI terminaba de conectarse y quedaba huerfano ocupando un lugar de
-    XInput (solo hay 4). Con los reintentos se llenaron los 4 y ya no habia lugar (2026-10-05). Aqui se
-    espera hasta 5 s y, si no conecta, se quita del driver explicitamente."""
+    """VX360Gamepad que ESPERA a que el driver lo conecte y que nunca deja controles muertos.
+
+    El de vgamepad revisa vigem_target_is_attached una sola vez, al instante, e ignora el error de
+    vigem_target_add: si ViGEmBus tardaba, fallaba con "could not connect" pero el control SI terminaba de
+    conectarse y quedaba huerfano ocupando un lugar de XInput (solo hay 4; con los reintentos se llenaron,
+    2026-10-05). Aqui se espera hasta 5 s.
+
+    Ademas cada control tiene SU PROPIA conexion con ViGEmBus (no la VBUS global de vgamepad). Paso el
+    2026-10-24: el control se dio por perdido a los 5 s, se quito, y aun asi termino conectandose despues ->
+    dos controles de Xbox en la laptop, el juego tomaba el muerto y no respondia al mando. Cerrar la conexion
+    (vigem_disconnect) hace que el driver quite TODO lo que se creo con ella, aunque se haya conectado tarde."""
     from ctypes import CFUNCTYPE, c_ubyte, c_void_p
-    from vgamepad.win.virtual_gamepad import VBUS, vcli
+    import vgamepad.win.vigem_commons as vcom
+    from vgamepad.win.virtual_gamepad import vcli
+    ok = vcom.VIGEM_ERRORS.VIGEM_ERROR_NONE
 
     class Pad(vg.VX360Gamepad):
         def __init__(self):
             self._vivo = False
-            self.vbus = VBUS
-            self._busp = VBUS.get_busp()
+            self._devicep = None
+            self._busp = vcli.vigem_alloc()
+            err = vcli.vigem_connect(self._busp)
+            if err != ok:
+                vcli.vigem_free(self._busp)
+                self._busp = None
+                raise RuntimeError(f"no se pudo conectar con ViGEmBus (0x{err & 0xffffffff:08x})")
+            self.vbus = None
             self._devicep = self.target_alloc()
             self.CMPFUNC = CFUNCTYPE(None, c_void_p, c_void_p, c_ubyte, c_ubyte, c_ubyte, c_void_p)
             self.cmp_func = None
@@ -684,17 +723,27 @@ def _pad_paciente(vg):
             while not vcli.vigem_target_is_attached(self._devicep) and time.monotonic() < limite:
                 time.sleep(0.1)
             if not vcli.vigem_target_is_attached(self._devicep):
-                vcli.vigem_target_remove(self._busp, self._devicep)
-                vcli.vigem_target_free(self._devicep)
+                self.cerrar()
                 raise RuntimeError(f"ViGEmBus no conecto el control (vigem_target_add = 0x{err & 0xffffffff:08x})")
             self._vivo = True
             self.report = self.get_default_report()
             self.update()
 
+        def cerrar(self):
+            """Quita el control y cierra su conexion (con eso el driver borra cualquier resto)."""
+            self._vivo = False
+            if self._busp is None:
+                return
+            if self._devicep is not None:
+                vcli.vigem_target_remove(self._busp, self._devicep)
+                vcli.vigem_target_free(self._devicep)
+                self._devicep = None
+            vcli.vigem_disconnect(self._busp)
+            vcli.vigem_free(self._busp)
+            self._busp = None
+
         def __del__(self):
-            if getattr(self, "_vivo", False):
-                self._vivo = False
-                super().__del__()
+            self.cerrar()
 
     return Pad()
 
@@ -971,6 +1020,11 @@ def bucle_vigia(transmision):
                 log.info("la pantalla cambio de GPU: %s -> %s", gpu, ahora)
                 gpu = ahora
             destino = transmision.destino
+            if destino and transmision.captura_fallo():
+                log.warning("ffmpeg perdio la captura de la pantalla (¿se cerro el juego?): se reinicia")
+                time.sleep(0.5)
+                transmision.iniciar(destino)
+                continue
             if destino and (cambio and transmision.corriendo() or transmision.murio()):
                 log.info("reiniciando la captura hacia %s", destino)
                 time.sleep(0.5)   # dejar que Windows termine de mover la pantalla

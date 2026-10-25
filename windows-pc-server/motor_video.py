@@ -264,6 +264,12 @@ def main():
     m = Motor(a)
     try:
         m.correr()
+    except av.error.PermissionError:
+        # ddagrab sin permiso: Windows muestra la ventana de permisos de administrador (escritorio protegido)
+        # o la pantalla esta bloqueada. No es falla del motor: pc_server reintenta con este mismo motor.
+        m.escribir("Windows no deja capturar la pantalla (Desktop duplication access denied)")
+        m.log.flush()
+        os._exit(3)
     except Exception:
         m.escribir("motor se cayo:\n" + traceback.format_exc())
         m.log.flush()
