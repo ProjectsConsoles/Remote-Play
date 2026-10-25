@@ -28,12 +28,17 @@ juego: el display X de gamescope (:1). Medido: query_pointer ahi da la posicion 
 (Button1 = izquierdo, Button3 = derecho). bucle_puntero lo sigue a 120 Hz y lo manda a la PC con los mismos
 eventos que el tactil. Tocar la pantalla tambien mueve ese puntero: mientras se toca (y 0.5 s despues) se
 ignora, para no dar dos clics.
+
+Ese puntero ademas lo dibuja gamescope encima del video y se veia junto al de la PC (que ya viene dentro
+de la imagen). Se esconde poniendole un cursor transparente a las ventanas de ese display (probado en la
+Deck: desaparece); al salir se regresa el de siempre.
 """
 
 import argparse
 import fcntl
 import json
 import os
+import signal
 import socket
 import struct
 import sys
@@ -174,6 +179,51 @@ ULTIMO_TOQUE = [0.0]
 PAUSA_TRAS_TOQUE_S = 0.5
 
 
+def _ventanas(w):
+    yield w
+    try:
+        hijas = w.query_tree().children
+    except Exception:
+        return
+    for h in hijas:
+        yield from _ventanas(h)
+
+
+def cursor_vacio(d):
+    """Cursor de 1x1 transparente (mascara en cero)."""
+    pm = d.screen().root.create_pixmap(1, 1, 1)
+    gc = pm.create_gc(foreground=0, background=0)
+    pm.fill_rectangle(gc, 0, 0, 1, 1)
+    return pm.create_cursor(pm, (0, 0, 0), (0, 0, 0), 0, 0)
+
+
+def esconder_cursor(d, cursor, ya):
+    """Pone `cursor` a las ventanas del display que todavia no lo tienen (`ya` = ids ya hechas)."""
+    for w in _ventanas(d.screen().root):
+        if w.id not in ya:
+            try:
+                w.change_attributes(cursor=cursor)
+                ya.add(w.id)
+            except Exception:
+                pass      # la ventana ya no existe
+    d.flush()
+
+
+def restaurar_cursor():
+    """Regresa el cursor normal (conexion aparte: la del hilo del trackpad puede estar ocupada)."""
+    try:
+        from Xlib import X, display
+        d = display.Display(os.environ.get("DISPLAY") or ":1")
+        for w in _ventanas(d.screen().root):
+            try:
+                w.change_attributes(cursor=X.NONE)
+            except Exception:
+                pass
+        d.sync()
+    except Exception:
+        pass
+
+
 def bucle_puntero(mandar):
     """El puntero de Steam (boton Steam + trackpad derecho; Steam+R2 / Steam+L2 = clics) -> mouse de la PC."""
     try:
@@ -190,8 +240,15 @@ def bucle_puntero(mandar):
     p = raiz.query_pointer()
     antes = (p.root_x * PANTALLA_W / ancho, p.root_y * PANTALLA_H / alto)
     izq, der = bool(p.mask & X.Button1Mask), bool(p.mask & X.Button3Mask)
+    vacio = cursor_vacio(d)
+    escondidas = set()
+    proxima_revision = 0.0
     while True:
         time.sleep(1 / 120)
+        if time.monotonic() >= proxima_revision:
+            # cada segundo: la ventana del video aparece despues de que arranca esto
+            esconder_cursor(d, vacio, escondidas)
+            proxima_revision = time.monotonic() + 1
         try:
             p = raiz.query_pointer()
         except Exception as e:
@@ -286,9 +343,16 @@ def main():
                 gestos.cuadro(puntos)
 
 
+def _terminar(*_):
+    raise KeyboardInterrupt      # start_client_stream.sh nos cierra con SIGTERM: salir por el finally
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, _terminar)
     try:
         main()
     except KeyboardInterrupt:
         pass
+    finally:
+        restaurar_cursor()
     sys.exit(0)

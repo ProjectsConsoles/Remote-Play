@@ -161,7 +161,8 @@ de cada tarjeta también es suave (0.14 s: crece y el borde se ilumina):
   Sin Steam, R2/L2 siguen siendo los gatillos del control. Es el mouse que Steam trae de
   fábrica en Modo Juego: `tactil_pc.py` lee ese puntero del display de gamescope y lo
   manda a la PC (necesita `python-xlib` en el venv; el arreglo automático del venv ya lo
-  instala).
+  instala). El puntero propio de la Deck se esconde mientras se transmite (solo se ve
+  el de la PC, dentro de la imagen).
   **Calidad adaptativa**, igual que en la tableta: el video pasa primero por
   `deck-client/vigia_red.py`, que se lo entrega a GStreamer al instante y cada 0.5 s le
   avisa a la PC si se pierden paquetes o si los cuadros llegan desparejos. Con eso la PC
