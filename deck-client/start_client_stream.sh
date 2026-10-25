@@ -205,6 +205,13 @@ PC_PORT=9000
 MODO_PC=0
 TACTIL_SCRIPT="$SCRIPT_DIR/tactil_pc.py"
 TACTIL_PID=""
+# Calidad adaptativa (2026-10-24, como la tableta): en modo PC el video entra por vigia_red.py, que lo
+# reenvia a GStreamer en VIGIA_HACIA y cada 0.5 s le cuenta a la PC como llega (perdidos/jitter) para
+# que baje la calidad antes de que se congele. PS3RP_VIGIA_RED=0 lo apaga (video directo, como antes).
+VIGIA_SCRIPT="$SCRIPT_DIR/vigia_red.py"
+VIGIA_RED="${PS3RP_VIGIA_RED:-1}"
+VIGIA_HACIA=5002
+VIGIA_PID=""
 MENU_SCRIPT="$SCRIPT_DIR/client_menu.py"
 CONTROL_UI="$SCRIPT_DIR/client_control_ui.py"
 INPUT_PID=""
@@ -294,6 +301,8 @@ cleanup() {
     pkill -f "input_client_v3.py" 2>/dev/null
     [ -n "$TACTIL_PID" ] && kill -TERM "$TACTIL_PID" 2>/dev/null
     pkill -f "tactil_pc.py" 2>/dev/null
+    [ -n "$VIGIA_PID" ] && kill -TERM "$VIGIA_PID" 2>/dev/null
+    pkill -f "vigia_red.py" 2>/dev/null
 
     # La ventana del modo control, si quedo abierta (ej. Steam mando SIGTERM
     # con la ventana todavia en pantalla).
@@ -511,6 +520,26 @@ start_tactil_pc() {
     TACTIL_PID=$!
 }
 
+# Vigia de red del modo PC (ver VIGIA_RED). Si no arranca (sin Python, puerto tomado), el video sigue
+# llegando directo al reproductor como antes: nunca dejar sin imagen por esto.
+start_vigia_red() {
+    [ "$VIGIA_RED" = "1" ] || return
+    if [ ! -x "$VENV_PY" ] || [ ! -f "$VIGIA_SCRIPT" ]; then
+        echo "AVISO: no encontre vigia_red.py; sin reporte de red (la calidad solo la baja la PC)." | tee -a "$LOG"
+        return
+    fi
+    pkill -f "vigia_red.py" 2>/dev/null
+    "$VENV_PY" -u "$VIGIA_SCRIPT" --pc "$PC_IP" --escucha "$PORT" --hacia "$VIGIA_HACIA" >> "$LOG" 2>&1 &
+    VIGIA_PID=$!
+    sleep 0.3
+    if kill -0 "$VIGIA_PID" 2>/dev/null; then
+        PORT="$VIGIA_HACIA"
+    else
+        echo "AVISO: vigia_red.py no arranco; el video va directo al reproductor." | tee -a "$LOG"
+        VIGIA_PID=""
+    fi
+}
+
 # ------------------------------------------------------------
 #  Menu de arranque: streaming o solo control
 # ------------------------------------------------------------
@@ -703,6 +732,7 @@ LOG_LINES_BEFORE=$(wc -l < "$LOG" 2>/dev/null || echo 0)
 # hasta el final.
 start_input_client
 [ "$MODO_PC" = "1" ] && start_tactil_pc
+[ "$MODO_PC" = "1" ] && start_vigia_red
 
 # -fflags nobuffer -flags low_delay -framedrop -probesize 32
 #   -analyzeduration 0 : minimizan el buffering/probing interno de

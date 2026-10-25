@@ -156,6 +156,11 @@ de cada tarjeta también es suave (0.14 s: crece y el borde se ilumina):
   El táctil necesita, **una sola vez**, un permiso de lectura:
   `sudo cp deck-client/70-ps3rp-tactil.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=input`
   (sin él se juega igual, solo sin táctil; el log lo avisa).
+  **Calidad adaptativa**, igual que en la tableta: el video pasa primero por
+  `deck-client/vigia_red.py`, que se lo entrega a GStreamer al instante y cada 0.5 s le
+  avisa a la PC si se pierden paquetes o si los cuadros llegan desparejos. Con eso la PC
+  baja la calidad un momento (la imagen se ve más borrosa) en vez de que se congele, y
+  luego la sube sola. `PS3RP_VIGIA_RED=0` lo apaga.
 
 ## Apps externas (Deck): PS4 / PS5 y Xbox
 
