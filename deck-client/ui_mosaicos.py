@@ -25,6 +25,7 @@ pantalla completa.
 """
 
 import os
+import threading
 import time
 import tkinter as tk
 from tkinter import font as tkfont
@@ -770,6 +771,34 @@ class App:
                 fin()
 
         paso()
+
+    def en_fondo(self, trabajo, listo):
+        """Corre trabajo() en un hilo y despues listo(resultado) en el de tkinter. Para todo lo que espere a la
+        red (2026-10-24, reportado: con el servidor apagado la pantalla se congelaba los 3 s del timeout, o
+        hasta 20 s al aplicar): mientras tanto se sigue dibujando y el mando sigue navegando. Si trabajo()
+        truena, listo recibe (False, mensaje), la misma forma que las funciones de server_udp."""
+        caja = {}
+
+        def correr():
+            try:
+                r = trabajo()
+            except Exception as e:
+                r = (False, str(e))
+            caja["r"] = r
+
+        def revisar():
+            if self.cerrado:
+                return
+            if "r" not in caja:
+                self.root.after(50, revisar)
+                return
+            try:
+                listo(caja["r"])
+            except tk.TclError:
+                pass   # la pantalla se cerro mientras esperaba (Volver): ya no hay donde mostrarlo
+
+        threading.Thread(target=correr, daemon=True).start()
+        self.root.after(50, revisar)
 
     def terminar(self, resultado=None):
         if self.cerrado:

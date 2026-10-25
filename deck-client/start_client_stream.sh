@@ -176,6 +176,24 @@ VQ_ARRANQUE_INTENTOS="${PS3RP_VQ_ARRANQUE_INTENTOS:-3}"
 VENV_PY="$SCRIPT_DIR/ps3rp-env/bin/python3"
 INPUT_SCRIPT="$SCRIPT_DIR/input_client_v3.py"
 
+# El venv se arma con el Python del sistema y SteamOS lo cambia en sus actualizaciones: el
+# 2026-10-24 paso de 3.13 a 3.14, el venv dejo de ver pygame y el mando murio sin avisar (menu
+# solo con tactil, la PC sin mando y sin reproductor). Si pygame no carga, se rehace el venv con
+# pygame-ce (mismo "import pygame"; pygame normal tardo en sacar version para 3.14). Necesita
+# internet; el viejo queda como ps3rp-env.roto-<fecha>.
+if [ -d "$SCRIPT_DIR/ps3rp-env" ]; then
+    if ! "$VENV_PY" -c "import pygame" >/dev/null 2>&1; then
+        echo "--- $(date) --- el venv no carga pygame (¿SteamOS cambio de Python?): lo rehago" | tee -a "$LOG"
+        mv "$SCRIPT_DIR/ps3rp-env" "$SCRIPT_DIR/ps3rp-env.roto-$(date +%Y%m%d-%H%M%S)"
+        if python3 -m venv "$SCRIPT_DIR/ps3rp-env" >> "$LOG" 2>&1 \
+                && "$VENV_PY" -m pip install -q pygame-ce >> "$LOG" 2>&1; then
+            echo "venv rehecho: $(PYGAME_HIDE_SUPPORT_PROMPT=1 "$VENV_PY" -c 'import pygame,sys;print(pygame.version.ver, sys.version.split()[0])')" | tee -a "$LOG"
+        else
+            echo "ERROR: no pude rehacer el venv (¿sin internet?)." | tee -a "$LOG"
+        fi
+    fi
+fi
+
 # Modo PC (2026-10-05, como el boton PC de Android): juegos de una PC con el
 # servidor de PC (windows-pc-server/pc_server.py). El menu ya le pidio a la PC
 # que transmita a esta Deck (set_config por UDP 9200) e imprime "pc"; aqui el

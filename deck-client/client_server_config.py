@@ -147,13 +147,32 @@ class PantallaServidor(ui.Pantalla):
             refrescar_marcas()
 
         # --- acciones de red (mismos mensajes y mismo flujo que antes) ---
-        def consultar():
+        # Todas corren en un hilo (app.en_fondo, 2026-10-24): con el servidor apagado cada consulta son 3 s de
+        # timeout y aplicar hasta 20 s, y antes la pantalla se quedaba congelada todo ese rato. Mientras una
+        # esta en curso no se lanza otra (el servidor atiende de una en una).
+        ocupado = {"si": False}
+
+        def en_red(texto, trabajo, listo):
             ip = estado["ip"].strip()
             if not ip:
                 msg(ui.ERROR, "Pon una IP primero.")
                 return
-            msg(ui.TENUE, "Consultando...")
-            ok, resp = server_udp.obtener_config(ip)
+            if ocupado["si"]:
+                return
+            ocupado["si"] = True
+            msg(ui.TENUE, texto)
+
+            def fin(r):
+                ocupado["si"] = False
+                listo(ip, r)
+
+            app.en_fondo(lambda: trabajo(ip), fin)
+
+        def consultar():
+            en_red("Consultando...", server_udp.obtener_config, consultado)
+
+        def consultado(ip, r):
+            ok, resp = r
             if not ok:
                 msg(ui.ERROR, str(resp))
                 return
@@ -176,25 +195,24 @@ class PantallaServidor(ui.Pantalla):
             elegir_modo_por_clave(resp.get("modo"))
 
         def aplicar():
-            ip = estado["ip"].strip()
-            if not ip:
-                msg(ui.ERROR, "Pon una IP primero.")
-                return
             clave = MODOS[estado["sel"]][0]
-            msg(ui.TENUE, "Aplicando... si el servidor ya esta corriendo, puede tardar unos "
-                          "segundos en reiniciar (no se congelo).")
-            ok, resp = server_udp.aplicar_config(ip, ip_deck, clave)
-            if not ok:
-                msg(ui.ERROR, str(resp))
-                return
-            server_udp.guardar_ip_servidor(ip)
-            aplicado = resp.get("aplicado")
-            if aplicado == "reiniciado":
-                msg(ui.OK, "Listo: servidor reiniciado con la config nueva.")
-            elif aplicado == "guardado_para_proxima_vez":
-                msg(ui.OK, "Guardado. El servidor no estaba corriendo; se aplicara la proxima vez que le den Iniciar.")
-            else:
-                msg(ui.ERROR, str(resp))
+
+            def listo(ip, r):
+                ok, resp = r
+                if not ok:
+                    msg(ui.ERROR, str(resp))
+                    return
+                server_udp.guardar_ip_servidor(ip)
+                aplicado = resp.get("aplicado")
+                if aplicado == "reiniciado":
+                    msg(ui.OK, "Listo: servidor reiniciado con la config nueva.")
+                elif aplicado == "guardado_para_proxima_vez":
+                    msg(ui.OK, "Guardado. El servidor no estaba corriendo; se aplicara la proxima vez que le den Iniciar.")
+                else:
+                    msg(ui.ERROR, str(resp))
+
+            en_red("Aplicando... si el servidor ya esta corriendo, puede tardar unos segundos en reiniciar.",
+                   lambda ip: server_udp.aplicar_config(ip, ip_deck, clave), listo)
 
         def enviar_ip():
             # "que no sea necesario escribirla en el servidor por si cambia"
@@ -203,31 +221,33 @@ class PantallaServidor(ui.Pantalla):
             # el servidor y se lo vuelve a mandar junto con la IP nueva, asi
             # Aplicar-config actualiza Guardar-Ip en la PC sin que el usuario
             # tenga que ir a escribirla a mano ahi ni elegir un modo aca.
-            ip = estado["ip"].strip()
-            if not ip:
-                msg(ui.ERROR, "Pon una IP primero.")
-                return
-            msg(ui.TENUE, "Consultando modo actual del servidor...")
-            ok, resp = server_udp.obtener_config(ip)
-            if not ok:
-                msg(ui.ERROR, str(resp))
-                return
-            modo_actual = resp.get("modo") or MODOS[estado["sel"]][0]
-            msg(ui.TENUE, f"Enviando IP de esta Deck ({ip_deck})... si el servidor esta "
-                          "corriendo, puede tardar unos segundos en reiniciar.")
-            ok, resp = server_udp.aplicar_config(ip, ip_deck, modo_actual)
-            if not ok:
-                msg(ui.ERROR, str(resp))
-                return
-            server_udp.guardar_ip_servidor(ip)
-            aplicado = resp.get("aplicado")
-            if aplicado == "reiniciado":
-                msg(ui.OK, f"IP enviada ({ip_deck}). Servidor reiniciado con el mismo modo.")
-            elif aplicado == "guardado_para_proxima_vez":
-                msg(ui.OK, f"IP enviada ({ip_deck}). Se aplicara la proxima vez que arranque.")
-            else:
-                msg(ui.ERROR, str(resp))
-            elegir_modo_por_clave(modo_actual)
+            sel = MODOS[estado["sel"]][0]
+
+            def trabajo(ip):
+                ok, resp = server_udp.obtener_config(ip)
+                if not ok:
+                    return False, resp, None
+                modo_actual = resp.get("modo") or sel
+                ok, resp = server_udp.aplicar_config(ip, ip_deck, modo_actual)
+                return ok, resp, modo_actual
+
+            def listo(ip, r):
+                ok, resp, modo_actual = r if len(r) == 3 else (r[0], r[1], None)
+                if not ok:
+                    msg(ui.ERROR, str(resp))
+                    return
+                server_udp.guardar_ip_servidor(ip)
+                aplicado = resp.get("aplicado")
+                if aplicado == "reiniciado":
+                    msg(ui.OK, f"IP enviada ({ip_deck}). Servidor reiniciado con el mismo modo.")
+                elif aplicado == "guardado_para_proxima_vez":
+                    msg(ui.OK, f"IP enviada ({ip_deck}). Se aplicara la proxima vez que arranque.")
+                else:
+                    msg(ui.ERROR, str(resp))
+                elegir_modo_por_clave(modo_actual)
+
+            en_red(f"Enviando IP de esta Deck ({ip_deck})... si el servidor esta corriendo, puede tardar "
+                   "unos segundos en reiniciar.", trabajo, listo)
 
         def reiniciar_servidor():
             # Reusa el mismo camino que "Enviar IP" (set_config con el modo
@@ -235,47 +255,47 @@ class PantallaServidor(ui.Pantalla):
             # cuando esto llega con el servidor corriendo (ver
             # server_engine_lib.ps1 / Iniciar-Servidor). No hace falta un
             # comando nuevo del lado de Windows para esto.
-            ip = estado["ip"].strip()
-            if not ip:
-                msg(ui.ERROR, "Pon una IP primero.")
-                return
-            msg(ui.TENUE, "Consultando servidor antes de reiniciar...")
-            ok, resp = server_udp.obtener_config(ip)
-            if not ok:
-                msg(ui.ERROR, str(resp))
-                return
-            if not resp.get("corriendo"):
-                msg(ui.TENUE, "El servidor no esta corriendo; no hay nada que reiniciar.")
-                return
-            modo_actual = resp.get("modo") or MODOS[estado["sel"]][0]
-            msg(ui.TENUE, "Reiniciando servidor... puede tardar unos segundos.")
-            ok, resp2 = server_udp.aplicar_config(ip, ip_deck, modo_actual)
-            if not ok:
-                msg(ui.ERROR, str(resp2))
-                return
-            server_udp.guardar_ip_servidor(ip)
-            if resp2.get("aplicado") == "reiniciado":
-                msg(ui.OK, "Listo: servidor reiniciado.")
-            else:
-                msg(ui.ERROR, str(resp2))
+            sel = MODOS[estado["sel"]][0]
+
+            def trabajo(ip):
+                ok, resp = server_udp.obtener_config(ip)
+                if not ok:
+                    return False, resp
+                if not resp.get("corriendo"):
+                    return True, None       # nada que reiniciar
+                return server_udp.aplicar_config(ip, ip_deck, resp.get("modo") or sel)
+
+            def listo(ip, r):
+                ok, resp = r
+                if not ok:
+                    msg(ui.ERROR, str(resp))
+                    return
+                if resp is None:
+                    msg(ui.TENUE, "El servidor no esta corriendo; no hay nada que reiniciar.")
+                    return
+                server_udp.guardar_ip_servidor(ip)
+                if resp.get("aplicado") == "reiniciado":
+                    msg(ui.OK, "Listo: servidor reiniciado.")
+                else:
+                    msg(ui.ERROR, str(resp))
+
+            en_red("Reiniciando servidor... puede tardar unos segundos.", trabajo, listo)
 
         def apagar_servidor():
             # A diferencia de reiniciar_servidor, esto usa el comando nuevo
             # stop_server (2026-09-17) - set_config SIEMPRE vuelve a arrancar,
             # no sirve para apagar de verdad.
-            ip = estado["ip"].strip()
-            if not ip:
-                msg(ui.ERROR, "Pon una IP primero.")
-                return
-            msg(ui.TENUE, "Apagando servidor...")
-            ok, resp = server_udp.detener_servidor(ip)
-            if not ok:
-                msg(ui.ERROR, str(resp))
-                return
-            if resp.get("aplicado") == "detenido":
-                msg(ui.OK, "Listo: servidor apagado.")
-            else:
-                msg(ui.TENUE, "El servidor ya estaba apagado.")
+            def listo(ip, r):
+                ok, resp = r
+                if not ok:
+                    msg(ui.ERROR, str(resp))
+                    return
+                if resp.get("aplicado") == "detenido":
+                    msg(ui.OK, "Listo: servidor apagado.")
+                else:
+                    msg(ui.TENUE, "El servidor ya estaba apagado.")
+
+            en_red("Apagando servidor...", server_udp.detener_servidor, listo)
 
         tk.Label(marco, font=esc.fuente(13), bg=ui.FONDO, fg=ui.TENUE,
                  text="Cruceta: mueve el foco. A ejecuta (sobre un modo, lo aplica). "

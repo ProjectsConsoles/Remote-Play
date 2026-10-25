@@ -36,6 +36,7 @@ class PantallaConsola(ui.Pantalla):
         self.modo = modo
         self.verificar_servidor = verificar_servidor
         self.saliendo = False
+        self.verificando = False
         esc, iconos = app.esc, app.iconos
         marco = tk.Frame(self.frame, bg=ui.FONDO, padx=esc.px(24), pady=esc.px(16))
         marco.pack(fill="both", expand=True)
@@ -114,7 +115,7 @@ class PantallaConsola(ui.Pantalla):
         self.nav = ui.Navegador(filas + [abajo], al_cambiar=self._foco)
 
     def _foco(self, mosaico):
-        if not self.saliendo:
+        if not self.saliendo and not self.verificando:
             self.tira.pintar(*self.estados.get(mosaico, (ui.TENUE, "")))
 
     def _salir(self, resultado):
@@ -122,16 +123,30 @@ class PantallaConsola(ui.Pantalla):
         self.app.root.after(ESPERA_SALIDA_MS, lambda: self.app.terminar(resultado))
 
     def elegir_esp32(self, indice, consola):
-        if self.saliendo:
+        if self.saliendo or self.verificando:
             return
         if self.modo == "streaming" and self.verificar_servidor:
-            # Primero el servidor: si no esta listo no tiene caso reiniciar el ESP32.
+            # Primero el servidor: si no esta listo no tiene caso reiniciar el ESP32. En un hilo: con el
+            # servidor apagado son 3 s de timeout y la pantalla se quedaba congelada (2026-10-24).
+            # Mientras tanto se puede seguir moviendo o volver con B, pero no elegir otra cosa.
+            self.verificando = True
             self.tira.pintar(ui.TENUE, "Verificando el servidor...")
-            self.app.root.update_idletasks()
-            ok, mensaje = self.verificar_servidor()
-            if not ok:
-                self.tira.pintar(ui.AVISO, "No se puede iniciar streaming: " + mensaje.replace("\n\n", "  "))
-                return
+
+            def listo(r):
+                self.verificando = False
+                if not self.app.pila or self.app.pila[-1] is not self:
+                    return      # volvio al menu mientras esperaba: ya no arrancar nada
+                ok, mensaje = r
+                if not ok:
+                    self.tira.pintar(ui.AVISO, "No se puede iniciar streaming: " + mensaje.replace("\n\n", "  "))
+                    return
+                self._arrancar_esp32(indice, consola)
+
+            self.app.en_fondo(self.verificar_servidor, listo)
+            return
+        self._arrancar_esp32(indice, consola)
+
+    def _arrancar_esp32(self, indice, consola):
         if ui.enviar_modo_esp32(indice):
             self.tira.pintar("#d4b106", f"ESP32 en modo {consola}: se reinicia (~2 s) y arranca "
                                         f"{'el streaming' if self.modo == 'streaming' else 'solo control'}...")
@@ -146,7 +161,7 @@ class PantallaConsola(ui.Pantalla):
         con "pc": start_client_stream.sh abre el streaming con el mando y el tactil apuntando a la PC. Primero
         get_config (3 s) para avisar rapido si la PC no tiene el servidor corriendo, en vez de esperar los
         20 s de set_config. En un hilo: set_config tarda lo que la PC en arrancar ffmpeg."""
-        if self.saliendo:
+        if self.saliendo or self.verificando:
             return
         self.saliendo = True
         ip_pc = self.ip_pc
@@ -177,7 +192,7 @@ class PantallaConsola(ui.Pantalla):
         revisar()
 
     def elegir_app(self, resultado, estado):
-        if self.saliendo:
+        if self.saliendo or self.verificando:
             return
         instalado, _, texto = estado()   # se revisa otra vez: pudo instalarse con el menu abierto
         if not instalado:
