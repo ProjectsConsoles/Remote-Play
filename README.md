@@ -129,6 +129,8 @@ de cada tarjeta también es suave (0.14 s: crece y el borde se ilumina):
   IP de la Deck, por UDP (puerto 9200) a `config_listener.ps1`. Reinicia el
   servidor solo si ya estaba transmitiendo. Atajos: Y manda la IP, X reinicia
   el servidor, L1 lo apaga.
+  Las consultas al servidor corren en segundo plano: si está apagado, la
+  pantalla no se congela mientras espera la respuesta (igual al elegir consola).
 - **Configurar cliente** — variables de latencia de `deck-client/OPCIONES.md`,
   como mosaicos de 3 en 3 que se desplazan solos. A cambia el valor (en los
   textos y números abre un cuadro para escribirlo) y L1 / R1 lo bajan / suben.
@@ -317,6 +319,38 @@ conectarla/resetear), mantén **BOOT** ~1.5s — el LED cicla de color cada
 | 🔵 Azul | PS2 / OPL |
 | 🟣 Morado | Xbox 360 |
 | 🟢 Verde | Xbox clásico |
+
+## Steam Deck: después de una actualización de SteamOS
+
+Las actualizaciones grandes de SteamOS pueden romper el cliente sin avisar. Pasó el
+2026-10-24 (SteamOS 3.9.5): los botones no navegaban el menú (solo el táctil), la PC no
+recibía el mando y no salía imagen. Las causas fueron dos:
+
+1. **Cambió la versión de Python** (3.13 → 3.14) y el entorno del cliente
+   (`deck-client/ps3rp-env`) dejó de encontrar pygame, que es lo que lee el mando.
+   **Esto ya se arregla solo:** al arrancar, `start_client_stream.sh` revisa que pygame
+   cargue y, si no, rehace el entorno con **pygame-ce** (funciona igual con
+   `import pygame` y ya tiene versión para Python 3.14). Necesita internet esa vez. El
+   entorno viejo queda como `ps3rp-env.roto-<fecha>` y en `~/ps3rp_client.log` queda
+   escrito lo que pasó. Para hacerlo a mano:
+   ```
+   cd "/home/deck/Documents/PS3 Remote Play SteamOS"
+   mv ps3rp-env ps3rp-env.viejo && python3 -m venv ps3rp-env && ps3rp-env/bin/pip install pygame-ce
+   ```
+2. **La actualización borra lo que se instaló en `/etc`**: el permiso del táctil (modo PC)
+   y el del wifi sin ahorro de energía. Esto no se puede reparar solo porque pide la
+   contraseña. En Modo Escritorio, en Konsole:
+   ```
+   cd "/home/deck/Documents/PS3 Remote Play SteamOS"
+   sudo cp 70-ps3rp-tactil.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger
+   sudo visudo -cf sudoers-wifi-powersave && sudo install -m 440 sudoers-wifi-powersave /etc/sudoers.d/zz-ps3rp-wifi
+   ```
+   Cómo darte cuenta: en `~/ps3rp_client.log` aparecen `sin permiso para leer /dev/input/...`
+   (táctil) o `no se pudo poner power_save off en wlan0` (wifi).
+
+La Deck también puede cambiar de IP. Con **PC** no hay que hacer nada (se manda la IP
+nueva al elegirla). Con las consolas, el menú avisa que el servidor transmite a otra
+IP: ve a *Configurar servidor → Enviar IP (Y)*.
 
 ## Qué hace falta para correrlo (no incluido en este repo)
 
