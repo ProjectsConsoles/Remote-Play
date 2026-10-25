@@ -122,6 +122,32 @@ Mbps reales, el audio, el mando y la tableta conectada, y tiene los botones
 **Detener transmisión**, **Ocultar** y **Salir**. Si el servidor estaba apagado,
 el acceso directo lo arranca.
 
+### Si la imagen se va a negro: ventana de permisos de Windows
+
+Cuando un programa pide permisos de administrador (por ejemplo el launcher de Poppy
+Playtime al abrirlo), Windows por defecto muestra la ventana "¿Quieres permitir que
+esta aplicación haga cambios?" en un **escritorio protegido**. Ningún programa puede
+capturarlo, ni este servidor ni Steam ni Sunshine. Mientras esa ventana esté abierta,
+la tableta o la Deck se quedan en negro y la ventana no se ve en ellas. Además la
+pantalla de la laptop está a brillo 0, así que tampoco se ve ahí. En `ffmpeg.log` (o en
+`motor_video.log`) queda `Desktop duplication access denied`. En cuanto se contesta,
+la imagen vuelve sola (el servidor reintenta cada segundo).
+
+**Para poder contestarla desde la tableta o la Deck** (paso de una sola vez, en la PC):
+**Panel de control → Cuentas de usuario → Cambiar configuración de Control de cuentas
+de usuario** y bajar el deslizador **un nivel**, a *"Notificarme solo cuando una
+aplicación intente realizar cambios en el equipo (no atenuar el escritorio)"*. La
+ventana de permisos sigue saliendo, pero ahora en el escritorio normal: se ve en el
+streaming y se le puede dar **Sí** con el táctil. Eso funciona porque el servidor corre
+con permisos elevados (tarea "PS3RP PC Server" con *privilegios más altos*); si no,
+Windows no deja que un programa normal haga clic en esa ventana.
+
+El costo es un poco menos de protección: si ya hubiera un programa malicioso
+corriendo en la PC, le sería más fácil imitar o tapar esa ventana. Para regresar a lo
+de antes, se sube el deslizador al nivel por defecto (el segundo de arriba). Equivale al
+valor de registro `PromptOnSecureDesktop` = 0 en
+`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System` (1 = por defecto).
+
 ## Para que se vea lo más fluido posible
 
 Medido con un juego a 60 fps:
