@@ -84,6 +84,7 @@ class PantallaConsola(ui.Pantalla):
             ok, col, txt = estado()
             t = ui.Mosaico(padre(), esc, iconos, icono, titulo, detalle if ok else "No está instalado.",
                            color if ok else ui.mezclar(color, ui.FONDO, 0.6), tam_titulo=30, tam_detalle=15,
+                           tam_icono=60,
                            on_a=lambda: self.elegir_app(clave, estado))
             self.estados[t] = (col, txt)
             return t
@@ -95,24 +96,31 @@ class PantallaConsola(ui.Pantalla):
         for f, fila_ in zip(marcos, filas):
             ui.disponer(f, fila_, esc, columnas=por_fila)
 
-        pie = ui.fila(marco, esc, expandir=False)
-        abajo = []
         if modo == "streaming":
             # PC (2026-10-05, como en Android): juegos de una PC con el servidor de PC (windows-pc-server),
-            # sin capturadora ni ESP32. Solo en streaming: sin video no tiene caso.
+            # sin capturadora ni ESP32. Solo en streaming: sin video no tiene caso. Desde 2026-10-24 tiene su
+            # propia fila con tarjetas del tamano de las consolas (antes era una barra abajo junto a Volver),
+            # con el boton de reiniciar el servidor de la PC que ya tenia Android.
             self.ip_pc = client_settings.leer_guardado().get("PS3RP_PC_IP") or IP_PC_DEFAULT
-            pc = ui.Mosaico(pie, esc, iconos, "computer", "PC (juegos de Windows)", self.ip_pc, ui.AZUL,
-                            on_a=self.elegir_pc, tam_titulo=22, tam_detalle=13, tam_icono=40,
-                            horizontal=True, alto=esc.px(84))
+            f_pc = ui.fila(marco, esc)
+            pc = ui.Mosaico(f_pc, esc, iconos, "computer", "PC", f"Juegos de Windows ({self.ip_pc})", ui.AZUL,
+                            on_a=self.elegir_pc, tam_titulo=30, tam_detalle=15)
             self.estados[pc] = (ui.TENUE, f"PC {self.ip_pc}: transmite su pantalla, el mando llega como control "
-                                          "de Xbox y la pantalla táctil es el mouse (cámbiala en Configurar cliente).")
-            abajo.append(pc)
+                                          "de Xbox y la pantalla táctil y el trackpad (con Steam) son el mouse.")
+            reiniciar = ui.Mosaico(f_pc, esc, iconos, "refresh", "Reiniciar servidor de PC",
+                                   "Si se trabó la imagen o el control.", "#8a4b14",
+                                   on_a=self.reiniciar_pc, tam_titulo=24, tam_detalle=15)
+            self.estados[reiniciar] = (ui.TENUE, f"Reinicia el servidor de la PC {self.ip_pc} sin cerrarlo. "
+                                                 "Luego elige PC otra vez.")
+            ui.disponer(f_pc, [pc, reiniciar], esc, columnas=2)
+            filas.append([pc, reiniciar])
+
+        pie = ui.fila(marco, esc, expandir=False)
         volver = ui.Mosaico(pie, esc, iconos, "back", "Volver", "B o Escape", ui.GRIS, on_a=app.volver,
                             tam_titulo=22, tam_detalle=13, tam_icono=40, horizontal=True, alto=esc.px(84))
-        abajo.append(volver)
-        ui.disponer(pie, abajo, esc)
+        ui.disponer(pie, [volver], esc)
         self.estados[volver] = (ui.TENUE, "Volver al menú.")
-        self.nav = ui.Navegador(filas + [abajo], al_cambiar=self._foco)
+        self.nav = ui.Navegador(filas + [[volver]], al_cambiar=self._foco)
 
     def _foco(self, mosaico):
         if not self.saliendo and not self.verificando:
@@ -190,6 +198,28 @@ class PantallaConsola(ui.Pantalla):
 
         threading.Thread(target=trabajo, daemon=True).start()
         revisar()
+
+    def reiniciar_pc(self):
+        """Mismo boton que Android (2026-10-17): el servidor de la PC queda como recien abierto."""
+        if self.saliendo or self.verificando:
+            return
+        self.verificando = True
+        ip_pc = self.ip_pc
+        self.tira.pintar(ui.TENUE, f"Reiniciando el servidor de la PC ({ip_pc})...")
+
+        def listo(r):
+            self.verificando = False
+            ok, resp = r
+            if not ok:
+                self.tira.pintar(ui.AVISO, f"La PC {ip_pc} no responde. ¿Está prendida y con el servidor de PC "
+                                           "corriendo?")
+            elif not resp.get("ok", False):
+                self.tira.pintar(ui.ERROR, "La PC no pudo reiniciar: " + str(resp.get("error", "servidor viejo, "
+                                                                                       "sin este comando")))
+            else:
+                self.tira.pintar(ui.OK, "Servidor de PC reiniciado. Elige PC para volver a jugar.")
+
+        self.app.en_fondo(lambda: server_udp.reiniciar_servidor_pc(ip_pc), listo)
 
     def elegir_app(self, resultado, estado):
         if self.saliendo or self.verificando:

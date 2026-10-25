@@ -87,6 +87,13 @@ def detener_servidor(ip_servidor):
     return _pedir(ip_servidor, {"cmd": "stop_server"}, timeout=TIMEOUT_APLICAR_S)
 
 
+def reiniciar_servidor_pc(ip_pc):
+    """Servidor de PC (windows-pc-server): lo deja como recien abierto (detiene la transmision, mata ffmpeg
+    colgados y recrea el control virtual) sin cerrar el programa. Mismo comando que el boton de Android
+    (2026-10-17). -> (True, {"ok": True, "aplicado": "reiniciado"}) o (False, mensaje_de_error)."""
+    return _pedir(ip_pc, {"cmd": "reiniciar_servidor"}, timeout=TIMEOUT_APLICAR_S)
+
+
 # ---------------------------------------------------------------------------
 # Utilidades de red generales (movidas de client_menu.py, 2026-09-11: las
 # necesita tambien la pantalla de "Configurar servidor" para mostrar/mandar

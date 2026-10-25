@@ -103,10 +103,15 @@ class Iconos:
         if not nombre:
             return None
         disco = 72 if lado >= 56 else 40
-        clave = (nombre, disco)
+        clave = (nombre, disco, lado)
         if clave not in self._cache:
             try:
-                self._cache[clave] = tk.PhotoImage(file=os.path.join(CARPETA_ICONOS, f"{nombre}_{disco}.png"))
+                img = tk.PhotoImage(file=os.path.join(CARPETA_ICONOS, f"{nombre}_{disco}.png"))
+                # Los logos de PS y Xbox miden 120 de alto (para tarjetas grandes): si piden mucho menos, a
+                # la mitad (2026-10-24, con la fila de PC las tarjetas de ¿Qué consola? quedaron mas bajas)
+                if img.height() > lado * 1.5:
+                    img = img.subsample(2)
+                self._cache[clave] = img
             except Exception:
                 self._cache[clave] = None  # sin icono, pero el mosaico se dibuja igual
         return self._cache[clave]
