@@ -15,15 +15,11 @@ consolas del ESP32 (las apps traen su propio control).
 
 import tkinter as tk
 
-import threading
-
 import client_apps
-import client_settings
 import server_udp
 import ui_mosaicos as ui
 
 ESPERA_SALIDA_MS = 900   # lo justo para leer "Modo X enviado" antes de que se cierre el menu
-IP_PC_DEFAULT = "192.168.0.171"   # la laptop; mismo default que PS3RP_PC_IP en client_settings y el .sh
 
 
 class PantallaConsola(ui.Pantalla):
@@ -96,24 +92,7 @@ class PantallaConsola(ui.Pantalla):
         for f, fila_ in zip(marcos, filas):
             ui.disponer(f, fila_, esc, columnas=por_fila)
 
-        if modo == "streaming":
-            # PC (2026-10-05, como en Android): juegos de una PC con el servidor de PC (windows-pc-server),
-            # sin capturadora ni ESP32. Solo en streaming: sin video no tiene caso. Desde 2026-10-24 tiene su
-            # propia fila con tarjetas del tamano de las consolas (antes era una barra abajo junto a Volver),
-            # con el boton de reiniciar el servidor de la PC que ya tenia Android.
-            self.ip_pc = client_settings.leer_guardado().get("PS3RP_PC_IP") or IP_PC_DEFAULT
-            f_pc = ui.fila(marco, esc)
-            pc = ui.Mosaico(f_pc, esc, iconos, "computer", "PC", f"Juegos de Windows ({self.ip_pc})", ui.AZUL,
-                            on_a=self.elegir_pc, tam_titulo=30, tam_detalle=15)
-            self.estados[pc] = (ui.TENUE, f"PC {self.ip_pc}: transmite su pantalla, el mando llega como control "
-                                          "de Xbox y la pantalla táctil y el trackpad (con Steam) son el mouse.")
-            reiniciar = ui.Mosaico(f_pc, esc, iconos, "refresh", "Reiniciar servidor de PC",
-                                   "Si se trabó la imagen o el control.", "#8a4b14",
-                                   on_a=self.reiniciar_pc, tam_titulo=24, tam_detalle=15)
-            self.estados[reiniciar] = (ui.TENUE, f"Reinicia el servidor de la PC {self.ip_pc} sin cerrarlo. "
-                                                 "Luego elige PC otra vez.")
-            ui.disponer(f_pc, [pc, reiniciar], esc, columnas=2)
-            filas.append([pc, reiniciar])
+        # La PC (juegos de Windows) tiene su propio menu desde 2026-11-16: client_pc.PantallaPc.
 
         pie = ui.fila(marco, esc, expandir=False)
         volver = ui.Mosaico(pie, esc, iconos, "back", "Volver", "B o Escape", ui.GRIS, on_a=app.volver,
@@ -163,63 +142,6 @@ class PantallaConsola(ui.Pantalla):
             self.tira.pintar(ui.AVISO, f"No pude mandar el modo {consola} al ESP32; sigo igual "
                                        "(revisa Info si el control no responde).")
         self._salir(self.modo)
-
-    def elegir_pc(self):
-        """Le pide a la PC (protocolo UDP 9200, igual que el server del PS3) que transmita a esta Deck y sale
-        con "pc": start_client_stream.sh abre el streaming con el mando y el tactil apuntando a la PC. Primero
-        get_config (3 s) para avisar rapido si la PC no tiene el servidor corriendo, en vez de esperar los
-        20 s de set_config. En un hilo: set_config tarda lo que la PC en arrancar ffmpeg."""
-        if self.saliendo or self.verificando:
-            return
-        self.saliendo = True
-        ip_pc = self.ip_pc
-        self.tira.pintar(ui.TENUE, f"Pidiéndole a la PC ({ip_pc}) que transmita a esta Deck...")
-        resultado = {}
-
-        def trabajo():
-            mi_ip = server_udp.obtener_ip_local()
-            if not mi_ip:
-                resultado["error"] = (ui.ERROR, "Esta Deck no tiene red.")
-            elif not server_udp.obtener_config(ip_pc)[0] or not server_udp.aplicar_config(ip_pc, mi_ip, "pc")[0]:
-                resultado["error"] = (ui.AVISO, f"La PC {ip_pc} no responde. ¿Está prendida y con el servidor "
-                                                "de PC corriendo?")
-            resultado["listo"] = True
-
-        def revisar():
-            if not resultado.get("listo"):
-                self.app.root.after(100, revisar)
-                return
-            if "error" in resultado:
-                self.saliendo = False
-                self.tira.pintar(*resultado["error"])
-                return
-            self.tira.pintar(ui.OK, "PC lista: arrancando el streaming...")
-            self.app.root.after(ESPERA_SALIDA_MS, lambda: self.app.terminar("pc"))
-
-        threading.Thread(target=trabajo, daemon=True).start()
-        revisar()
-
-    def reiniciar_pc(self):
-        """Mismo boton que Android (2026-10-17): el servidor de la PC queda como recien abierto."""
-        if self.saliendo or self.verificando:
-            return
-        self.verificando = True
-        ip_pc = self.ip_pc
-        self.tira.pintar(ui.TENUE, f"Reiniciando el servidor de la PC ({ip_pc})...")
-
-        def listo(r):
-            self.verificando = False
-            ok, resp = r
-            if not ok:
-                self.tira.pintar(ui.AVISO, f"La PC {ip_pc} no responde. ¿Está prendida y con el servidor de PC "
-                                           "corriendo?")
-            elif not resp.get("ok", False):
-                self.tira.pintar(ui.ERROR, "La PC no pudo reiniciar: " + str(resp.get("error", "servidor viejo, "
-                                                                                       "sin este comando")))
-            else:
-                self.tira.pintar(ui.OK, "Servidor de PC reiniciado. Elige PC para volver a jugar.")
-
-        self.app.en_fondo(lambda: server_udp.reiniciar_servidor_pc(ip_pc), listo)
 
     def elegir_app(self, resultado, estado):
         if self.saliendo or self.verificando:

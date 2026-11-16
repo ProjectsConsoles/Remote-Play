@@ -94,6 +94,13 @@ def reiniciar_servidor_pc(ip_pc):
     return _pedir(ip_pc, {"cmd": "reiniciar_servidor"}, timeout=TIMEOUT_APLICAR_S)
 
 
+def reiniciar_steam_pc(ip_pc):
+    """Servidor de PC: cierra Steam y lo abre en Big Picture (2026-11-16, como Android). Contesta al instante;
+    el avance llega en get_config -> "steam" ("cerrando", "abriendo", "listo" o "error: ...").
+    -> (True, {"ok": True, "aplicado": ...}) o (False, mensaje_de_error)."""
+    return _pedir(ip_pc, {"cmd": "reiniciar_steam"})
+
+
 # ---------------------------------------------------------------------------
 # Utilidades de red generales (movidas de client_menu.py, 2026-09-11: las
 # necesita tambien la pantalla de "Configurar servidor" para mostrar/mandar

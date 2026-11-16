@@ -148,13 +148,16 @@ de cada tarjeta también es suave (0.14 s: crece y el borde se ilumina):
   sosteniendo BOOT en la placa.
 - **PS4 / PS5** y **Xbox One / Series** (solo en Streaming): abren las apps
   externas de abajo.
-- **PC (juegos de Windows)** (solo en Streaming, en su propia fila debajo de las
-  consolas, junto a **Reiniciar servidor de PC**, que deja el servidor de la PC como
-  recién abierto si se trabó la imagen o el control): le pide
-  a la PC con el [servidor de PC](windows-pc-server/README.md) que transmita a la
+- La **PC (juegos de Windows)** ya no está aquí: desde 2026-11-16 tiene su propio
+  mosaico **PC** en el menú principal (igual que en Android), con **Jugar en la PC**,
+  **Reiniciar Steam** (cierra Steam en la PC y lo abre en Big Picture, para cuando
+  aquí se ve negro con el puntero en medio y en la PC sí se ve), **Reiniciar
+  servidor** (deja el servidor de la PC como recién abierto) y la **IP de la PC**.
+  *Jugar en la PC* le pide a la PC con el
+  [servidor de PC](windows-pc-server/README.md) que transmita a la
   Deck. El mando va a la PC (control de Xbox virtual) y **la pantalla táctil es su
   mouse**: un dedo toca/arrastra, dos dedos clic derecho o scroll. El ESP32 no
-  recibe nada. La IP está en *Configurar cliente → IP de la PC (juegos)*.
+  recibe nada. La IP se cambia en *PC → IP de la PC* o en *Configurar cliente*.
   El táctil necesita, **una sola vez**, un permiso de lectura:
   `sudo cp deck-client/70-ps3rp-tactil.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=input`
   (sin él se juega igual, solo sin táctil; el log lo avisa).

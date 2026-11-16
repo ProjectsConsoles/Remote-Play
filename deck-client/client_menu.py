@@ -85,7 +85,7 @@ def _texto_estado_servidor(ip_servidor, resp, ip_local):
 
 
 class PantallaMenu(ui.Pantalla):
-    """El menu principal: 2x2 de mosaicos (jugar arriba, configurar abajo) y Info / Salir."""
+    """El menu principal: jugar arriba (Streaming, Solo control, PC), configurar abajo y Info / Salir."""
 
     def __init__(self, app):
         super().__init__(app)
@@ -93,6 +93,7 @@ class PantallaMenu(ui.Pantalla):
         import client_server_config
         import client_settings
         import client_consolas
+        import client_pc
         esc, iconos = app.esc, app.iconos
         self.ip_local = obtener_ip_local()
         self._consulta = 0
@@ -116,12 +117,15 @@ class PantallaMenu(ui.Pantalla):
                                "La Deck es nada mas el mando, con la pantalla apagada.", ui.VERDE,
                                on_a=lambda: app.abrir(client_consolas.PantallaConsola(app, "control")),
                                tam_titulo=32, tam_detalle=16)
-        ui.disponer(f1, [t_stream, t_control], esc)
+        t_pc = ui.Mosaico(f1, esc, iconos, "computer", "PC",
+                          "Juegos de Windows, reiniciar Steam y servidor.", "#2a6f97",
+                          on_a=lambda: app.abrir(client_pc.PantallaPc(app)), tam_titulo=32, tam_detalle=16)
+        ui.disponer(f1, [t_stream, t_control, t_pc], esc, columnas=3)
 
         f2 = ui.fila(marco, esc)
         t_servidor = ui.Mosaico(
             f2, esc, iconos, "server", "Configurar servidor",
-            "Modo de captura y estado de la PC Windows, en remoto.", ui.MORADO,
+            "Modo de captura de la capturadora, en remoto.", ui.MORADO,
             on_a=lambda: app.abrir(client_server_config.PantallaServidor(app)),
             tam_titulo=32, tam_detalle=16)
         t_cliente = ui.Mosaico(
@@ -140,7 +144,7 @@ class PantallaMenu(ui.Pantalla):
                              tam_icono=40, horizontal=True, alto=esc.px(84))
         ui.disponer(f3, [t_info, t_salir], esc)
 
-        self.nav = ui.Navegador([[t_stream, t_control], [t_servidor, t_cliente], [t_info, t_salir]])
+        self.nav = ui.Navegador([[t_stream, t_control, t_pc], [t_servidor, t_cliente], [t_info, t_salir]])
 
         tk.Label(marco, font=esc.fuente(13), bg=ui.FONDO, fg=ui.TENUE,
                  text=("Cruceta/stick para moverte, confirma con A, cancela con B, info con Y."

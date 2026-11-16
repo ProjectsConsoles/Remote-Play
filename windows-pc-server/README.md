@@ -103,9 +103,8 @@ ventana no se abra sola), y si no hay nada guardado deja `pc`.
 
 ## Usar
 
-1. La IP de la PC, una sola vez: en la tableta **PC → IP de la PC**; en la Steam Deck
-   **Configurar cliente → IP de la PC (juegos)**.
-2. Tableta: **PC → Jugar en la PC**. Deck: **Streaming → PC (juegos de Windows)**. El cliente le avisa a la PC, que empieza
+1. La IP de la PC, una sola vez: **PC → IP de la PC** (tableta y Steam Deck).
+2. **PC → Jugar en la PC**. El cliente le avisa a la PC, que empieza
    a transmitir a esa tableta o Deck.
 3. Para salir: **L1 + R1 + SELECT + START** en la tableta; en la Deck, cerrar el
    juego desde Steam. Si el cliente deja de mandar el mando por 60 s, la PC deja de
@@ -126,7 +125,7 @@ el acceso directo lo arranca.
 
 Pasa a veces después de un rato sin tocar nada. La captura sigue trabajando y
 reiniciar el servidor no lo compone; cerrar y abrir Steam sí. Por eso la tableta
-tiene **PC → Reiniciar Steam**. Si `motor_video.log` dice `captura NEGRA` justo en
+y la Deck tienen **PC → Reiniciar Steam**. Si `motor_video.log` dice `captura NEGRA` justo en
 ese momento, lo negro ya sale de la captura de Windows; si no lo dice, es Steam o
 la red.
 
