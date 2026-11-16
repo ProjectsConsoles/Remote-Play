@@ -10,6 +10,7 @@ Tres partes, todas en este proceso:
         {"cmd": "set_config", "ip": ..., ...}    -> transmitir a esa IP (reinicia si ya transmitia)
         {"cmd": "stop_server"}                   -> dejar de transmitir
         {"cmd": "reiniciar_servidor"}            -> como recien abierto (boton de la tableta, ver reiniciar)
+        {"cmd": "reiniciar_steam"}               -> cierra Steam y lo abre en Big Picture (ver reiniciar_steam)
   2. Transmision: ffmpeg captura la pantalla con ddagrab (Desktop Duplication) y la codifica con NVENC
      con los MISMOS ajustes de baja latencia del servidor del PS3 (start_server_stream.bat): H.264 p1 ull,
      sin B-frames, intra-refresh, Opus lowdelay de 5 ms, MPEG-TS con -pes_payload_size 0 por UDP al puerto
@@ -885,6 +886,9 @@ def bucle_config(transmision, mando):
             elif c == "reiniciar_servidor":
                 reiniciar(transmision, mando)
                 resp["aplicado"] = "reiniciado"
+            elif c == "reiniciar_steam":
+                # contesta al instante; la tableta sigue el avance con get_config ("steam")
+                resp["aplicado"] = "reiniciando" if reiniciar_steam() else "ya se estaba reiniciando"
             elif c == "mostrar_ventana" and origen[0] == "127.0.0.1":
                 # el acceso directo del escritorio (abrir_servidor.pyw), solo desde esta misma PC
                 if VENTANA_COLA is not None:
@@ -897,7 +901,8 @@ def bucle_config(transmision, mando):
         corriendo = transmision.corriendo()
         resp.update({"corriendo": corriendo, "transmitiendo": corriendo, "ip": transmision.destino or "",
                      "modo": "pc", "modos": ["pc"], "mando_paquetes": mando.paquetes,
-                     "motor": transmision.motor, "calidad_mbps": round(CALIDAD.objetivo, 1) if CALIDAD else None})
+                     "motor": transmision.motor, "steam": STEAM_ESTADO,
+                     "calidad_mbps": round(CALIDAD.objetivo, 1) if CALIDAD else None})
         s.sendto(json.dumps(resp).encode(), origen)
 
 
@@ -1068,6 +1073,89 @@ def reiniciar(transmision, mando):
     transmision.directo_falla = False
     matar_ffmpeg_huerfanos()
     mando.recrear()
+
+
+# ------------------------------------------------------------------------------------------------
+# Reiniciar Steam desde la tableta (pedido 2026-11-16)
+# ------------------------------------------------------------------------------------------------
+# A veces, tras un rato sin tocar nada, Big Picture se ve en la laptop pero a la tableta solo llega negro con
+# el puntero en medio. La captura seguia sacando ~60 cuadros/s (ffmpeg_progreso.log del 2026-11-16) y
+# "Reiniciar servidor de PC" no lo arreglo: lo arreglo reiniciar Steam en la laptop. Este boton lo hace sin
+# levantarse. Estados para la tableta: "" (nada), "cerrando", "abriendo", "listo", "error: ...".
+STEAM_ESTADO = ""
+_STEAM_CERROJO = threading.Lock()
+STEAM_ARGS = os.environ.get("PS3RP_PC_STEAM_ARGS", "-gamepadui").split()   # -gamepadui = Big Picture
+
+
+def _ruta_steam():
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as k:
+            ruta = winreg.QueryValueEx(k, "SteamExe")[0].replace("/", "\\")
+            if os.path.isfile(ruta):
+                return ruta
+    except OSError:
+        pass
+    return r"C:\Program Files (x86)\Steam\steam.exe"
+
+
+def _steam_vivo():
+    r = subprocess.run(["tasklist", "/FI", "IMAGENAME eq steam.exe", "/NH"], capture_output=True, text=True,
+                       timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
+    return "steam.exe" in r.stdout.lower()
+
+
+def _esperar(condicion, segundos):
+    fin = time.time() + segundos
+    while time.time() < fin:
+        if condicion():
+            return True
+        time.sleep(1)
+    return condicion()
+
+
+def _reiniciar_steam():
+    global STEAM_ESTADO
+    try:
+        exe = _ruta_steam()
+        sin_ventana = subprocess.CREATE_NO_WINDOW
+        if _steam_vivo():
+            STEAM_ESTADO = "cerrando"
+            log.info("steam: cerrando (%s -shutdown)", exe)
+            subprocess.Popen([exe, "-shutdown"], cwd=os.path.dirname(exe), creationflags=sin_ventana)
+            if not _esperar(lambda: not _steam_vivo(), 25):
+                log.warning("steam: no cerro en 25 s, se fuerza")
+                for imagen in ("steam.exe", "steamwebhelper.exe"):
+                    subprocess.run(["taskkill", "/F", "/T", "/IM", imagen], capture_output=True, timeout=15,
+                                   creationflags=sin_ventana)
+                _esperar(lambda: not _steam_vivo(), 10)
+            time.sleep(2)   # que suelte sus archivos antes de volver a abrir
+        STEAM_ESTADO = "abriendo"
+        log.info("steam: abriendo %s %s", exe, " ".join(STEAM_ARGS))
+        # proceso aparte (no hijo de este servidor): si el servidor se reinicia, Steam sigue
+        subprocess.Popen([exe] + STEAM_ARGS, cwd=os.path.dirname(exe), close_fds=True,
+                         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+        if _esperar(_steam_vivo, 30):
+            STEAM_ESTADO = "listo"
+            log.info("steam: abierto")
+        else:
+            STEAM_ESTADO = "error: Steam no arranco en 30 s"
+            log.warning("steam: no arranco en 30 s")
+    except Exception as e:
+        log.exception("steam: fallo el reinicio")
+        STEAM_ESTADO = f"error: {e}"
+    finally:
+        _STEAM_CERROJO.release()
+
+
+def reiniciar_steam():
+    """Arranca el reinicio en un hilo. False si ya habia uno en curso."""
+    global STEAM_ESTADO
+    if not _STEAM_CERROJO.acquire(blocking=False):
+        return False
+    STEAM_ESTADO = "cerrando"   # ya, antes del hilo: que el siguiente get_config no conteste un "listo" viejo
+    threading.Thread(target=_reiniciar_steam, daemon=True).start()
+    return True
 
 
 def main():

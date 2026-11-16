@@ -66,6 +66,12 @@ class Motor:
         self.bytes = 0
         self.cambios = 0
         self.vivo = True
+        # Diagnostico (2026-11-16): a veces la tableta ve negro con el puntero en medio y Big Picture en la
+        # laptop se ve bien. Se mide el brillo de un cuadro por segundo y se anota cuando la captura se queda
+        # negra (ver revisar_negro), para saber la proxima vez si lo negro ya sale de aqui.
+        self.revision_negro = 0.0
+        self.negro_desde = None
+        self.negro_avisado = False
 
     def escribir(self, texto):
         self.log.write(time.strftime("%Y-%m-%d %H:%M:%S ") + texto + "\n")
@@ -174,7 +180,30 @@ class Motor:
             cuadro.time_base = c.time_base
             self.mux(self.video.encode(cuadro), True)
             self.cuadros += 1
+            self.revisar_negro(cuadro)
             cuadro = g.pull()
+
+    def revisar_negro(self, cuadro):
+        ahora = time.perf_counter()
+        if ahora - self.revision_negro < 1.0:
+            return
+        self.revision_negro = ahora
+        try:
+            brillo = float(cuadro.to_ndarray()[::16, ::16, :3].mean())
+        except Exception:
+            return
+        if brillo < 6:      # 0-255; el puntero solo apenas lo mueve
+            if self.negro_desde is None:
+                self.negro_desde = ahora
+            elif not self.negro_avisado and ahora - self.negro_desde >= 3:
+                self.negro_avisado = True
+                self.escribir(f"captura NEGRA desde hace 3 s (brillo {brillo:.1f}, siguen saliendo cuadros)")
+        elif self.negro_desde is not None:
+            if self.negro_avisado:
+                self.escribir(f"captura con imagen otra vez tras {ahora - self.negro_desde:.0f} s negra "
+                              f"(brillo {brillo:.1f})")
+            self.negro_desde = None
+            self.negro_avisado = False
 
     # ---- audio --------------------------------------------------------------------------------------------
     def bucle_audio(self, tasa, canales):

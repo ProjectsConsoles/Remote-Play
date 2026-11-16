@@ -63,8 +63,12 @@ class MainActivity : PantallaActivity() {
             // Streaming y Solo control preguntan primero la consola (2026-10-04, ConsolaActivity).
             startActivity(Intent(this, ConsolaActivity::class.java).putExtra(ConsolaActivity.EXTRA_SOLO_CONTROL, true))
         }
+        val pc = Ui.mosaico(
+            this, R.drawable.ic_computer, "PC", "Juegos de Windows, reiniciar Steam y servidor",
+            0xFF2A6F97.toInt(), compacto,
+        ) { startActivity(Intent(this, PcActivity::class.java)) }
         val servidor = Ui.mosaico(
-            this, R.drawable.ic_server, "Configurar servidor", "Modo de captura y estado de la PC",
+            this, R.drawable.ic_server, "Configurar servidor", "Modo de captura de la capturadora",
             0xFF8E5FD6.toInt(), compacto,
         ) { startActivity(Intent(this, ServerConfigActivity::class.java)) }
         val cliente = Ui.mosaico(
@@ -73,7 +77,7 @@ class MainActivity : PantallaActivity() {
         ) { startActivity(Intent(this, ClientConfigActivity::class.java)) }
 
         raiz.addView(
-            Ui.cuadricula(this, compacto, listOf(listOf(streaming, soloControl), listOf(servidor, cliente))),
+            Ui.cuadricula(this, compacto, listOf(listOf(streaming, soloControl, pc), listOf(servidor, cliente))),
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
         )
 

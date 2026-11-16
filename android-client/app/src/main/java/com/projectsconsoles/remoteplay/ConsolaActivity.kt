@@ -85,16 +85,7 @@ class ConsolaActivity : PantallaActivity() {
 
         val pie = LinearLayout(this)
         pie.orientation = LinearLayout.HORIZONTAL
-        if (!soloControl) {
-            // PC con juegos (2026-10-04): la PC transmite su propia pantalla y recibe el mando como un
-            // control de Xbox virtual. Va abajo, ancho, para no achicar las tarjetas de consola.
-            val pc = Ui.botonIcono(this, R.drawable.ic_computer, "PC (juegos de Windows)", 0xFF2D6CDF.toInt()) { elegirPc() }
-            estados[pc] = Ui.TENUE to "PC ${prefs.pcIp}: transmite su pantalla y el mando llega como control de Xbox (cámbiala en Configurar cliente)."
-            pie.addView(pc)
-            val reiniciar = Ui.botonIcono(this, R.drawable.ic_refresh, "Reiniciar servidor de PC", 0xFF8A4B14.toInt()) { reiniciarPc() }
-            estados[reiniciar] = Ui.TENUE to "Reinicia el servidor de la PC ${prefs.pcIp} (si se trabó la imagen o el control). Luego elige PC otra vez."
-            pie.addView(reiniciar)
-        }
+        // La PC (juegos de Windows) tiene su propio menu desde 2026-11-16: PcActivity, en el menu principal.
         val volver = Ui.botonIcono(this, R.drawable.ic_back, "Volver", 0xFF2A3441.toInt()) { finish() }
         estados[volver] = Ui.TENUE to "Volver al menú."
         pie.addView(volver)
@@ -177,74 +168,6 @@ class ConsolaActivity : PantallaActivity() {
         }
     }
 
-    /**
-     * PC: le pide a la PC (mismo protocolo UDP 9200 que el servidor de la capturadora) que transmita a
-     * esta tableta y abre el streaming con el mando apuntando a la PC. Sin ESP32.
-     */
-    private fun elegirPc() {
-        if (saliendo) return
-        saliendo = true
-        val ipPc = prefs.pcIp
-        tira.pintar(Ui.TENUE, "Pidiéndole a la PC ($ipPc) que transmita a esta tableta...")
-        Thread {
-            val miIp = Net.ipLocal()
-            // Primero get_config (3 s de espera): si la PC no tiene el servidor corriendo se avisa rapido,
-            // en vez de esperar los 20 s de set_config.
-            val resp = when {
-                miIp == null -> null
-                ServerClient.obtenerConfig(ipPc) is ServerClient.Resp.Error -> ServerClient.Resp.Error("sin respuesta")
-                else -> ServerClient.aplicarConfig(ipPc, miIp, "pc")
-            }
-            runOnUiThread {
-                if (isDestroyed) return@runOnUiThread
-                when {
-                    miIp == null -> {
-                        saliendo = false
-                        tira.pintar(Ui.ERROR, "Esta tableta no tiene red.")
-                    }
-                    resp is ServerClient.Resp.Error -> {
-                        saliendo = false
-                        tira.pintar(Ui.AVISO, "La PC $ipPc no responde. ¿Está prendida y con el servidor de PC corriendo?")
-                    }
-                    else -> {
-                        tira.pintar(Ui.OK, "PC lista: arrancando el streaming...")
-                        startActivity(
-                            Intent(this, StreamActivity::class.java)
-                                .putExtra(StreamActivity.EXTRA_CONTROL_IP, ipPc)
-                                .putExtra(StreamActivity.EXTRA_CONTROL_PUERTO, PUERTO_CONTROL_PC)
-                                .putExtra(StreamActivity.EXTRA_FUENTE, "PC $ipPc")
-                                .putExtra(StreamActivity.EXTRA_TACTIL_PC, true)
-                                .putExtra(StreamActivity.EXTRA_REPORTAR_RED, true),
-                        )
-                        finish()
-                    }
-                }
-            }
-        }.start()
-    }
-
-    /** Pedido 2026-10-17: reiniciar el servidor de PC desde la tableta sin ir a la laptop. */
-    private fun reiniciarPc() {
-        if (saliendo) return
-        saliendo = true
-        val ipPc = prefs.pcIp
-        tira.pintar(Ui.TENUE, "Reiniciando el servidor de la PC ($ipPc)...")
-        Thread {
-            val resp = ServerClient.reiniciarServidorPc(ipPc)
-            runOnUiThread {
-                if (isDestroyed) return@runOnUiThread
-                saliendo = false
-                when {
-                    resp is ServerClient.Resp.Error ->
-                        tira.pintar(Ui.AVISO, "La PC $ipPc no responde. ¿Está prendida y con el servidor de PC corriendo?")
-                    resp is ServerClient.Resp.Ok && !resp.json.optBoolean("ok", false) ->
-                        tira.pintar(Ui.ERROR, "La PC no pudo reiniciar: ${resp.json.optString("error", "servidor viejo, sin este comando")}")
-                    else -> tira.pintar(Ui.OK, "Servidor de PC reiniciado. Elige PC para volver a jugar.")
-                }
-            }
-        }.start()
-    }
-
     private fun elegirApp(a: Consolas.App) {
         if (saliendo) return
         val inst = Consolas.instalada(this, a) // otra vez: pudo instalarse con esta pantalla abierta
@@ -258,8 +181,5 @@ class ConsolaActivity : PantallaActivity() {
 
     companion object {
         const val EXTRA_SOLO_CONTROL = "solo_control"
-
-        /** Puerto UDP donde el servidor de PC recibe el mando (el mismo JSON que el ESP32). */
-        const val PUERTO_CONTROL_PC = 9000
     }
 }

@@ -103,9 +103,9 @@ ventana no se abra sola), y si no hay nada guardado deja `pc`.
 
 ## Usar
 
-1. En la tableta o en la Steam Deck: **Configurar cliente → IP de la PC (juegos)**
-   (una sola vez).
-2. **Streaming → PC (juegos de Windows)**. El cliente le avisa a la PC, que empieza
+1. La IP de la PC, una sola vez: en la tableta **PC → IP de la PC**; en la Steam Deck
+   **Configurar cliente → IP de la PC (juegos)**.
+2. Tableta: **PC → Jugar en la PC**. Deck: **Streaming → PC (juegos de Windows)**. El cliente le avisa a la PC, que empieza
    a transmitir a esa tableta o Deck.
 3. Para salir: **L1 + R1 + SELECT + START** en la tableta; en la Deck, cerrar el
    juego desde Steam. Si el cliente deja de mandar el mando por 60 s, la PC deja de
@@ -121,6 +121,14 @@ escritorio se le da doble clic para abrir la ventana: muestra el estado, los fps
 Mbps reales, el audio, el mando y la tableta conectada, y tiene los botones
 **Detener transmisión**, **Ocultar** y **Salir**. Si el servidor estaba apagado,
 el acceso directo lo arranca.
+
+### Si en la tableta solo se ve negro con el puntero en medio (y en la PC Steam sí)
+
+Pasa a veces después de un rato sin tocar nada. La captura sigue trabajando y
+reiniciar el servidor no lo compone; cerrar y abrir Steam sí. Por eso la tableta
+tiene **PC → Reiniciar Steam**. Si `motor_video.log` dice `captura NEGRA` justo en
+ese momento, lo negro ya sale de la captura de Windows; si no lo dice, es Steam o
+la red.
 
 ### Si la imagen se va a negro: ventana de permisos de Windows
 
@@ -192,7 +200,12 @@ mejores:
 
 - **UDP 9200** (JSON): `get_config` (estado), `set_config` (`{"ip": ...}`:
   transmitir a esa IP; si ya transmitía, se reinicia), `stop_server` y
-  `mostrar_ventana` (solo desde la misma PC, lo usa el acceso directo). Es el
+  `mostrar_ventana` (solo desde la misma PC, lo usa el acceso directo),
+  `reiniciar_servidor` y `reiniciar_steam` (cierra Steam con `-shutdown`, a la
+  fuerza si no cerró en 25 s, y lo abre con `PS3RP_PC_STEAM_ARGS`, por defecto
+  `-gamepadui` = Big Picture; contesta al instante y `get_config` trae `"steam"`:
+  `cerrando`, `abriendo`, `listo` o `error: ...`). El motor anota en
+  `motor_video.log` cuando la captura se queda negra más de 3 s. Es el
   mismo protocolo que `windows-server/config_listener.ps1`. Además, la tableta
   manda cada 0.5 s `{"cmd": "red", "perdidos": n, "jitter_ms": ms, ...}` (sin
   respuesta): con 2 o más paquetes perdidos, o con 70 ms o más de jitter, la

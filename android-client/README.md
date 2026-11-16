@@ -41,12 +41,19 @@ en vez de en cuanto llega: quita los tirones que mete el WiFi.
    - Xbox One / Series: la app de *Xbox* (gratis, trae juego remoto) o *xbPlay*.
 
    Si no hay ninguna, el mosaico dice **"No está instalado"** y qué instalar.
-5. Solo en Streaming, **PC (juegos de Windows)** juega la pantalla de una PC con
-   el [servidor de PC](../windows-pc-server/README.md): el mando llega como un
-   control de Xbox 360 y el táctil como mouse. La IP de la PC se pone en
-   *Configurar cliente*.
    Al salir de esa app se regresa a nuestra pantalla. Nuevos paquetes se
    agregan en `Consolas.kt` y en `<queries>` del `AndroidManifest.xml`.
+
+**PC** (menú principal) tiene todo lo del [servidor de PC](../windows-pc-server/README.md):
+
+- **Jugar en la PC**: transmite la pantalla de la PC; el mando llega como un control
+  de Xbox 360 y el táctil como mouse.
+- **Reiniciar Steam**: cierra Steam en la PC y lo vuelve a abrir en Big Picture
+  (~30 s, la tira dice en qué va). Sirve cuando en la tableta solo se ve negro con
+  el puntero en medio pero en la PC Steam sí se ve.
+- **Reiniciar servidor**: deja el servidor de la PC como recién abierto si se trabó
+  la imagen o el control.
+- **IP de la PC**: se guarda sola.
 
 **Info del ESP32-S3** ahora también elige el modo (toque o A), como respaldo.
 

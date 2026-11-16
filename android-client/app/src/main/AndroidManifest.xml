@@ -62,6 +62,12 @@
             android:configChanges="orientation|screenSize|keyboard|keyboardHidden|navigation" />
 
         <activity
+            android:name=".PcActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize|keyboard|keyboardHidden|navigation" />
+
+        <activity
             android:name=".InfoActivity"
             android:exported="false"
             android:screenOrientation="sensorLandscape"
